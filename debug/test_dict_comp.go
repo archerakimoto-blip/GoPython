@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	input := "[x * 2 for x in [1, 2, 3, 4, 5]]"
+	input := "{x: x * 2 for x in [1, 2, 3, 4, 5]}"
 	fmt.Println("Testing input:", input)
 
 	l := lexer.New(input)
@@ -63,7 +63,7 @@ func main() {
 		compiler.OpMinus:        "OpMinus",
 		compiler.OpBang:         "OpBang",
 		compiler.OpJump:         "OpJump",
-		compiler.OpJumpNotTruthy:"OpJumpNotTruthy",
+		compiler.OpJumpNotTruthy: "OpJumpNotTruthy",
 		compiler.OpNull:         "OpNull",
 		compiler.OpGetGlobal:    "OpGetGlobal",
 		compiler.OpSetGlobal:    "OpSetGlobal",

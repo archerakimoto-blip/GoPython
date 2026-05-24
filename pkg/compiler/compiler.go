@@ -108,6 +108,24 @@ func (c *Compiler) registerBuiltins() {
 	appendIndex := len(c.constants)
 	c.constants = append(c.constants, appendBuiltin)
 	c.symbolTable.DefineBuiltin("append", appendIndex)
+
+	// setitem: set dict[key] = value
+	setitemBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 3 {
+				return objects.NewError("setitem() takes exactly 3 arguments: dict, key, value")
+			}
+			dict, ok := args[0].(*objects.Dict)
+			if !ok {
+				return objects.NewError("first argument to setitem() must be a dict")
+			}
+			dict.Pairs[args[1]] = args[2]
+			return objects.None_
+		},
+	}
+	setitemIndex := len(c.constants)
+	c.constants = append(c.constants, setitemBuiltin)
+	c.symbolTable.DefineBuiltin("setitem", setitemIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -318,6 +336,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.ListComprehension:
 		return c.compileListComprehension(node)
+
+	case *ast.DictComprehension:
+		return c.compileDictComprehension(node)
 
 	case *ast.DictLiteral:
 		keys := []ast.Expression{}
@@ -686,49 +707,41 @@ func (s *SymbolTable) defineFree(original Symbol) Symbol {
 }
 
 func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
-	// 定义临时变量
+	// 使用全局临时变量
 	resultSym := c.symbolTable.Define("_lc_result")
 	iterSym := c.symbolTable.Define("_lc_i")
 	elemSym := c.symbolTable.Define(node.Variable.Value)
 
 	// 1. 创建空结果数组
 	c.emit(OpArray, 0)
-	if resultSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, resultSym.Index)
-	} else {
-		c.emit(OpSetLocal, resultSym.Index)
-	}
+	c.emit(OpSetGlobal, resultSym.Index)
 
-	// 2. 初始化迭代索引为 0
+	// 2. 初始化迭代索引为0
 	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpSetLocal, iterSym.Index)
-	}
+	c.emit(OpSetGlobal, iterSym.Index)
 
 	// 3. 循环开始
 	loopStart := len(c.instructions)
 
-	// 4. 编译可迭代对象并获取其长度: 先 push len，再 push iterable!
-	c.emit(OpConstant, 0) // len builtin
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	c.emit(OpCall, 1)
-
-	// 5. i < len(iterable): 先 push i，再 push len
+	// 5. 先 push i
 	if iterSym.Scope == GlobalScope {
 		c.emit(OpGetGlobal, iterSym.Index)
 	} else {
 		c.emit(OpGetLocal, iterSym.Index)
 	}
+	// 4. 编译可迭代对象并获取其长度: 先 push len builtin，再 push iterable
+	c.emit(OpConstant, 0) // len builtin
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	c.emit(OpCall, 1)
+	// 现在栈上是 [i, len_val]，比较 i < len_val
 	c.emit(OpLessThan)
 
 	// 6. 如果条件不满足则跳出
 	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
 
-	// 7. elemVar = iterable[i]
+	// 7. elemVar = iterable[i]: compile node.Iterable, push i, index, assign
 	if err := c.Compile(node.Iterable); err != nil {
 		return err
 	}
@@ -751,8 +764,8 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 		}
 		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
 
-		// 9. append 元素到结果: 先 append 内置函数，然后列表，然后元素
-		c.emit(OpConstant, 1) // push append builtin
+		// 9. append 元素到结果: push append builtin, push list, push elem, call, pop
+		c.emit(OpConstant, 1)
 		if resultSym.Scope == GlobalScope {
 			c.emit(OpGetGlobal, resultSym.Index)
 		} else {
@@ -762,12 +775,13 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 			return err
 		}
 		c.emit(OpCall, 2)
+		c.emit(OpPop)
 
 		jumpAfterCondPos := len(c.instructions)
 		c.changeOperand(jumpCondPos, jumpAfterCondPos)
 	} else {
 		// 9. append 元素到结果
-		c.emit(OpConstant, 1) // push append builtin
+		c.emit(OpConstant, 1)
 		if resultSym.Scope == GlobalScope {
 			c.emit(OpGetGlobal, resultSym.Index)
 		} else {
@@ -777,9 +791,10 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 			return err
 		}
 		c.emit(OpCall, 2)
+		c.emit(OpPop)
 	}
 
-	// 10. i += 1
+	// 10. i +=1
 	if iterSym.Scope == GlobalScope {
 		c.emit(OpGetGlobal, iterSym.Index)
 	} else {
@@ -801,6 +816,131 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	c.changeOperand(jumpEndPos, loopEnd)
 
 	// 13. 返回结果数组
+	if resultSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, resultSym.Index)
+	} else {
+		c.emit(OpGetLocal, resultSym.Index)
+	}
+
+	return nil
+}
+
+func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
+	// 使用全局临时变量
+	resultSym := c.symbolTable.Define("_dc_result")
+	iterSym := c.symbolTable.Define("_dc_i")
+	elemSym := c.symbolTable.Define(node.Variable.Value)
+
+	// 1. 创建空结果字典
+	c.emit(OpHash, 0)
+	c.emit(OpSetGlobal, resultSym.Index)
+
+	// 2. 初始化迭代索引为0
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+	c.emit(OpSetGlobal, iterSym.Index)
+
+	// 3. 循环开始
+	loopStart := len(c.instructions)
+
+	// 5. 先 push i
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	// 4. 编译可迭代对象并获取其长度: 先 push len builtin，再 push iterable
+	c.emit(OpConstant, 0) // len builtin
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	c.emit(OpCall, 1)
+	// 现在栈上是 [i, len_val]，比较 i < len_val
+	c.emit(OpLessThan)
+
+	// 6. 如果条件不满足则跳出
+	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
+
+	// 7. elemVar = iterable[i]: compile node.Iterable, push i, index, assign
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpIndex)
+	if elemSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, elemSym.Index)
+	} else {
+		c.emit(OpSetLocal, elemSym.Index)
+	}
+
+	// 8. 如果有条件，检查一下
+	if node.Condition != nil {
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
+
+		// 9. setitem(dict, key, value)
+		c.emit(OpConstant, 2) // setitem builtin index is 2 (len is 0, append is 1)
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Key); err != nil {
+			return err
+		}
+		if err := c.Compile(node.Value); err != nil {
+			return err
+		}
+		c.emit(OpCall, 3)
+		c.emit(OpPop)
+
+		jumpAfterCondPos := len(c.instructions)
+		c.changeOperand(jumpCondPos, jumpAfterCondPos)
+	} else {
+		// 9. setitem(dict, key, value)
+		c.emit(OpConstant, 2) // setitem builtin index is 2
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Key); err != nil {
+			return err
+		}
+		if err := c.Compile(node.Value); err != nil {
+			return err
+		}
+		c.emit(OpCall, 3)
+		c.emit(OpPop)
+	}
+
+	// 10. i +=1
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
+	c.emit(OpAdd)
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpSetLocal, iterSym.Index)
+	}
+
+	// 11. 跳转回循环开始
+	c.emit(OpJump, loopStart)
+
+	// 12. 设置跳出循环的跳转位置
+	loopEnd := len(c.instructions)
+	c.changeOperand(jumpEndPos, loopEnd)
+
+	// 13. 返回结果字典
 	if resultSym.Scope == GlobalScope {
 		c.emit(OpGetGlobal, resultSym.Index)
 	} else {

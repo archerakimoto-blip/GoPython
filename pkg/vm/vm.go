@@ -90,8 +90,6 @@ func (vm *VM) Run() error {
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().fn.Instructions
 		op = compiler.Opcode(ins[ip])
-		fmt.Println("VM Step: ip=", ip, "op=", op)
-		vm.printStack()
 
 		switch op {
 		case compiler.OpConstant:
@@ -123,7 +121,7 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan:
+		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan:
 			err := vm.executeComparison(op)
 			if err != nil {
 				return err
@@ -269,26 +267,13 @@ func (vm *VM) Run() error {
 	return nil
 }
 
-func (vm *VM) printStack() {
-	fmt.Print("VM Stack (sp=", vm.sp, "): ")
-	for i := 0; i < vm.sp; i++ {
-		if vm.stack[i] != nil {
-			fmt.Printf("%v ", vm.stack[i].Inspect())
-		}
-	}
-	fmt.Println()
-}
-
 func (vm *VM) executeCall(numArgs int) error {
-	vm.printStack()
 	calleeIndex := vm.sp - 1 - numArgs
 	calleeObj := vm.stack[calleeIndex]
-	fmt.Println("VM: executeCall called, callee type:", fmt.Sprintf("%T", calleeObj), "callee:", calleeObj.Inspect())
 	callee, ok := calleeObj.(*compiler.CompiledFunction)
 	if !ok {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
 			args := vm.stack[vm.sp-numArgs : vm.sp]
-			fmt.Println("VM: builtin call with args:", args)
 			result := builtin.Fn(args...)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)
@@ -378,6 +363,8 @@ func (vm *VM) executeIntegerComparison(op compiler.Opcode, left, right objects.O
 		return vm.push(nativeBoolToBooleanObject(leftValue != rightValue))
 	case compiler.OpGreaterThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
 	}
@@ -394,6 +381,8 @@ func (vm *VM) executeFloatComparison(op compiler.Opcode, left, right objects.Obj
 		return vm.push(nativeBoolToBooleanObject(leftValue != rightValue))
 	case compiler.OpGreaterThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
 	}
