@@ -160,6 +160,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseLetStatement()
 	case lexer.RETURN:
 		return p.parseReturnStatement()
+	case lexer.WHILE:
+		return p.parseWhileStatement()
+	case lexer.FOR:
+		return p.parseForStatement()
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
 		switch p.peekToken.Type {
@@ -171,6 +175,22 @@ func (p *Parser) parseStatement() ast.Statement {
 			return p.parseExpressionStatement()
 		}
 	default:
+		// 检查是否是 break 或 continue
+		if p.curToken.Type == lexer.IDENT {
+			if p.curToken.Literal == "break" {
+				return p.parseBreakStatement()
+			}
+			if p.curToken.Literal == "continue" {
+				return p.parseContinueStatement()
+			}
+		}
+		// 检查是否是 while 或 for 循环（作为语句）
+		if p.curToken.Type == lexer.WHILE {
+			return p.parseWhileStatement()
+		}
+		if p.curToken.Type == lexer.FOR {
+			return p.parseForStatement()
+		}
 		return p.parseExpressionStatement()
 	}
 }
@@ -282,7 +302,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -429,12 +449,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
-	p.nextToken()
-
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
+		}
+		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) {
+			break
 		}
 		p.nextToken()
 	}
@@ -590,5 +611,56 @@ func (p *Parser) parseTernaryExpression(consequence ast.Expression) ast.Expressi
 	exp.Alternative = p.parseExpression(LOWEST)
 
 	return exp
+}
+
+func (p *Parser) parseWhileStatement() *ast.WhileStatement {
+	stmt := &ast.WhileStatement{Token: p.curToken.Literal}
+
+	p.nextToken()
+	stmt.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseForStatement() *ast.ForStatement {
+	stmt := &ast.ForStatement{Token: p.curToken.Literal}
+
+	p.nextToken()
+	if !p.curTokenIs(lexer.IDENT) {
+		p.errors = append(p.errors, "expected identifier after 'for'")
+		return nil
+	}
+	stmt.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	if !p.expectPeek(lexer.IN) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Iterable = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseBreakStatement() *ast.BreakStatement {
+	return &ast.BreakStatement{Token: "break"}
+}
+
+func (p *Parser) parseContinueStatement() *ast.ContinueStatement {
+	return &ast.ContinueStatement{Token: "continue"}
 }
 

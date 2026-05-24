@@ -260,6 +260,12 @@ func (vm *VM) Run() error {
 func (vm *VM) executeCall(numArgs int) error {
 	callee, ok := vm.stack[vm.sp-1-numArgs].(*compiler.CompiledFunction)
 	if !ok {
+		if builtin, ok := vm.stack[vm.sp-1-numArgs].(*objects.Builtin); ok {
+			args := vm.stack[vm.sp-numArgs : vm.sp]
+			result := builtin.Fn(args...)
+			vm.sp = vm.sp - numArgs - 1
+			return vm.push(result)
+		}
 		return fmt.Errorf("calling non-function")
 	}
 

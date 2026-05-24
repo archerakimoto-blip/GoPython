@@ -366,3 +366,60 @@ func (te *TernaryExpression) String() string {
 	return out.String()
 }
 
+type WhileStatement struct {
+	Token    string
+	Condition Expression
+	Body     *BlockStatement
+}
+
+func (ws *WhileStatement) statementNode()       {}
+func (ws *WhileStatement) TokenLiteral() string { return ws.Token }
+func (ws *WhileStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("while ")
+	out.WriteString(ws.Condition.String())
+	out.WriteString(": ")
+	out.WriteString(ws.Body.String())
+	return out.String()
+}
+
+type ForStatement struct {
+	Token    string
+	Variable *Identifier
+	Iterable Expression
+	Body     *BlockStatement
+}
+
+func (fs *ForStatement) statementNode()       {}
+func (fs *ForStatement) TokenLiteral() string { return fs.Token }
+func (fs *ForStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("for ")
+	out.WriteString(fs.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(fs.Iterable.String())
+	out.WriteString(": ")
+	out.WriteString(fs.Body.String())
+	return out.String()
+}
+
+type BreakStatement struct {
+	Token string
+}
+
+func (bs *BreakStatement) statementNode()       {}
+func (bs *BreakStatement) TokenLiteral() string { return bs.Token }
+func (bs *BreakStatement) String() string {
+	return "break"
+}
+
+type ContinueStatement struct {
+	Token string
+}
+
+func (cs *ContinueStatement) statementNode()       {}
+func (cs *ContinueStatement) TokenLiteral() string { return cs.Token }
+func (cs *ContinueStatement) String() string {
+	return "continue"
+}
+

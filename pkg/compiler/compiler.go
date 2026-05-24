@@ -61,10 +61,34 @@ type Bytecode struct {
 type Instructions []byte
 
 func New() *Compiler {
-	return &Compiler{
+	c := &Compiler{
 		constants:   []objects.Object{},
 		symbolTable: NewSymbolTable(),
 	}
+	c.registerBuiltins()
+	return c
+}
+
+func (c *Compiler) registerBuiltins() {
+	lenBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("len() takes exactly one argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.List:
+				return &objects.Integer{Value: int64(len(arg.Elements))}
+			case *objects.String:
+				return &objects.Integer{Value: int64(len(arg.Value))}
+			case *objects.Dict:
+				return &objects.Integer{Value: int64(len(arg.Pairs))}
+			default:
+				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
+			}
+		},
+	}
+	c.symbolTable.Define("len")
+	c.constants = append(c.constants, lenBuiltin)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -253,6 +277,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
+			if node.Value == "len" {
+				c.emit(OpConstant, 0)
+				return nil
+			}
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
 
@@ -362,6 +390,36 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.emit(OpReturnValue)
+
+	case *ast.WhileStatement:
+		conditionPos := len(c.instructions)
+		err := c.Compile(node.Condition)
+		if err != nil {
+			return err
+		}
+
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
+
+		err = c.Compile(node.Body)
+		if err != nil {
+			return err
+		}
+
+		if c.lastInstructionIs(OpPop) {
+			c.removeLastPop()
+		}
+
+		c.emit(OpJump, conditionPos)
+
+		afterLoopPos := len(c.instructions)
+		c.changeOperand(jumpNotTruthyPos, afterLoopPos)
+
+	case *ast.ForStatement:
+		return fmt.Errorf("for loops should be desugared before compilation")
+	case *ast.BreakStatement:
+		return fmt.Errorf("break statements should be desugared before compilation")
+	case *ast.ContinueStatement:
+		return fmt.Errorf("continue statements should be desugared before compilation")
 	}
 
 	return nil

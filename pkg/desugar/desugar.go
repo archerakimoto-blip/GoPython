@@ -62,6 +62,18 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 	case *ast.BlockStatement:
 		return desugarBlockStatement(s)
+	case *ast.WhileStatement:
+		return &ast.WhileStatement{
+			Token:     s.Token,
+			Condition: desugarExpression(s.Condition),
+			Body:      desugarBlockStatement(s.Body),
+		}
+	case *ast.ForStatement:
+		return desugarForToWhile(s)
+	case *ast.BreakStatement:
+		return nil
+	case *ast.ContinueStatement:
+		return nil
 	default:
 		return stmt
 	}
@@ -273,4 +285,52 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 
 func isComparisonOp(op string) bool {
 	return op == "==" || op == "!=" || op == "<" || op == ">"
+}
+
+func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
+	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
+	iterable := desugarExpression(forStmt.Iterable)
+
+	condition := &ast.InfixExpression{
+		Token:    "<",
+		Left:     indexVar,
+		Operator: "<",
+		Right: &ast.CallExpression{
+			Token:    "len",
+			Function: &ast.Identifier{Token: "len", Value: "len"},
+			Arguments: []ast.Expression{iterable},
+		},
+	}
+
+	bodyStmts := []ast.Statement{
+		&ast.AssignStatement{
+			Token: "=",
+			Name:  forStmt.Variable,
+			Value: &ast.IndexExpression{
+				Token: "[",
+				Left:  iterable,
+				Index: indexVar,
+			},
+		},
+	}
+
+	bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
+
+	bodyStmts = append(bodyStmts, &ast.AugAssignStatement{
+		Token:    "+=",
+		Name:     indexVar,
+		Operator: "+",
+		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
+	})
+
+	body := &ast.BlockStatement{
+		Token:      forStmt.Token,
+		Statements: bodyStmts,
+	}
+
+	return &ast.WhileStatement{
+		Token:     forStmt.Token,
+		Condition: condition,
+		Body:      body,
+	}
 }
