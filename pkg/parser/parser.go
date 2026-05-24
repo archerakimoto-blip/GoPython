@@ -597,64 +597,91 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseListLiteral() ast.Expression {
-	// Check if it's a list comprehension
-	if p.peekTokenIs(lexer.FOR) {
+	// First, let's parse the first element, or check for empty list
+	if p.peekTokenIs(lexer.RBRACKET) {
 		p.nextToken()
-		result := p.parseListComprehension()
+		return &ast.ListLiteral{Token: p.curToken.Literal}
+	}
+
+	// Now, check if it's a list comprehension or a normal list
+	// Let's try to parse an expression and see if next token is FOR
+	p.nextToken()
+	firstExpr := p.parseExpression(LOWEST)
+	if firstExpr == nil {
+		return nil
+	}
+
+	// Now check if next token is FOR! That means list comprehension!
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		comp := &ast.ListComprehension{Token: p.curToken.Literal}
+		comp.Element = firstExpr
+
+		// Handle FOR token
+		if !p.curTokenIs(lexer.FOR) {
+			p.nextToken()
+		}
+		// Now curToken should be FOR
+		if !p.curTokenIs(lexer.FOR) {
+			p.errors = append(p.errors, "expected FOR in list comprehension")
+			return nil
+		}
+		p.nextToken()
+
+		// Parse variable
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, "expected IDENT after FOR")
+			return nil
+		}
+		comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken()
+
+		// Parse IN
+		if !p.curTokenIs(lexer.IN) {
+			p.errors = append(p.errors, "expected IN after variable")
+			return nil
+		}
+		p.nextToken()
+		comp.Iterable = p.parseExpression(LOWEST)
+
+		// Consume closing ]
 		if p.curTokenIs(lexer.RBRACKET) {
 			p.nextToken()
 		} else if p.peekTokenIs(lexer.RBRACKET) {
 			p.nextToken()
+		} else {
+			p.errors = append(p.errors, "expected RBRACKET at end of list comprehension")
 		}
-		return result
+		return comp
 	}
 
-	// Normal list literal
+	// Okay, it's a normal list literal! Let's collect all elements
 	list := &ast.ListLiteral{Token: p.curToken.Literal}
-	list.Elements = p.parseExpressionList(lexer.RBRACKET)
+	elements := []ast.Expression{firstExpr}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		exp := p.parseExpression(LOWEST)
+		if exp != nil {
+			elements = append(elements, exp)
+		}
+	}
+
+	// Consume closing ]
+	if !p.curTokenIs(lexer.RBRACKET) {
+		if !p.expectPeek(lexer.RBRACKET) {
+			return nil
+		}
+	} else {
+		p.nextToken()
+	}
+
+	list.Elements = elements
 	return list
 }
 
 func (p *Parser) parseListComprehension() ast.Expression {
-	comp := &ast.ListComprehension{Token: p.curToken.Literal}
-
-	comp.Element = p.parseExpression(LOWEST)
-
-	if p.curTokenIs(lexer.FOR) {
-		p.nextToken()
-	} else if p.peekTokenIs(lexer.FOR) {
-		p.nextToken()
-		p.nextToken()
-	} else {
-		p.errors = append(p.errors, "expected FOR in list comprehension")
-		return nil
-	}
-
-	if !p.curTokenIs(lexer.IDENT) {
-		p.errors = append(p.errors, "expected IDENT after FOR")
-		return nil
-	}
-	comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-
-	p.nextToken()
-	if !p.curTokenIs(lexer.IN) {
-		p.errors = append(p.errors, "expected IN after variable")
-		return nil
-	}
-
-	p.nextToken()
-	comp.Iterable = p.parseExpression(LOWEST)
-
-	if p.curTokenIs(lexer.RBRACKET) {
-		return comp
-	}
-
-	if p.peekTokenIs(lexer.RBRACKET) {
-		p.nextToken()
-		return comp
-	}
-
-	p.errors = append(p.errors, "expected RBRACKET at end of list comprehension")
+	// Keep this as a fallback, but most of the logic is now in parseListLiteral
 	return nil
 }
 

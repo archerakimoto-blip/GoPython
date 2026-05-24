@@ -710,15 +710,14 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	// 3. 循环开始
 	loopStart := len(c.instructions)
 
-	// 4. 编译可迭代对象并获取其长度
+	// 4. 编译可迭代对象并获取其长度: 先 push len，再 push iterable!
+	c.emit(OpConstant, 0) // len builtin
 	if err := c.Compile(node.Iterable); err != nil {
 		return err
 	}
-	// 使用 len
-	c.emit(OpConstant, 0)
 	c.emit(OpCall, 1)
 
-	// 5. i < len(iterable)
+	// 5. i < len(iterable): 先 push i，再 push len
 	if iterSym.Scope == GlobalScope {
 		c.emit(OpGetGlobal, iterSym.Index)
 	} else {
@@ -752,7 +751,8 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 		}
 		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
 
-		// 9. append 元素到结果
+		// 9. append 元素到结果: 先 append 内置函数，然后列表，然后元素
+		c.emit(OpConstant, 1) // push append builtin
 		if resultSym.Scope == GlobalScope {
 			c.emit(OpGetGlobal, resultSym.Index)
 		} else {
@@ -761,14 +761,13 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 		if err := c.Compile(node.Element); err != nil {
 			return err
 		}
-		c.emit(OpConstant, 1)
 		c.emit(OpCall, 2)
-		c.emit(OpPop)
 
 		jumpAfterCondPos := len(c.instructions)
 		c.changeOperand(jumpCondPos, jumpAfterCondPos)
 	} else {
 		// 9. append 元素到结果
+		c.emit(OpConstant, 1) // push append builtin
 		if resultSym.Scope == GlobalScope {
 			c.emit(OpGetGlobal, resultSym.Index)
 		} else {
@@ -777,9 +776,7 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 		if err := c.Compile(node.Element); err != nil {
 			return err
 		}
-		c.emit(OpConstant, 1)
 		c.emit(OpCall, 2)
-		c.emit(OpPop)
 	}
 
 	// 10. i += 1

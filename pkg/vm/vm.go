@@ -90,6 +90,8 @@ func (vm *VM) Run() error {
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().fn.Instructions
 		op = compiler.Opcode(ins[ip])
+		fmt.Println("VM Step: ip=", ip, "op=", op)
+		vm.printStack()
 
 		switch op {
 		case compiler.OpConstant:
@@ -267,16 +269,31 @@ func (vm *VM) Run() error {
 	return nil
 }
 
+func (vm *VM) printStack() {
+	fmt.Print("VM Stack (sp=", vm.sp, "): ")
+	for i := 0; i < vm.sp; i++ {
+		if vm.stack[i] != nil {
+			fmt.Printf("%v ", vm.stack[i].Inspect())
+		}
+	}
+	fmt.Println()
+}
+
 func (vm *VM) executeCall(numArgs int) error {
-	callee, ok := vm.stack[vm.sp-1-numArgs].(*compiler.CompiledFunction)
+	vm.printStack()
+	calleeIndex := vm.sp - 1 - numArgs
+	calleeObj := vm.stack[calleeIndex]
+	fmt.Println("VM: executeCall called, callee type:", fmt.Sprintf("%T", calleeObj), "callee:", calleeObj.Inspect())
+	callee, ok := calleeObj.(*compiler.CompiledFunction)
 	if !ok {
-		if builtin, ok := vm.stack[vm.sp-1-numArgs].(*objects.Builtin); ok {
+		if builtin, ok := calleeObj.(*objects.Builtin); ok {
 			args := vm.stack[vm.sp-numArgs : vm.sp]
+			fmt.Println("VM: builtin call with args:", args)
 			result := builtin.Fn(args...)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)
 		}
-		return fmt.Errorf("calling non-function")
+		return fmt.Errorf("calling non-function: type %T", calleeObj)
 	}
 
 	if numArgs != callee.NumParameters {
