@@ -289,6 +289,27 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		return desugarListComprehension(e)
 	case *ast.DictComprehension:
 		return e
+	case *ast.FStringLiteral:
+		// Desugar f-string into a chain of + expressions (concatenation)
+		var result ast.Expression
+		for _, part := range e.Parts {
+			desugaredPart := desugarExpression(part)
+			if result == nil {
+				result = desugaredPart
+			} else {
+				result = &ast.InfixExpression{
+					Token:    "+",
+					Left:     result,
+					Operator: "+",
+					Right:    desugaredPart,
+				}
+			}
+		}
+		// If the f-string is empty, return empty string literal
+		if result == nil {
+			return &ast.StringLiteral{Value: ""}
+		}
+		return result
 	default:
 		return expr
 	}

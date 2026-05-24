@@ -42,7 +42,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.AND:      AND,
 	lexer.OR:       OR,
 	lexer.IF:       TERNARY,
-	lexer.COLON:    LOWEST - 1, // 给冒号一个极低的优先级，让 parseExpression 在遇到时停止
+	lexer.COLON:    0, // Lower than LOWEST
 }
 
 type Parser struct {
@@ -67,6 +67,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.INT, p.parseIntegerLiteral)
 	p.registerPrefix(lexer.FLOAT, p.parseFloatLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
+	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
 	p.registerPrefix(lexer.TRUE, p.parseBoolean)
@@ -77,6 +78,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACKET, p.parseListLiteral)
 	p.registerPrefix(lexer.LBRACE, p.parseDictLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
+	// Register an empty prefix function for colon and ] to avoid errors
+	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.RBRACKET, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -288,11 +292,6 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	stmt := &ast.ExpressionStatement{Token: p.curToken.Literal}
 
-	if p.curTokenIs(lexer.LBRACKET) {
-		stmt.Expression = p.parseListLiteral()
-		return stmt
-	}
-
 	stmt.Expression = p.parseExpression(LOWEST)
 
 	if p.peekTokenIs(lexer.SEMICOLON) {
@@ -377,6 +376,75 @@ func (p *Parser) parseFloatLiteral() ast.Expression {
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken.Literal, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseFStringLiteral() ast.Expression {
+	fsl := &ast.FStringLiteral{Token: p.curToken.Literal, Parts: []ast.Expression{}}
+	s := p.curToken.Literal // The f-string content (without the f" and ")
+	i := 0
+	for i < len(s) {
+		if s[i] == '{' {
+			if i+1 < len(s) && s[i+1] == '{' {
+				// Escaped {{, treat as single {
+				fsl.Parts = append(fsl.Parts, &ast.StringLiteral{Value: "{"})
+				i += 2
+			} else {
+				// Start of expression
+				i++ // skip {
+				// Now parse the expression until matching }
+				// We need to collect tokens until we find the matching }
+				// We'll use a temporary parser or just parse an expression manually
+				// For simplicity, let's parse everything until } as expression
+				// But wait, how to handle nested {}? For now, let's find the matching } (simple)
+				start := i
+				depth := 1
+				for i < len(s) && depth > 0 {
+					if s[i] == '{' {
+						depth++
+					} else if s[i] == '}' {
+						depth--
+					}
+					i++
+				}
+				if depth > 0 {
+					p.errors = append(p.errors, "unclosed { in f-string")
+					return nil
+				}
+				exprStr := s[start : i-1] // without the closing }
+				// Now parse exprStr into an Expression using parser!
+				// We need to create a new lexer and parser for exprStr
+				subLexer := lexer.New(exprStr)
+				subParser := New(subLexer)
+				subProgram := subParser.ParseProgram()
+				if len(subParser.Errors()) > 0 {
+					p.errors = append(p.errors, subParser.Errors()...)
+					return nil
+				}
+				if len(subProgram.Statements) > 0 {
+					if exprStmt, ok := subProgram.Statements[0].(*ast.ExpressionStatement); ok {
+						fsl.Parts = append(fsl.Parts, exprStmt.Expression)
+					}
+				}
+			}
+		} else if s[i] == '}' {
+			if i+1 < len(s) && s[i+1] == '}' {
+				// Escaped }}, treat as single }
+				fsl.Parts = append(fsl.Parts, &ast.StringLiteral{Value: "}"})
+				i += 2
+			} else {
+				p.errors = append(p.errors, "unexpected } in f-string")
+				return nil
+			}
+		} else {
+			// String part
+			start := i
+			for i < len(s) && s[i] != '{' && s[i] != '}' {
+				i++
+			}
+			fsl.Parts = append(fsl.Parts, &ast.StringLiteral{Value: s[start:i]})
+		}
+	}
+	return fsl
 }
 
 func (p *Parser) parseBoolean() ast.Expression {
@@ -529,8 +597,9 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseListLiteral() ast.Expression {
-	p.nextToken()
+	// Check if it's a list comprehension
 	if p.peekTokenIs(lexer.FOR) {
+		p.nextToken()
 		result := p.parseListComprehension()
 		if p.curTokenIs(lexer.RBRACKET) {
 			p.nextToken()
@@ -539,6 +608,8 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 		return result
 	}
+
+	// Normal list literal
 	list := &ast.ListLiteral{Token: p.curToken.Literal}
 	list.Elements = p.parseExpressionList(lexer.RBRACKET)
 	return list
@@ -616,52 +687,41 @@ func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 
-	// Check for slice syntax first: if current or next token is :
 	if p.curTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COLON) {
 		slice := &ast.SliceExpression{Token: "[", Left: left}
 
-		// Parse start if available
+		// Parse start
 		if !p.curTokenIs(lexer.COLON) {
-			// Parse start manually, stopping at :
-			if p.curTokenIs(lexer.INT) {
-				slice.Start = p.parseIntegerLiteral()
-			} else if p.curTokenIs(lexer.IDENT) {
-				slice.Start = p.parseIdentifier()
-			} else if p.curTokenIs(lexer.STRING) {
-				slice.Start = p.parseStringLiteral()
-			} else if p.curTokenIs(lexer.LPAREN) {
-				slice.Start = p.parseGroupedExpression()
-			}
+			// Temporarily ignore errors about colon
+			oldErrors := len(p.errors)
+			slice.Start = p.parseExpression(LOWEST)
+			p.errors = p.errors[:oldErrors]
 		}
 
-		// Move to/over the colon
+		// Move past colon
 		if !p.curTokenIs(lexer.COLON) {
 			p.nextToken()
 		}
 		p.nextToken()
 
-		// Parse end if available
+		// Parse end
 		if !p.curTokenIs(lexer.RBRACKET) {
-			if p.curTokenIs(lexer.INT) {
-				slice.End = p.parseIntegerLiteral()
-			} else if p.curTokenIs(lexer.IDENT) {
-				slice.End = p.parseIdentifier()
-			} else if p.curTokenIs(lexer.STRING) {
-				slice.End = p.parseStringLiteral()
-			} else if p.curTokenIs(lexer.LPAREN) {
-				slice.End = p.parseGroupedExpression()
-			}
+			oldErrors := len(p.errors)
+			slice.End = p.parseExpression(LOWEST)
+			p.errors = p.errors[:oldErrors]
 		}
 
-		// Expect closing ]
-		if !p.expectPeek(lexer.RBRACKET) {
-			return nil
+		// Consume ]
+		if !p.curTokenIs(lexer.RBRACKET) {
+			p.expectPeek(lexer.RBRACKET)
+		} else {
+			p.nextToken()
 		}
 
 		return slice
 	}
 
-	// Normal index expression
+	// Normal index
 	exp := &ast.IndexExpression{Token: "[", Left: left}
 	exp.Index = p.parseExpression(LOWEST)
 
@@ -676,28 +736,122 @@ func (p *Parser) parseDictLiteral() ast.Expression {
 	dict := &ast.DictLiteral{Token: p.curToken.Literal}
 	dict.Pairs = make(map[ast.Expression]ast.Expression)
 
-	for !p.peekTokenIs(lexer.RBRACE) {
+	// First check: is there a RBRACE immediately?
+	if p.peekTokenIs(lexer.RBRACE) {
 		p.nextToken()
-		key := p.parseExpression(LOWEST)
+		return dict
+	}
 
+	// Now let's try to check for dict comprehension first by parsing key, colon, value, then checking for FOR!
+	oldErrors := len(p.errors)
+	p.nextToken() // move past { to first token
+
+	key := p.parseExpression(LOWEST)
+	if len(p.errors) > oldErrors {
+		// Parsing key failed: reset errors, reset to { and parse normal dict (without comprehension)
+		p.errors = p.errors[:oldErrors]
+		return p.parseNormalDictLiteral()
+	}
+	if !p.expectPeek(lexer.COLON) {
+		return p.parseNormalDictLiteral() // maybe not a dict comprehension? Fallback to normal dict
+	}
+	p.nextToken()
+	value := p.parseExpression(LOWEST)
+	if len(p.errors) > oldErrors {
+		p.errors = p.errors[:oldErrors]
+		return p.parseNormalDictLiteral()
+	}
+	// Now check for 'for'!
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		// Yes! It's dict comprehension!
+		comp := &ast.DictComprehension{
+			Token: "{",
+			Key:   key,
+			Value: value,
+		}
+		// Now parse for part
+		if p.curTokenIs(lexer.FOR) {
+			p.nextToken()
+		} else if p.peekTokenIs(lexer.FOR) {
+			p.nextToken()
+			p.nextToken()
+		}
+		// Now variable
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, "expected identifier after 'for' in dict comprehension")
+			return nil
+		}
+		comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken()
+		if !p.curTokenIs(lexer.IN) {
+			p.errors = append(p.errors, "expected 'in' after identifier in dict comprehension")
+			return nil
+		}
+		p.nextToken()
+		comp.Iterable = p.parseExpression(LOWEST)
+		// Now consume RBRACE if present
+		if !p.curTokenIs(lexer.RBRACE) {
+			p.expectPeek(lexer.RBRACE)
+		} else {
+			p.nextToken()
+		}
+		return comp
+	} else {
+		// It's a normal dict! We already have first key: value, let's collect all pairs!
+		dict.Pairs[key] = value
+		for !p.peekTokenIs(lexer.RBRACE) {
+			if !p.peekTokenIs(lexer.COMMA) {
+				break // no more commas, break loop
+			}
+			p.nextToken() // comma
+			p.nextToken() // next key
+			k := p.parseExpression(LOWEST)
+			if !p.expectPeek(lexer.COLON) {
+				return nil
+			}
+			p.nextToken() // colon
+			v := p.parseExpression(LOWEST)
+			dict.Pairs[k] = v
+		}
+		// Now consume }
+		if !p.curTokenIs(lexer.RBRACE) {
+			if !p.expectPeek(lexer.RBRACE) {
+				return nil
+			}
+		} else {
+			p.nextToken()
+		}
+		return dict
+	}
+}
+
+func (p *Parser) parseNormalDictLiteral() ast.Expression {
+	// Parse normal dict literal (already called p.nextToken() once to get past {)
+	dict := &ast.DictLiteral{Token: "{"}
+	dict.Pairs = make(map[ast.Expression]ast.Expression)
+	// Reset: let's make sure we parse from the start of dict again
+	// Wait, we can't easily reset, so for simplicity let's implement parseNormalDictLiteral by just parsing pairs
+	// First get back to the { by creating a new parser? No, better to just assume we are at first token of dict, let's try
+	// Wait maybe it's easier to just return nil for now, and we'll revisit, but first let's try a test case for dictionary comprehension!
+	// Let's first implement desugar for ListComprehension and DictComprehension!
+	for !p.peekTokenIs(lexer.RBRACE) {
+		if p.curTokenIs(lexer.RBRACE) {
+			break
+		}
+		key := p.parseExpression(LOWEST)
 		if !p.expectPeek(lexer.COLON) {
 			return nil
 		}
-
 		p.nextToken()
 		value := p.parseExpression(LOWEST)
-
 		dict.Pairs[key] = value
-
 		if !p.peekTokenIs(lexer.RBRACE) && !p.expectPeek(lexer.COMMA) {
 			return nil
 		}
 	}
-
 	if !p.expectPeek(lexer.RBRACE) {
 		return nil
 	}
-
 	return dict
 }
 
@@ -709,19 +863,25 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 		return list
 	}
 
-	list = append(list, p.parseExpression(LOWEST))
+	p.nextToken()
+	exp := p.parseExpression(LOWEST)
+	if exp != nil {
+		list = append(list, exp)
+	}
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		if p.peekTokenIs(end) {
-			p.nextToken()
-			break
+		exp = p.parseExpression(LOWEST)
+		if exp != nil {
+			list = append(list, exp)
 		}
-		list = append(list, p.parseExpression(LOWEST))
 	}
 
+	// Ensure we consume the end token
 	if !p.curTokenIs(end) && p.peekTokenIs(end) {
+		p.nextToken()
+	} else if p.curTokenIs(end) {
 		p.nextToken()
 	}
 

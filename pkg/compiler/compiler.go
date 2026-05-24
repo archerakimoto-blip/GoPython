@@ -360,7 +360,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 		if node.End == nil {
-			// 我们用一个特殊的标记 -1 表示未指定结束
 			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: -1}))
 		} else {
 			err = c.Compile(node.End)
@@ -368,7 +367,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 				return err
 			}
 		}
-		// 添加一个简单的操作码，让我们先定义它！
 		c.emit(OpSlice)
 
 	case *ast.FunctionLiteral:
@@ -592,6 +590,7 @@ var definitions = map[Opcode]*Definition{
 	OpArray:         {"OpArray", []int{2}},
 	OpHash:          {"OpHash", []int{2}},
 	OpIndex:         {"OpIndex", []int{}},
+	OpSlice:         {"OpSlice", []int{}},
 	OpCall:          {"OpCall", []int{1}},
 	OpReturnValue:   {"OpReturnValue", []int{}},
 	OpReturn:        {"OpReturn", []int{}},

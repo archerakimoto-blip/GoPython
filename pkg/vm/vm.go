@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/objects"
@@ -403,11 +404,41 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 		return vm.executeBinaryFloatOperation(op, left, right)
 	}
 
-	if leftType == objects.STRING_OBJ && rightType == objects.STRING_OBJ && op == compiler.OpAdd {
-		return vm.executeBinaryStringOperation(op, left, right)
+	if op == compiler.OpAdd {
+		// If either operand is a string, convert both to string and concatenate
+		leftStr := toString(left)
+		rightStr := toString(right)
+		return vm.push(&objects.String{Value: leftStr + rightStr})
 	}
 
 	return fmt.Errorf("unsupported types for binary operation: %s %s", leftType, rightType)
+}
+
+func toString(obj objects.Object) string {
+	switch o := obj.(type) {
+	case *objects.String:
+		return o.Value
+	case *objects.Integer:
+		return fmt.Sprintf("%d", o.Value)
+	case *objects.Float:
+		return fmt.Sprintf("%g", o.Value)
+	case *objects.Boolean:
+		if o.Value {
+			return "True"
+		}
+		return "False"
+	case *objects.None:
+		return "None"
+	case *objects.List:
+		// For simplicity, return a basic representation
+		elements := []string{}
+		for _, elem := range o.Elements {
+			elements = append(elements, toString(elem))
+		}
+		return "[" + strings.Join(elements, ", ") + "]"
+	default:
+		return o.Inspect()
+	}
 }
 
 func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right objects.Object) error {

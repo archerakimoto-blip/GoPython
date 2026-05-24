@@ -10,6 +10,7 @@ const (
 	INT    = "INT"
 	FLOAT  = "FLOAT"
 	STRING = "STRING"
+	FSTRING = "FSTRING"
 
 	ASSIGN   = "="
 	PLUS     = "+"
@@ -170,6 +171,19 @@ func (l *Lexer) NextToken() Token {
 	case '"':
 		tok.Type = STRING
 		tok.Literal = l.readString()
+	case 'f':
+		if l.peekChar() == '"' {
+			// f"..."
+			l.readChar() // skip 'f'
+			tok.Type = FSTRING
+			tok.Literal = l.readString()
+			l.readChar() // skip closing "
+			return tok
+		}
+		// normal identifier starting with f
+		tok.Literal = l.readIdentifier()
+		tok.Type = lookupIdent(tok.Literal)
+		return tok
 	case 0:
 		tok.Literal = ""
 		tok.Type = EOF

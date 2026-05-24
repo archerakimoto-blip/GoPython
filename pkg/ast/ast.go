@@ -75,6 +75,27 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token }
 func (sl *StringLiteral) String() string       { return "\"" + sl.Value + "\"" }
 
+type FStringLiteral struct {
+	Token string
+	Parts []Expression // Mix of StringLiterals and Expressions (for {expr} parts)
+}
+
+func (fsl *FStringLiteral) expressionNode()      {}
+func (fsl *FStringLiteral) TokenLiteral() string { return fsl.Token }
+func (fsl *FStringLiteral) String() string {
+	var out bytes.Buffer
+	out.WriteString("f\"")
+	for _, p := range fsl.Parts {
+		if sl, ok := p.(*StringLiteral); ok {
+			out.WriteString(sl.Value)
+		} else {
+			out.WriteString("{" + p.String() + "}")
+		}
+	}
+	out.WriteString("\"")
+	return out.String()
+}
+
 type Boolean struct {
 	Token string
 	Value bool
