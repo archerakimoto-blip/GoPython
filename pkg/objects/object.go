@@ -18,6 +18,8 @@ const (
 	ERROR_OBJ        ObjectType = "ERROR"
 	GENERATOR_OBJ    ObjectType = "GENERATOR"
 	CONTEXT_OBJ      ObjectType = "CONTEXT"
+	CLASS_OBJ        ObjectType = "CLASS"
+	INSTANCE_OBJ     ObjectType = "INSTANCE"
 )
 
 type Object interface {
@@ -149,6 +151,41 @@ type Generator struct {
 func (g *Generator) Type() ObjectType { return GENERATOR_OBJ }
 func (g *Generator) Inspect() string  { return fmt.Sprintf("generator[%p]", g) }
 
+type Class struct {
+	Name      string
+	Methods   map[string]Object
+	Fields    map[string]Object
+	SuperClass *Class
+}
+
+func (c *Class) Type() ObjectType { return CLASS_OBJ }
+func (c *Class) Inspect() string  { return fmt.Sprintf("<class %s>", c.Name) }
+
+type Instance struct {
+	Class      *Class
+	Fields     map[string]Object
+	InitMethod *BuiltinFunction
+}
+
+func (i *Instance) Type() ObjectType { return INSTANCE_OBJ }
+func (i *Instance) Inspect() string  { return fmt.Sprintf("<%s instance>", i.Class.Name) }
+
+func (i *Instance) GetAttr(name string) (Object, bool) {
+	if val, ok := i.Fields[name]; ok {
+		return val, true
+	}
+	if i.Class != nil {
+		if method, ok := i.Class.Methods[name]; ok {
+			return method, true
+		}
+	}
+	return nil, false
+}
+
+func (i *Instance) SetAttr(name string, value Object) {
+	i.Fields[name] = value
+}
+
 var (
 	True  = &Boolean{Value: true}
 	False = &Boolean{Value: false}
@@ -180,4 +217,3 @@ func Equal(a, b Object) bool {
 		return false
 	}
 }
-
