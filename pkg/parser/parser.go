@@ -42,7 +42,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.AND:      AND,
 	lexer.OR:       OR,
 	lexer.IF:       TERNARY,
-	lexer.COLON:    0, // Lower than LOWEST
+	lexer.COLON:    0,
+	lexer.AS:       LOWEST + 1,
 }
 
 type Parser struct {
@@ -357,7 +358,10 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && precedence < p.peekPrecedence() {
+		if p.peekTokenIs(lexer.AS) {
+			return leftExp
+		}
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -366,6 +370,10 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		p.nextToken()
 
 		leftExp = infix(leftExp)
+	}
+
+	if p.peekTokenIs(lexer.EXCEPT) || p.peekTokenIs(lexer.FINALLY) || p.peekTokenIs(lexer.ELSE) {
+		p.nextToken()
 	}
 
 	return leftExp
@@ -573,12 +581,16 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
-	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) &&
+		!p.curTokenIs(lexer.EXCEPT) && !p.curTokenIs(lexer.FINALLY) &&
+		!p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.FUNCTION) {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
-		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) {
+		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
+			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+			p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.FUNCTION) {
 			break
 		}
 		p.nextToken()
@@ -1183,26 +1195,33 @@ func (p *Parser) parseExceptClause() *ast.ExceptClause {
 
 	p.nextToken()
 
-	// Parse optional exception type
-	if !p.curTokenIs(lexer.COLON) {
-		if !p.curTokenIs(lexer.AS) {
-			clause.Type = p.parseExpression(LOWEST)
+	if p.curTokenIs(lexer.AS) {
+		p.nextToken()
+		if p.curTokenIs(lexer.IDENT) {
+			clause.Name = &ast.Identifier{
+				Token: p.curToken.Literal,
+				Value: p.curToken.Literal,
+			}
+			p.nextToken()
 		}
-		// Parse optional 'as x'
+	} else if !p.curTokenIs(lexer.COLON) {
+		clause.Type = p.parseExpression(LOWEST)
 		if p.curTokenIs(lexer.AS) {
 			p.nextToken()
-			if p.expectPeek(lexer.IDENT) {
+			if p.curTokenIs(lexer.IDENT) {
 				clause.Name = &ast.Identifier{
 					Token: p.curToken.Literal,
 					Value: p.curToken.Literal,
 				}
+				p.nextToken()
 			}
 		}
 	}
 
-	// Parse colon
-	if !p.expectPeek(lexer.COLON) {
-		return nil
+	if !p.curTokenIs(lexer.COLON) {
+		if p.peekTokenIs(lexer.COLON) {
+			p.nextToken()
+		}
 	}
 
 	p.nextToken()
@@ -1220,7 +1239,7 @@ func (p *Parser) parseWithStatement() *ast.WithStatement {
 	stmt.Expr = p.parseExpression(LOWEST)
 
 	// Parse optional 'as x'
-	if p.curTokenIs(lexer.AS) {
+	if p.peekTokenIs(lexer.AS) {
 		p.nextToken()
 		if p.expectPeek(lexer.IDENT) {
 			stmt.Name = &ast.Identifier{

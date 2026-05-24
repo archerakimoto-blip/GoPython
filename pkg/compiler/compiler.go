@@ -12,6 +12,7 @@ type Opcode byte
 const (
 	OpConstant Opcode = iota
 	OpPop
+	OpDupTop
 	OpAdd
 	OpSub
 	OpMul
@@ -42,8 +43,13 @@ const (
 	OpBeginTry
 	OpEndTry
 	OpRaise
-	OpExcept
+	OpExceptHandler
+	OpFinally
 	OpYield
+	OpEnterContext
+	OpExitContext
+	OpMakeGenerator
+	OpYieldValue
 )
 
 type EmittedInstruction struct {
@@ -154,6 +160,75 @@ func (c *Compiler) registerBuiltins() {
 	setaddIndex := len(c.constants)
 	c.constants = append(c.constants, setaddBuiltin)
 	c.symbolTable.DefineBuiltin("setadd", setaddIndex)
+
+	printBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			for i, arg := range args {
+				if i > 0 {
+					fmt.Print(" ")
+				}
+				fmt.Print(arg.Inspect())
+			}
+			fmt.Println()
+			return objects.None_
+		},
+	}
+	printIndex := len(c.constants)
+	c.constants = append(c.constants, printBuiltin)
+	c.symbolTable.DefineBuiltin("print", printIndex)
+
+	openBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("open() takes at least 1 argument")
+			}
+
+			filename := ""
+			if str, ok := args[0].(*objects.String); ok {
+				filename = str.Value
+			} else {
+				return objects.NewError("open(): first argument must be a string (filename)")
+			}
+
+			mode := "r"
+			if len(args) > 1 {
+				if str, ok := args[1].(*objects.String); ok {
+					mode = str.Value
+				}
+			}
+
+			return &objects.ContextManager{
+				EnterFunc: func() objects.Object {
+					return &objects.String{Value: "file_handle:" + filename + ":" + mode}
+				},
+				ExitFunc: func(exc objects.Object) objects.Object {
+					return objects.None_
+				},
+			}
+		},
+	}
+	openIndex := len(c.constants)
+	c.constants = append(c.constants, openBuiltin)
+	c.symbolTable.DefineBuiltin("open", openIndex)
+
+	nextBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("next() takes exactly 1 argument")
+			}
+			gen, ok := args[0].(*objects.Generator)
+			if !ok {
+				return objects.NewError("next() argument must be a generator")
+			}
+			if gen.Done {
+				return objects.None_
+			}
+			return gen
+		},
+	}
+	nextIndex := len(c.constants)
+	c.constants = append(c.constants, nextBuiltin)
+	c.symbolTable.DefineBuiltin("next", nextIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -474,12 +549,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:  fnInstructions,
-			NumLocals:     numLocals,
-			NumParameters: len(node.Parameters),
-		}
+		Instructions:  fnInstructions,
+		NumLocals:     numLocals,
+		NumParameters: len(node.Parameters),
+		IsGenerator:   c.hasYieldInBody(node.Body),
+	}
 
-		c.emit(OpConstant, c.addConstant(compiledFn))
+	c.emit(OpConstant, c.addConstant(compiledFn))
+	if compiledFn.IsGenerator {
+		c.emit(OpMakeGenerator)
+	}
 
 	case *ast.LambdaExpression:
 		funcLit := &ast.FunctionLiteral{
@@ -562,31 +641,28 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpRaise)
 		return nil
 	case *ast.WithStatement:
-		// 简化版 with 语句：目前只支持基本的上下文管理
-		// 编译上下文管理器表达式
 		if err := c.Compile(node.Expr); err != nil {
 			return err
 		}
 
-		// 如果有 as 变量，我们把它保存起来
+		c.emit(OpEnterContext)
+
 		if node.Name != nil {
-			// 为变量名定义符号
 			symbol := c.symbolTable.Define(node.Name.Value)
-			// 赋值
 			if symbol.Scope == GlobalScope {
 				c.emit(OpSetGlobal, symbol.Index)
 			} else {
 				c.emit(OpSetLocal, symbol.Index)
 			}
 		} else {
-			// 如果没有 as 变量，弹出结果
 			c.emit(OpPop)
 		}
 
-		// 编译 body
 		if err := c.Compile(node.Body); err != nil {
 			return err
 		}
+
+		c.emit(OpExitContext)
 		return nil
 	case *ast.YieldStatement:
 		if node.Expression != nil {
@@ -596,59 +672,129 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			c.emit(OpNull)
 		}
-		c.emit(OpYield)
+		c.emit(OpYieldValue)
 		return nil
 	}
 
 	return nil
 }
 
-func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
-	// 保存当前指令位置，用于后续的跳转修复
-	beginTryPos := c.emit(OpBeginTry, 0)
+func (c *Compiler) hasYieldInBody(node ast.Node) bool {
+	switch node := node.(type) {
+	case *ast.YieldStatement:
+		return true
+	case *ast.BlockStatement:
+		for _, stmt := range node.Statements {
+			if c.hasYieldInBody(stmt) {
+				return true
+			}
+		}
+	case *ast.IfExpression:
+		if c.hasYieldInBody(node.Consequence) {
+			return true
+		}
+		if node.Alternative != nil && c.hasYieldInBody(node.Alternative) {
+			return true
+		}
+	case *ast.WhileStatement:
+		if c.hasYieldInBody(node.Body) {
+			return true
+		}
+	case *ast.FunctionLiteral:
+		return false
+	}
+	return false
+}
 
-	// 编译 try body
+func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
+	hasExcept := len(ts.Excepts) > 0
+	hasFinally := ts.Finally != nil
+	c.emit(OpBeginTry, boolToInt(hasExcept), boolToInt(hasFinally))
+
 	if err := c.Compile(ts.Body); err != nil {
 		return err
 	}
 
-	// 编译完 body 后，跳转到 finally 之后（如果有 finally）或者结束
-	jumpToEndPos := c.emit(OpJump, 0)
-	exceptStartPos := len(c.instructions)
+	jumpAfterTry := c.emit(OpJump, 0)
 
-	// 修复 beginTry 的跳转位置到 exceptStartPos
-	c.changeOperand(beginTryPos, exceptStartPos)
+	if hasExcept {
+		ex := ts.Excepts[0]
 
-	// 编译 except 子句
-	for _, ex := range ts.Excepts {
-		// 首先编译 except body
+		var typeIdx int
+		if ex.Type != nil {
+			if typeStr, ok := ex.Type.(*ast.Identifier); ok {
+				typeIdx = c.addConstant(&objects.String{Value: typeStr.Value})
+			} else {
+				typeIdx = c.addConstant(&objects.String{Value: "Exception"})
+			}
+		} else {
+			typeIdx = c.addConstant(&objects.String{Value: ""})
+		}
+
+		var varIdx int
+		var varSymbol Symbol
+		if ex.Name != nil {
+			varIdx = c.addConstant(&objects.String{Value: ex.Name.Value})
+			varSymbol = c.symbolTable.Define(ex.Name.Value)
+		} else {
+			varIdx = c.addConstant(&objects.String{Value: ""})
+		}
+
+		c.emit(OpExceptHandler, typeIdx, varIdx)
+
+		if ex.Name != nil {
+			c.emit(OpDupTop)
+			if varSymbol.Scope == GlobalScope {
+				c.emit(OpSetGlobal, varSymbol.Index)
+			} else {
+				c.emit(OpSetLocal, varSymbol.Index)
+			}
+		}
+
 		if err := c.Compile(ex.Body); err != nil {
 			return err
 		}
-		// 跳转到 finally
-		jumpToFinally := c.emit(OpJump, 0)
-		// 标记下一个 except 子句的起始位置
-		nextExceptStartPos := len(c.instructions)
-		// 修复 jumpToFinally
-		c.changeOperand(jumpToFinally, nextExceptStartPos)
-	}
 
-	// 编译 finally 子句
-	if ts.Finally != nil {
-		finallyStartPos := len(c.instructions)
-		if err := c.Compile(ts.Finally); err != nil {
-			return err
+		jumpAfterExcept := c.emit(OpJump, 0)
+
+		if hasFinally {
+			finallyPos := len(c.instructions)
+			c.emit(OpFinally)
+			if err := c.Compile(ts.Finally); err != nil {
+				return err
+			}
+			endPos := len(c.instructions)
+			c.changeOperand(jumpAfterTry, finallyPos)
+			c.changeOperand(jumpAfterExcept, endPos)
+		} else {
+			endPos := len(c.instructions)
+			c.changeOperand(jumpAfterTry, endPos)
+			c.changeOperand(jumpAfterExcept, endPos)
 		}
-		// 修复 jumpToEndPos
-		c.changeOperand(jumpToEndPos, finallyStartPos)
 	} else {
-		endPos := len(c.instructions)
-		c.changeOperand(jumpToEndPos, endPos)
+		if hasFinally {
+			finallyPos := len(c.instructions)
+			c.emit(OpFinally)
+			if err := c.Compile(ts.Finally); err != nil {
+				return err
+			}
+			c.changeOperand(jumpAfterTry, finallyPos)
+		} else {
+			endPos := len(c.instructions)
+			c.changeOperand(jumpAfterTry, endPos)
+		}
 	}
 
 	c.emit(OpEndTry)
 
 	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (c *Compiler) Bytecode() *Bytecode {
@@ -735,8 +881,8 @@ func Make(op Opcode, operands ...int) []byte {
 		width := def.OperandWidths[i]
 		switch width {
 		case 2:
-			instruction[offset] = byte((o >> 8) & 0xFF)
-			instruction[offset+1] = byte(o & 0xFF)
+			instruction[offset] = byte(o & 0xFF)
+			instruction[offset+1] = byte((o >> 8) & 0xFF)
 		case 1:
 			instruction[offset] = byte(o & 0xFF)
 		}
@@ -781,17 +927,24 @@ var definitions = map[Opcode]*Definition{
 	OpReturn:        {"OpReturn", []int{}},
 	OpGetLocal:      {"OpGetLocal", []int{1}},
 	OpSetLocal:      {"OpSetLocal", []int{1}},
-	OpBeginTry:      {"OpBeginTry", []int{2}},
+	OpBeginTry:      {"OpBeginTry", []int{2, 2}},
 	OpEndTry:        {"OpEndTry", []int{}},
 	OpRaise:         {"OpRaise", []int{}},
-	OpExcept:        {"OpExcept", []int{}},
+	OpDupTop:        {"OpDupTop", []int{}},
+	OpExceptHandler: {"OpExceptHandler", []int{2, 2}},
+	OpFinally:       {"OpFinally", []int{}},
 	OpYield:         {"OpYield", []int{}},
+	OpEnterContext:  {"OpEnterContext", []int{}},
+	OpExitContext:   {"OpExitContext", []int{}},
+	OpMakeGenerator: {"OpMakeGenerator", []int{}},
+	OpYieldValue:    {"OpYieldValue", []int{}},
 }
 
 type CompiledFunction struct {
 	Instructions  Instructions
 	NumLocals     int
 	NumParameters int
+	IsGenerator   bool
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType { return "COMPILED_FUNCTION" }

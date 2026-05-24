@@ -16,6 +16,8 @@ const (
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
 	BUILTIN_OBJ      ObjectType = "BUILTIN"
 	ERROR_OBJ        ObjectType = "ERROR"
+	GENERATOR_OBJ    ObjectType = "GENERATOR"
+	CONTEXT_OBJ      ObjectType = "CONTEXT"
 )
 
 type Object interface {
@@ -124,6 +126,28 @@ type Builtin struct {
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }
 func (b *Builtin) Inspect() string  { return "builtin function" }
+
+type ContextManager struct {
+	EnterFunc func() Object
+	ExitFunc  func(exc Object) Object
+}
+
+func (cm *ContextManager) Type() ObjectType { return CONTEXT_OBJ }
+func (cm *ContextManager) Inspect() string  { return "context manager" }
+
+type Generator struct {
+	Instructions  []byte
+	Constants     []Object
+	Locals        []Object
+	IP            int
+	Stack         []Object
+	StackPtr      int
+	BasePointer   int
+	Done          bool
+}
+
+func (g *Generator) Type() ObjectType { return GENERATOR_OBJ }
+func (g *Generator) Inspect() string  { return fmt.Sprintf("generator[%p]", g) }
 
 var (
 	True  = &Boolean{Value: true}
