@@ -613,3 +613,107 @@ func (sc *SetComprehension) String() string {
 	return out.String()
 }
 
+type TryStatement struct {
+	Token      string
+	Body       *BlockStatement
+	Excepts    []*ExceptClause
+	Finally    *BlockStatement
+}
+
+func (ts *TryStatement) statementNode()       {}
+func (ts *TryStatement) TokenLiteral() string { return ts.Token }
+func (ts *TryStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("try:")
+	out.WriteString(ts.Body.String())
+	for _, ex := range ts.Excepts {
+		out.WriteString(ex.String())
+	}
+	if ts.Finally != nil {
+		out.WriteString("finally:")
+		out.WriteString(ts.Finally.String())
+	}
+	return out.String()
+}
+
+type ExceptClause struct {
+	Token     string
+	Type      Expression
+	Name      *Identifier
+	Body      *BlockStatement
+}
+
+func (ec *ExceptClause) statementNode()       {}
+func (ec *ExceptClause) TokenLiteral() string { return ec.Token }
+func (ec *ExceptClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("except")
+	if ec.Type != nil {
+		out.WriteString(" ")
+		out.WriteString(ec.Type.String())
+	}
+	if ec.Name != nil {
+		out.WriteString(" as ")
+		out.WriteString(ec.Name.String())
+	}
+	out.WriteString(":")
+	out.WriteString(ec.Body.String())
+	return out.String()
+}
+
+type RaiseStatement struct {
+	Token      string
+	Expression Expression
+}
+
+func (rs *RaiseStatement) statementNode()       {}
+func (rs *RaiseStatement) TokenLiteral() string { return rs.Token }
+func (rs *RaiseStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("raise")
+	if rs.Expression != nil {
+		out.WriteString(" ")
+		out.WriteString(rs.Expression.String())
+	}
+	return out.String()
+}
+
+type WithStatement struct {
+	Token     string
+	Expr      Expression
+	Name      *Identifier
+	Body      *BlockStatement
+}
+
+func (ws *WithStatement) statementNode()       {}
+func (ws *WithStatement) TokenLiteral() string { return ws.Token }
+func (ws *WithStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("with ")
+	out.WriteString(ws.Expr.String())
+	if ws.Name != nil {
+		out.WriteString(" as ")
+		out.WriteString(ws.Name.String())
+	}
+	out.WriteString(": ")
+	out.WriteString(ws.Body.String())
+	return out.String()
+}
+
+type YieldStatement struct {
+	Token      string
+	Expression Expression
+}
+
+func (ys *YieldStatement) statementNode()       {}
+func (ys *YieldStatement) TokenLiteral() string { return ys.Token }
+func (ys *YieldStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("yield")
+	if ys.Expression != nil {
+		out.WriteString(" ")
+		out.WriteString(ys.Expression.String())
+	}
+	return out.String()
+}
+

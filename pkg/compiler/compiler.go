@@ -39,6 +39,11 @@ const (
 	OpReturn
 	OpGetLocal
 	OpSetLocal
+	OpBeginTry
+	OpEndTry
+	OpRaise
+	OpExcept
+	OpYield
 )
 
 type EmittedInstruction struct {
@@ -544,7 +549,104 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return fmt.Errorf("break statements should be desugared before compilation")
 	case *ast.ContinueStatement:
 		return fmt.Errorf("continue statements should be desugared before compilation")
+	case *ast.TryStatement:
+		return c.compileTryStatement(node)
+	case *ast.RaiseStatement:
+		if node.Expression != nil {
+			if err := c.Compile(node.Expression); err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpNull)
+		}
+		c.emit(OpRaise)
+		return nil
+	case *ast.WithStatement:
+		// 简化版 with 语句：目前只支持基本的上下文管理
+		// 编译上下文管理器表达式
+		if err := c.Compile(node.Expr); err != nil {
+			return err
+		}
+
+		// 如果有 as 变量，我们把它保存起来
+		if node.Name != nil {
+			// 为变量名定义符号
+			symbol := c.symbolTable.Define(node.Name.Value)
+			// 赋值
+			if symbol.Scope == GlobalScope {
+				c.emit(OpSetGlobal, symbol.Index)
+			} else {
+				c.emit(OpSetLocal, symbol.Index)
+			}
+		} else {
+			// 如果没有 as 变量，弹出结果
+			c.emit(OpPop)
+		}
+
+		// 编译 body
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+		return nil
+	case *ast.YieldStatement:
+		if node.Expression != nil {
+			if err := c.Compile(node.Expression); err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpNull)
+		}
+		c.emit(OpYield)
+		return nil
 	}
+
+	return nil
+}
+
+func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
+	// 保存当前指令位置，用于后续的跳转修复
+	beginTryPos := c.emit(OpBeginTry, 0)
+
+	// 编译 try body
+	if err := c.Compile(ts.Body); err != nil {
+		return err
+	}
+
+	// 编译完 body 后，跳转到 finally 之后（如果有 finally）或者结束
+	jumpToEndPos := c.emit(OpJump, 0)
+	exceptStartPos := len(c.instructions)
+
+	// 修复 beginTry 的跳转位置到 exceptStartPos
+	c.changeOperand(beginTryPos, exceptStartPos)
+
+	// 编译 except 子句
+	for _, ex := range ts.Excepts {
+		// 首先编译 except body
+		if err := c.Compile(ex.Body); err != nil {
+			return err
+		}
+		// 跳转到 finally
+		jumpToFinally := c.emit(OpJump, 0)
+		// 标记下一个 except 子句的起始位置
+		nextExceptStartPos := len(c.instructions)
+		// 修复 jumpToFinally
+		c.changeOperand(jumpToFinally, nextExceptStartPos)
+	}
+
+	// 编译 finally 子句
+	if ts.Finally != nil {
+		finallyStartPos := len(c.instructions)
+		if err := c.Compile(ts.Finally); err != nil {
+			return err
+		}
+		// 修复 jumpToEndPos
+		c.changeOperand(jumpToEndPos, finallyStartPos)
+	} else {
+		endPos := len(c.instructions)
+		c.changeOperand(jumpToEndPos, endPos)
+	}
+
+	c.emit(OpEndTry)
 
 	return nil
 }
@@ -679,6 +781,11 @@ var definitions = map[Opcode]*Definition{
 	OpReturn:        {"OpReturn", []int{}},
 	OpGetLocal:      {"OpGetLocal", []int{1}},
 	OpSetLocal:      {"OpSetLocal", []int{1}},
+	OpBeginTry:      {"OpBeginTry", []int{2}},
+	OpEndTry:        {"OpEndTry", []int{}},
+	OpRaise:         {"OpRaise", []int{}},
+	OpExcept:        {"OpExcept", []int{}},
+	OpYield:         {"OpYield", []int{}},
 }
 
 type CompiledFunction struct {

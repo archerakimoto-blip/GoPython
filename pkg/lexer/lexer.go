@@ -55,6 +55,13 @@ const (
 	NONE     = "NONE"
 	CLASS    = "CLASS"
 	LAMBDA   = "LAMBDA"
+	TRY      = "TRY"
+	EXCEPT   = "EXCEPT"
+	FINALLY  = "FINALLY"
+	RAISE    = "RAISE"
+	AS       = "AS"
+	WITH     = "WITH"
+	YIELD    = "YIELD"
 )
 
 type Token struct {
@@ -79,6 +86,13 @@ var keywords = map[string]TokenType{
 	"None":   NONE,
 	"class":  CLASS,
 	"lambda": LAMBDA,
+	"try":    TRY,
+	"except": EXCEPT,
+	"finally": FINALLY,
+	"raise": RAISE,
+	"as": AS,
+	"with": WITH,
+	"yield": YIELD,
 }
 
 type Lexer struct {

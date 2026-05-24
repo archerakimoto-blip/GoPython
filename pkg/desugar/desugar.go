@@ -74,6 +74,47 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		return nil
 	case *ast.ContinueStatement:
 		return nil
+	case *ast.TryStatement:
+		// 对 try 语句进行脱糖处理：脱糖 body、excepts 和 finally
+		desugaredTry := &ast.TryStatement{
+			Token: s.Token,
+			Body:  desugarBlockStatement(s.Body),
+		}
+		desugaredTry.Excepts = make([]*ast.ExceptClause, 0, len(s.Excepts))
+		for _, ex := range s.Excepts {
+			desugaredExcept := &ast.ExceptClause{
+				Token: ex.Token,
+				Type:  desugarExpression(ex.Type),
+				Name:  ex.Name,
+				Body:  desugarBlockStatement(ex.Body),
+			}
+			desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
+		}
+		if s.Finally != nil {
+			desugaredTry.Finally = desugarBlockStatement(s.Finally)
+		}
+		return desugaredTry
+	case *ast.RaiseStatement:
+		// 对 raise 语句进行脱糖处理：脱糖表达式
+		return &ast.RaiseStatement{
+			Token:      s.Token,
+			Expression: desugarExpression(s.Expression),
+		}
+	case *ast.WithStatement:
+		// 对 with 语句进行脱糖处理：脱糖表达式和 body
+		desugaredWith := &ast.WithStatement{
+			Token: s.Token,
+			Expr:  desugarExpression(s.Expr),
+			Name:  s.Name,
+			Body:  desugarBlockStatement(s.Body),
+		}
+		return desugaredWith
+	case *ast.YieldStatement:
+		// 对 yield 语句进行脱糖处理：脱糖表达式
+		return &ast.YieldStatement{
+			Token:      s.Token,
+			Expression: desugarExpression(s.Expression),
+		}
 	default:
 		return stmt
 	}

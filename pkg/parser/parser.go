@@ -170,6 +170,14 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseWhileStatement()
 	case lexer.FOR:
 		return p.parseForStatement()
+	case lexer.TRY:
+		return p.parseTryStatement()
+	case lexer.RAISE:
+		return p.parseRaiseStatement()
+	case lexer.WITH:
+		return p.parseWithStatement()
+	case lexer.YIELD:
+		return p.parseYieldStatement()
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
 		switch p.peekToken.Type {
@@ -1130,5 +1138,117 @@ func (p *Parser) parseBreakStatement() *ast.BreakStatement {
 
 func (p *Parser) parseContinueStatement() *ast.ContinueStatement {
 	return &ast.ContinueStatement{Token: "continue"}
+}
+
+func (p *Parser) parseRaiseStatement() *ast.RaiseStatement {
+	stmt := &ast.RaiseStatement{Token: p.curToken.Literal}
+
+	p.nextToken()
+	if !p.curTokenIs(lexer.SEMICOLON) && !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		stmt.Expression = p.parseExpression(LOWEST)
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseTryStatement() *ast.TryStatement {
+	stmt := &ast.TryStatement{Token: p.curToken.Literal}
+
+	// Parse try body
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
+
+	// Parse except clauses
+	for p.curTokenIs(lexer.EXCEPT) {
+		stmt.Excepts = append(stmt.Excepts, p.parseExceptClause())
+	}
+
+	// Parse finally clause if present
+	if p.curTokenIs(lexer.FINALLY) {
+		if !p.expectPeek(lexer.COLON) {
+			return nil
+		}
+		p.nextToken()
+		stmt.Finally = p.parseBlockStatement()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseExceptClause() *ast.ExceptClause {
+	clause := &ast.ExceptClause{Token: p.curToken.Literal}
+
+	p.nextToken()
+
+	// Parse optional exception type
+	if !p.curTokenIs(lexer.COLON) {
+		if !p.curTokenIs(lexer.AS) {
+			clause.Type = p.parseExpression(LOWEST)
+		}
+		// Parse optional 'as x'
+		if p.curTokenIs(lexer.AS) {
+			p.nextToken()
+			if p.expectPeek(lexer.IDENT) {
+				clause.Name = &ast.Identifier{
+					Token: p.curToken.Literal,
+					Value: p.curToken.Literal,
+				}
+			}
+		}
+	}
+
+	// Parse colon
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	clause.Body = p.parseBlockStatement()
+
+	return clause
+}
+
+func (p *Parser) parseWithStatement() *ast.WithStatement {
+	stmt := &ast.WithStatement{Token: p.curToken.Literal}
+
+	p.nextToken()
+
+	// Parse the with expression
+	stmt.Expr = p.parseExpression(LOWEST)
+
+	// Parse optional 'as x'
+	if p.curTokenIs(lexer.AS) {
+		p.nextToken()
+		if p.expectPeek(lexer.IDENT) {
+			stmt.Name = &ast.Identifier{
+				Token: p.curToken.Literal,
+				Value: p.curToken.Literal,
+			}
+		}
+	}
+
+	// Parse colon
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+func (p *Parser) parseYieldStatement() *ast.YieldStatement {
+	stmt := &ast.YieldStatement{Token: p.curToken.Literal}
+
+	p.nextToken()
+	if !p.curTokenIs(lexer.SEMICOLON) && !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		stmt.Expression = p.parseExpression(LOWEST)
+	}
+
+	return stmt
 }
 

@@ -12,6 +12,18 @@ const StackSize = 2048
 const GlobalSize = 65536
 const MaxFrames = 1024
 
+// ExceptionHandler 存储异常处理器信息
+type ExceptionHandler struct {
+	handlerIP int // 异常处理器的指令指针位置
+	stackPtr  int // 发生异常时的栈指针位置
+}
+
+type Frame struct {
+	fn          *compiler.CompiledFunction
+	ip          int
+	basePointer int
+}
+
 type VM struct {
 	constants    []objects.Object
 	instructions compiler.Instructions
@@ -22,12 +34,9 @@ type VM struct {
 
 	frames      []*Frame
 	framesIndex int
-}
 
-type Frame struct {
-	fn          *compiler.CompiledFunction
-	ip          int
-	basePointer int
+	exceptionStack []ExceptionHandler // 异常处理器栈
+	pendingError   objects.Object     // 待处理的异常
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -273,7 +282,47 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-		}
+		case compiler.OpBeginTry:
+			handlerIP := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+			// 保存当前异常处理器信息
+			vm.exceptionStack = append(vm.exceptionStack, ExceptionHandler{
+				handlerIP: handlerIP,
+				stackPtr:  vm.sp,
+			})
+		case compiler.OpEndTry:
+			// 移除当前异常处理器
+			if len(vm.exceptionStack) > 0 {
+				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+			}
+		case compiler.OpRaise:
+			// 获取待抛出的异常对象
+			errObj := vm.pop()
+			// 查找异常处理器
+			if len(vm.exceptionStack) > 0 {
+				handler := vm.exceptionStack[len(vm.exceptionStack)-1]
+				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+				// 恢复栈指针
+				vm.sp = handler.stackPtr
+				// 将异常对象压入栈
+				if err := vm.push(errObj); err != nil {
+					return err
+				}
+				// 跳转到异常处理器
+				vm.currentFrame().ip = handler.handlerIP - 1
+			} else {
+				// 没有异常处理器，返回错误
+				vm.pendingError = errObj
+				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+			}
+		case compiler.OpExcept:
+		// 处理异常（弹出异常对象）
+		_ = vm.pop()
+	case compiler.OpYield:
+		// 简单的 yield 处理：先不实现完整的生成器状态保存
+		// 目前只是弹出值（以后可以扩展）
+		_ = vm.pop()
+	}
 	}
 
 	return nil
