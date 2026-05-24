@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/compiler"
+	"github.com/go-py/go-python/pkg/desugar"
 	"github.com/go-py/go-python/pkg/lexer"
 	"github.com/go-py/go-python/pkg/objects"
 	"github.com/go-py/go-python/pkg/parser"
@@ -45,6 +45,9 @@ func runREPL() {
 			printParserErrors(p.Errors())
 			continue
 		}
+
+		// 进行脱糖转换
+		program = desugar.Desugar(program)
 
 		comp := compiler.NewWithState(symbolTable, constants)
 		err := comp.Compile(program)
@@ -85,6 +88,9 @@ func runFile(filename string) {
 		printParserErrors(p.Errors())
 		return
 	}
+
+	// 进行脱糖转换
+	program = desugar.Desugar(program)
 
 	comp := compiler.New()
 	err = comp.Compile(program)
