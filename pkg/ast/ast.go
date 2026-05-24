@@ -310,3 +310,21 @@ func (rs *ReturnStatement) String() string {
 	return out.String()
 }
 
+type AssignStatement struct {
+	Token string
+	Name  *Identifier
+	Value Expression
+}
+
+func (as *AssignStatement) statementNode()       {}
+func (as *AssignStatement) TokenLiteral() string { return as.Token }
+func (as *AssignStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString(as.Name.String())
+	out.WriteString(" = ")
+	if as.Value != nil {
+		out.WriteString(as.Value.String())
+	}
+	return out.String()
+}
+

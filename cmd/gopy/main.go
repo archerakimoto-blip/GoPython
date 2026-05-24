@@ -106,6 +106,11 @@ func runFile(filename string) {
 		fmt.Printf("Execution error: %s\n", err)
 		return
 	}
+
+	lastPopped := machine.LastPoppedStackElem()
+	if lastPopped != nil {
+		fmt.Println(lastPopped.Inspect())
+	}
 }
 
 func printParserErrors(errors []string) {

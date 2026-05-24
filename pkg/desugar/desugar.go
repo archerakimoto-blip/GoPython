@@ -34,6 +34,13 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Name:  s.Name,
 			Value: desugarExpression(s.Value),
 		}
+	case *ast.AssignStatement:
+		// 将赋值语句转换为 let 语句
+		return &ast.LetStatement{
+			Token: s.Token,
+			Name:  s.Name,
+			Value: desugarExpression(s.Value),
+		}
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{
 			Token:       s.Token,

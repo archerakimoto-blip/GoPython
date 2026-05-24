@@ -1,5 +1,5 @@
 
-let x = 5
-let y = 3
-let z = x + y
+x = 5
+y = 3
+z = x + y
 z

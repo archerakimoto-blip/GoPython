@@ -157,6 +157,12 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseLetStatement()
 	case lexer.RETURN:
 		return p.parseReturnStatement()
+	case lexer.IDENT:
+		// 检查是否是赋值语句
+		if p.peekTokenIs(lexer.ASSIGN) {
+			return p.parseAssignStatement()
+		}
+		return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -192,6 +198,26 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	p.nextToken()
 
 	stmt.ReturnValue = p.parseExpression(LOWEST)
+
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseAssignStatement() *ast.AssignStatement {
+	stmt := &ast.AssignStatement{Token: p.curToken.Literal}
+
+	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	if !p.expectPeek(lexer.ASSIGN) {
+		return nil
+	}
+
+	p.nextToken()
+
+	stmt.Value = p.parseExpression(LOWEST)
 
 	if p.peekTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
