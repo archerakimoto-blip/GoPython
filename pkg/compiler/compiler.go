@@ -229,6 +229,289 @@ func (c *Compiler) registerBuiltins() {
 	nextIndex := len(c.constants)
 	c.constants = append(c.constants, nextBuiltin)
 	c.symbolTable.DefineBuiltin("next", nextIndex)
+
+	typeBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("type() takes exactly 1 argument")
+			}
+			return &objects.String{Value: string(args[0].Type())}
+		},
+	}
+	typeIndex := len(c.constants)
+	c.constants = append(c.constants, typeBuiltin)
+	c.symbolTable.DefineBuiltin("type", typeIndex)
+
+	strBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("str() takes exactly 1 argument")
+			}
+			return &objects.String{Value: args[0].Inspect()}
+		},
+	}
+	strIndex := len(c.constants)
+	c.constants = append(c.constants, strBuiltin)
+	c.symbolTable.DefineBuiltin("str", strIndex)
+
+	intBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("int() takes exactly 1 argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.Integer:
+				return arg
+			case *objects.Float:
+				return &objects.Integer{Value: int64(arg.Value)}
+			case *objects.String:
+				var val int64
+				_, err := fmt.Sscanf(arg.Value, "%d", &val)
+				if err != nil {
+					return objects.NewError("cannot convert string '%s' to int", arg.Value)
+				}
+				return &objects.Integer{Value: val}
+			case *objects.Boolean:
+				if arg.Value {
+					return &objects.Integer{Value: 1}
+				}
+				return &objects.Integer{Value: 0}
+			default:
+				return objects.NewError("cannot convert %s to int", arg.Type())
+			}
+		},
+	}
+	intIndex := len(c.constants)
+	c.constants = append(c.constants, intBuiltin)
+	c.symbolTable.DefineBuiltin("int", intIndex)
+
+	floatBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("float() takes exactly 1 argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.Float:
+				return arg
+			case *objects.Integer:
+				return &objects.Float{Value: float64(arg.Value)}
+			case *objects.String:
+				var val float64
+				_, err := fmt.Sscanf(arg.Value, "%f", &val)
+				if err != nil {
+					return objects.NewError("cannot convert string '%s' to float", arg.Value)
+				}
+				return &objects.Float{Value: val}
+			case *objects.Boolean:
+				if arg.Value {
+					return &objects.Float{Value: 1.0}
+				}
+				return &objects.Float{Value: 0.0}
+			default:
+				return objects.NewError("cannot convert %s to float", arg.Type())
+			}
+		},
+	}
+	floatIndex := len(c.constants)
+	c.constants = append(c.constants, floatBuiltin)
+	c.symbolTable.DefineBuiltin("float", floatIndex)
+
+	boolBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("bool() takes exactly 1 argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.Boolean:
+				return arg
+			case *objects.Integer:
+				if arg.Value != 0 {
+					return objects.True
+				}
+				return objects.False
+			case *objects.Float:
+				if arg.Value != 0 {
+					return objects.True
+				}
+				return objects.False
+			case *objects.String:
+				if arg.Value != "" {
+					return objects.True
+				}
+				return objects.False
+			case *objects.List:
+				if len(arg.Elements) > 0 {
+					return objects.True
+				}
+				return objects.False
+			case *objects.Dict:
+				if len(arg.Pairs) > 0 {
+					return objects.True
+				}
+				return objects.False
+			case *objects.None:
+				return objects.False
+			default:
+				return objects.True
+			}
+		},
+	}
+	boolIndex := len(c.constants)
+	c.constants = append(c.constants, boolBuiltin)
+	c.symbolTable.DefineBuiltin("bool", boolIndex)
+
+	absBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("abs() takes exactly 1 argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.Integer:
+				if arg.Value < 0 {
+					return &objects.Integer{Value: -arg.Value}
+				}
+				return arg
+			case *objects.Float:
+				if arg.Value < 0 {
+					return &objects.Float{Value: -arg.Value}
+				}
+				return arg
+			default:
+				return objects.NewError("abs() argument must be a number")
+			}
+		},
+	}
+	absIndex := len(c.constants)
+	c.constants = append(c.constants, absBuiltin)
+	c.symbolTable.DefineBuiltin("abs", absIndex)
+
+	rangeBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 || len(args) > 3 {
+				return objects.NewError("range() takes 1 to 3 arguments")
+			}
+			var start, stop, step int64 = 0, 0, 1
+			if len(args) == 1 {
+				stopArg, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() argument must be an integer")
+				}
+				stop = stopArg.Value
+			} else if len(args) == 2 {
+				startArg, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() start argument must be an integer")
+				}
+				stopArg, ok := args[1].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() stop argument must be an integer")
+				}
+				start = startArg.Value
+				stop = stopArg.Value
+			} else {
+				startArg, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() start argument must be an integer")
+				}
+				stopArg, ok := args[1].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() stop argument must be an integer")
+				}
+				stepArg, ok := args[2].(*objects.Integer)
+				if !ok {
+					return objects.NewError("range() step argument must be an integer")
+				}
+				start = startArg.Value
+				stop = stopArg.Value
+				step = stepArg.Value
+				if step == 0 {
+					return objects.NewError("range() step cannot be zero")
+				}
+			}
+			elements := []objects.Object{}
+			if step > 0 {
+				for i := start; i < stop; i += step {
+					elements = append(elements, &objects.Integer{Value: i})
+				}
+			} else {
+				for i := start; i > stop; i += step {
+					elements = append(elements, &objects.Integer{Value: i})
+				}
+			}
+			return &objects.List{Elements: elements}
+		},
+	}
+	rangeIndex := len(c.constants)
+	c.constants = append(c.constants, rangeBuiltin)
+	c.symbolTable.DefineBuiltin("range", rangeIndex)
+
+	minBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("min() takes at least 1 argument")
+			}
+			var minVal *objects.Integer
+			for _, arg := range args {
+				intVal, ok := arg.(*objects.Integer)
+				if !ok {
+					return objects.NewError("min() arguments must be integers")
+				}
+				if minVal == nil || intVal.Value < minVal.Value {
+					minVal = intVal
+				}
+			}
+			return minVal
+		},
+	}
+	minIndex := len(c.constants)
+	c.constants = append(c.constants, minBuiltin)
+	c.symbolTable.DefineBuiltin("min", minIndex)
+
+	maxBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("max() takes at least 1 argument")
+			}
+			var maxVal *objects.Integer
+			for _, arg := range args {
+				intVal, ok := arg.(*objects.Integer)
+				if !ok {
+					return objects.NewError("max() arguments must be integers")
+				}
+				if maxVal == nil || intVal.Value > maxVal.Value {
+					maxVal = intVal
+				}
+			}
+			return maxVal
+		},
+	}
+	maxIndex := len(c.constants)
+	c.constants = append(c.constants, maxBuiltin)
+	c.symbolTable.DefineBuiltin("max", maxIndex)
+
+	sumBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("sum() takes exactly 1 argument")
+			}
+			list, ok := args[0].(*objects.List)
+			if !ok {
+				return objects.NewError("sum() argument must be a list")
+			}
+			var total int64 = 0
+			for _, elem := range list.Elements {
+				intVal, ok := elem.(*objects.Integer)
+				if !ok {
+					return objects.NewError("sum() list elements must be integers")
+				}
+				total += intVal.Value
+			}
+			return &objects.Integer{Value: total}
+		},
+	}
+	sumIndex := len(c.constants)
+	c.constants = append(c.constants, sumBuiltin)
+	c.symbolTable.DefineBuiltin("sum", sumIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {

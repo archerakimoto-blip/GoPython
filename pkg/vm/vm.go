@@ -127,7 +127,7 @@ func (vm *VM) Run() error {
 
 		switch op {
 		case compiler.OpConstant:
-			constIndex := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 			err := vm.push(vm.constants[constIndex])
 			if err != nil {
@@ -222,7 +222,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpArray:
-			numElements := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			array := vm.buildArray(vm.sp-numElements, vm.sp)
@@ -324,8 +324,8 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpBeginTry:
-		exceptCount := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
-		hasFinally := int(uint16(ins[ip+4])<<8 | uint16(ins[ip+3]))
+		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 		vm.currentFrame().ip += 4
 		tryBlockStartIP := ip + 5
 		handler := ExceptionHandler{
@@ -460,8 +460,8 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 			}
 		case compiler.OpExceptHandler:
-			typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
-			varIdx := int(uint16(ins[ip+4])<<8 | uint16(ins[ip+3]))
+			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 			vm.currentFrame().ip += 4
 
 			var exceptionType, varName string
@@ -1172,7 +1172,7 @@ func (vm *VM) findMatchingExceptHandlerFrom(startIP int, errObj objects.Object, 
 		}
 		op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
 		if op == compiler.OpExceptHandler {
-			typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+			typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+1])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+2]))
 
 			var exceptionType string
 			if typeIdx > 0 && typeIdx < len(vm.constants) {
