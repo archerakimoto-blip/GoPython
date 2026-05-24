@@ -278,6 +278,10 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Token: e.Token,
 			Pairs: desugaredPairs,
 		}
+	case *ast.ListComprehension:
+		return e
+	case *ast.DictComprehension:
+		return e
 	default:
 		return expr
 	}

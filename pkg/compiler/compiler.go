@@ -89,6 +89,22 @@ func (c *Compiler) registerBuiltins() {
 	}
 	c.symbolTable.Define("len")
 	c.constants = append(c.constants, lenBuiltin)
+
+	appendBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewError("append() takes exactly 2 arguments")
+			}
+			list, ok := args[0].(*objects.List)
+			if !ok {
+				return objects.NewError("first argument to append() must be a list")
+			}
+			list.Elements = append(list.Elements, args[1])
+			return objects.None_
+		},
+	}
+	c.symbolTable.Define("append")
+	c.constants = append(c.constants, appendBuiltin)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -277,14 +293,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
-			if node.Value == "len" {
-				c.emit(OpConstant, 0)
-				return nil
-			}
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
 
-		if symbol.Scope == GlobalScope {
+		if symbol.Scope == BuiltinScope {
+			c.emit(OpConstant, symbol.Index)
+		} else if symbol.Scope == GlobalScope {
 			c.emit(OpGetGlobal, symbol.Index)
 		} else {
 			c.emit(OpGetLocal, symbol.Index)
@@ -298,6 +312,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 		c.emit(OpArray, len(node.Elements))
+
+	case *ast.ListComprehension:
+		return c.compileListComprehension(node)
 
 	case *ast.DictLiteral:
 		keys := []ast.Expression{}
@@ -633,5 +650,133 @@ func (s *SymbolTable) defineFree(original Symbol) Symbol {
 	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, Scope: FreeScope}
 	s.store[original.Name] = symbol
 	return symbol
+}
+
+func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
+	resultVar := &ast.Identifier{Token: "_lc_result", Value: "_lc_result"}
+	iterVar := &ast.Identifier{Token: "_lc_i", Value: "_lc_i"}
+	elemVar := node.Variable
+
+	c.emit(OpConstant, c.addConstant(&objects.List{Elements: []objects.Object{}}))
+	c.Compile(&ast.AssignStatement{
+		Token: "=",
+		Name:  resultVar,
+		Value: &ast.ListLiteral{Token: "[", Elements: []ast.Expression{}},
+	})
+
+	c.Compile(&ast.AssignStatement{
+		Token: "=",
+		Name:  iterVar,
+		Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+	})
+
+	conditionPos := len(c.instructions)
+	c.Compile(&ast.InfixExpression{
+		Token:    "<",
+		Left:     iterVar,
+		Operator: "<",
+		Right: &ast.CallExpression{
+			Token:    "len",
+			Function: &ast.Identifier{Token: "len", Value: "len"},
+			Arguments: []ast.Expression{desugarExpression(node.Iterable)},
+		},
+	})
+
+	jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
+
+	c.Compile(&ast.AssignStatement{
+		Token: "=",
+		Name:  elemVar,
+		Value: &ast.IndexExpression{
+			Token: "[",
+			Left:  desugarExpression(node.Iterable),
+			Index: iterVar,
+		},
+	})
+
+	if node.Condition != nil {
+		condPos := len(c.instructions)
+		c.Compile(desugarExpression(node.Condition))
+		jumpCondNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
+
+		c.Compile(&ast.CallExpression{
+			Token:    "append",
+			Function: &ast.Identifier{Token: "append", Value: "append"},
+			Arguments: []ast.Expression{resultVar, desugarExpression(node.Element)},
+		})
+
+		condEndPos := len(c.instructions)
+		c.changeOperand(jumpCondNotTruthyPos, condEndPos)
+		_ = condPos
+	} else {
+		c.Compile(&ast.CallExpression{
+			Token:    "append",
+			Function: &ast.Identifier{Token: "append", Value: "append"},
+			Arguments: []ast.Expression{resultVar, desugarExpression(node.Element)},
+		})
+	}
+
+	c.Compile(&ast.AugAssignStatement{
+		Token:    "+=",
+		Name:     iterVar,
+		Operator: "+",
+		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
+	})
+
+	c.emit(OpJump, conditionPos)
+
+	afterLoopPos := len(c.instructions)
+	c.changeOperand(jumpNotTruthyPos, afterLoopPos)
+
+	c.Compile(resultVar)
+
+	return nil
+}
+
+func desugarExpression(expr ast.Expression) ast.Expression {
+	if expr == nil {
+		return nil
+	}
+
+	switch e := expr.(type) {
+	case *ast.IntegerLiteral:
+		return e
+	case *ast.Identifier:
+		return e
+	case *ast.InfixExpression:
+		return &ast.InfixExpression{
+			Token:    e.Token,
+			Left:     desugarExpression(e.Left),
+			Operator: e.Operator,
+			Right:    desugarExpression(e.Right),
+		}
+	case *ast.PrefixExpression:
+		return &ast.PrefixExpression{
+			Token:    e.Token,
+			Operator: e.Operator,
+			Right:    desugarExpression(e.Right),
+		}
+	case *ast.CallExpression:
+		args := make([]ast.Expression, len(e.Arguments))
+		for i, arg := range e.Arguments {
+			args[i] = desugarExpression(arg)
+		}
+		return &ast.CallExpression{
+			Token:    e.Token,
+			Function: e.Function,
+			Arguments: args,
+		}
+	case *ast.ListLiteral:
+		elements := make([]ast.Expression, len(e.Elements))
+		for i, el := range e.Elements {
+			elements[i] = desugarExpression(el)
+		}
+		return &ast.ListLiteral{
+			Token:    e.Token,
+			Elements: elements,
+		}
+	default:
+		return e
+	}
 }
 

@@ -174,6 +174,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		default:
 			return p.parseExpressionStatement()
 		}
+	case lexer.LBRACKET:
+		return p.parseExpressionStatement()
 	default:
 		// 检查是否是 break 或 continue
 		if p.curToken.Type == lexer.IDENT {
@@ -285,6 +287,11 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	stmt := &ast.ExpressionStatement{Token: p.curToken.Literal}
 
+	if p.curTokenIs(lexer.LBRACKET) {
+		stmt.Expression = p.parseListLiteral()
+		return stmt
+	}
+
 	stmt.Expression = p.parseExpression(LOWEST)
 
 	if p.peekTokenIs(lexer.SEMICOLON) {
@@ -302,7 +309,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -317,8 +324,8 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 }
 
 func (p *Parser) peekPrecedence() int {
-	if p, ok := precedences[p.peekToken.Type]; ok {
-		return p
+	if precedence, ok := precedences[p.peekToken.Type]; ok {
+		return precedence
 	}
 	return LOWEST
 }
@@ -521,8 +528,87 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseListLiteral() ast.Expression {
+	p.nextToken()
+	if p.peekTokenIs(lexer.FOR) {
+		result := p.parseListComprehension()
+		if p.curTokenIs(lexer.RBRACKET) {
+			p.nextToken()
+		} else if p.peekTokenIs(lexer.RBRACKET) {
+			p.nextToken()
+		}
+		return result
+	}
 	list := &ast.ListLiteral{Token: p.curToken.Literal}
 	list.Elements = p.parseExpressionList(lexer.RBRACKET)
+	return list
+}
+
+func (p *Parser) parseListComprehension() ast.Expression {
+	comp := &ast.ListComprehension{Token: p.curToken.Literal}
+
+	comp.Element = p.parseExpression(LOWEST)
+
+	if p.curTokenIs(lexer.FOR) {
+		p.nextToken()
+	} else if p.peekTokenIs(lexer.FOR) {
+		p.nextToken()
+		p.nextToken()
+	} else {
+		p.errors = append(p.errors, "expected FOR in list comprehension")
+		return nil
+	}
+
+	if !p.curTokenIs(lexer.IDENT) {
+		p.errors = append(p.errors, "expected IDENT after FOR")
+		return nil
+	}
+	comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	p.nextToken()
+	if !p.curTokenIs(lexer.IN) {
+		p.errors = append(p.errors, "expected IN after variable")
+		return nil
+	}
+
+	p.nextToken()
+	comp.Iterable = p.parseExpression(LOWEST)
+
+	if p.curTokenIs(lexer.RBRACKET) {
+		return comp
+	}
+
+	if p.peekTokenIs(lexer.RBRACKET) {
+		p.nextToken()
+		return comp
+	}
+
+	p.errors = append(p.errors, "expected RBRACKET at end of list comprehension")
+	return nil
+}
+
+func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) []ast.Expression {
+	list := []ast.Expression{}
+
+	if p.peekTokenIs(end) {
+		p.nextToken()
+		return list
+	}
+
+	p.nextToken()
+	exp := p.parseExpression(LOWEST)
+	if exp != nil {
+		list = append(list, exp)
+	}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		exp = p.parseExpression(LOWEST)
+		if exp != nil {
+			list = append(list, exp)
+		}
+	}
+
 	return list
 }
 
@@ -576,17 +662,20 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 		return list
 	}
 
-	p.nextToken()
 	list = append(list, p.parseExpression(LOWEST))
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
+		if p.peekTokenIs(end) {
+			p.nextToken()
+			break
+		}
 		list = append(list, p.parseExpression(LOWEST))
 	}
 
-	if !p.expectPeek(end) {
-		return nil
+	if !p.curTokenIs(end) && p.peekTokenIs(end) {
+		p.nextToken()
 	}
 
 	return list

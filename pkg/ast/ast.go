@@ -261,6 +261,61 @@ func (dl *DictLiteral) String() string {
 	return out.String()
 }
 
+type ListComprehension struct {
+	Token       string
+	Element     Expression
+	Variable    *Identifier
+	Iterable    Expression
+	Condition   Expression
+}
+
+func (lc *ListComprehension) expressionNode()      {}
+func (lc *ListComprehension) TokenLiteral() string { return lc.Token }
+func (lc *ListComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("[")
+	out.WriteString(lc.Element.String())
+	out.WriteString(" for ")
+	out.WriteString(lc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(lc.Iterable.String())
+	if lc.Condition != nil {
+		out.WriteString(" if ")
+		out.WriteString(lc.Condition.String())
+	}
+	out.WriteString("]")
+	return out.String()
+}
+
+type DictComprehension struct {
+	Token       string
+	Key         Expression
+	Value       Expression
+	Variable    *Identifier
+	Iterable    Expression
+	Condition   Expression
+}
+
+func (dc *DictComprehension) expressionNode()      {}
+func (dc *DictComprehension) TokenLiteral() string { return dc.Token }
+func (dc *DictComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("{")
+	out.WriteString(dc.Key.String())
+	out.WriteString(": ")
+	out.WriteString(dc.Value.String())
+	out.WriteString(" for ")
+	out.WriteString(dc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(dc.Iterable.String())
+	if dc.Condition != nil {
+		out.WriteString(" if ")
+		out.WriteString(dc.Condition.String())
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
 type ExpressionStatement struct {
 	Token      string
 	Expression Expression
