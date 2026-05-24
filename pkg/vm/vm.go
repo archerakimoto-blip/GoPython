@@ -31,6 +31,7 @@ type Frame struct {
 	fn          *compiler.CompiledFunction
 	ip          int
 	basePointer int
+	generator   *objects.Generator // 指向创建此帧的生成器（如果是生成器帧）
 }
 
 type VM struct {
@@ -82,13 +83,14 @@ func NewFrame(fn *compiler.CompiledFunction, basePointer int) *Frame {
 		fn:          fn,
 		ip:          -1,
 		basePointer: basePointer,
+		generator:   nil,
 	}
 }
 
 func NewFrameFromGenerator(gen *objects.Generator) *Frame {
 	fn := &compiler.CompiledFunction{
 		Instructions: gen.Instructions,
-		NumLocals:     len(gen.Locals),
+		NumLocals:    len(gen.Locals),
 	}
 	for i, val := range gen.Locals {
 		gen.Stack[gen.BasePointer+i] = val
@@ -97,6 +99,7 @@ func NewFrameFromGenerator(gen *objects.Generator) *Frame {
 		fn:          fn,
 		ip:          gen.IP,
 		basePointer: gen.BasePointer,
+		generator:   gen,
 	}
 }
 
@@ -291,6 +294,17 @@ func (vm *VM) Run() error {
 			returnValue := vm.pop()
 
 			frame := vm.popFrame()
+			
+			// 检查是否是从生成器返回
+			if len(vm.frames) > 0 && vm.sp > 0 {
+				calleeIndex := vm.sp - 1
+				if calleeIndex >= 0 {
+					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
+						gen.Done = true
+					}
+				}
+			}
+			
 			vm.sp = frame.basePointer - 1
 
 			err := vm.push(returnValue)
@@ -300,6 +314,17 @@ func (vm *VM) Run() error {
 
 		case compiler.OpReturn:
 			frame := vm.popFrame()
+			
+			// 检查是否是从生成器返回
+			if len(vm.frames) > 0 && vm.sp > 0 {
+				calleeIndex := vm.sp - 1
+				if calleeIndex >= 0 {
+					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
+						gen.Done = true
+					}
+				}
+			}
+			
 			vm.sp = frame.basePointer - 1
 
 			err := vm.push(objects.None_)
@@ -592,6 +617,34 @@ func (vm *VM) Run() error {
 				}
 			}
 		case compiler.OpYieldValue:
+			frame := vm.currentFrame()
+			// 获取要产出的值
+			yieldValue := vm.pop()
+			
+			// 找到生成器对象（它应该在 basePointer-1 位置）
+			genIndex := frame.basePointer - 1
+			if gen, ok := vm.stack[genIndex].(*objects.Generator); ok {
+				// 保存当前状态到生成器对象
+				gen.IP = frame.ip + 1
+				gen.StackPtr = vm.sp
+				gen.BasePointer = frame.basePointer
+				
+				// 保存局部变量
+				copy(gen.Locals, vm.stack[frame.basePointer:])
+				// 保存当前栈的完整状态
+				copy(gen.Stack[:vm.sp], vm.stack[:vm.sp])
+				
+				// 恢复调用者栈
+				vm.sp = genIndex
+				
+				// 弹出当前帧
+				vm.popFrame()
+				
+				// 把产出值压到调用者栈上
+				return vm.push(yieldValue)
+			}
+			
+			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
 			vm.currentFrame().ip--
 			gen := &objects.Generator{
 				Instructions: vm.currentFrame().fn.Instructions,
@@ -620,10 +673,24 @@ func (vm *VM) executeCall(numArgs int) error {
 
 	if gen, ok := calleeObj.(*objects.Generator); ok {
 		if gen.Done {
-			return vm.push(objects.None_)
+			vm.sp = vm.sp - numArgs - 1
+			return vm.push(objects.NewError("StopIteration"))
 		}
+		// 保存生成器对象引用，用于后续在栈上找到它
+		// 先移除生成器对象，后面在恢复栈后再放回去
+		genObj := vm.stack[calleeIndex]
+		vm.sp = calleeIndex
+		// 恢复生成器状态
 		frame := NewFrameFromGenerator(gen)
 		vm.pushFrame(frame)
+		// 恢复 VM 的栈到生成器保存的状态
+		copy(vm.stack[:gen.StackPtr], gen.Stack[:gen.StackPtr])
+		vm.sp = gen.StackPtr
+		// 把生成器对象放回栈上，用于后续在 OpYieldValue 或返回时找到
+		// 我们把它放在 frame.basePointer - 1 的位置，就像普通函数调用那样
+		vm.stack[calleeIndex] = genObj
+		vm.sp = calleeIndex + 1
+		// 让 Run() 继续执行
 		return nil
 	}
 

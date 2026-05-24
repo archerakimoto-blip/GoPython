@@ -221,7 +221,7 @@ func (c *Compiler) registerBuiltins() {
 				return objects.NewError("next() argument must be a generator")
 			}
 			if gen.Done {
-				return objects.None_
+				return objects.NewError("StopIteration")
 			}
 			return gen
 		},
