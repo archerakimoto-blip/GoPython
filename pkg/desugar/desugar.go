@@ -269,6 +269,13 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Left:  desugarExpression(e.Left),
 			Index: desugarExpression(e.Index),
 		}
+	case *ast.SliceExpression:
+		return &ast.SliceExpression{
+			Token: e.Token,
+			Left:  desugarExpression(e.Left),
+			Start: desugarExpression(e.Start),
+			End:   desugarExpression(e.End),
+		}
 	case *ast.DictLiteral:
 		desugaredPairs := make(map[ast.Expression]ast.Expression)
 		for key, value := range e.Pairs {
@@ -279,7 +286,7 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Pairs: desugaredPairs,
 		}
 	case *ast.ListComprehension:
-		return e
+		return desugarListComprehension(e)
 	case *ast.DictComprehension:
 		return e
 	default:
@@ -289,6 +296,17 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 
 func isComparisonOp(op string) bool {
 	return op == "==" || op == "!=" || op == "<" || op == ">"
+}
+
+func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
+	// 直接返回，让编译器来处理列表推导式
+	// 我们需要在这里脱糖子表达式
+	lc.Element = desugarExpression(lc.Element)
+	lc.Iterable = desugarExpression(lc.Iterable)
+	if lc.Condition != nil {
+		lc.Condition = desugarExpression(lc.Condition)
+	}
+	return lc
 }
 
 func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {

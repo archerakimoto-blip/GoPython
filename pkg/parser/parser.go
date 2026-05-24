@@ -42,6 +42,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.AND:      AND,
 	lexer.OR:       OR,
 	lexer.IF:       TERNARY,
+	lexer.COLON:    LOWEST - 1, // 给冒号一个极低的优先级，让 parseExpression 在遇到时停止
 }
 
 type Parser struct {
@@ -613,9 +614,55 @@ func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) 
 }
 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
-	exp := &ast.IndexExpression{Token: p.curToken.Literal, Left: left}
-
 	p.nextToken()
+
+	// Check for slice syntax first: if current or next token is :
+	if p.curTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COLON) {
+		slice := &ast.SliceExpression{Token: "[", Left: left}
+
+		// Parse start if available
+		if !p.curTokenIs(lexer.COLON) {
+			// Parse start manually, stopping at :
+			if p.curTokenIs(lexer.INT) {
+				slice.Start = p.parseIntegerLiteral()
+			} else if p.curTokenIs(lexer.IDENT) {
+				slice.Start = p.parseIdentifier()
+			} else if p.curTokenIs(lexer.STRING) {
+				slice.Start = p.parseStringLiteral()
+			} else if p.curTokenIs(lexer.LPAREN) {
+				slice.Start = p.parseGroupedExpression()
+			}
+		}
+
+		// Move to/over the colon
+		if !p.curTokenIs(lexer.COLON) {
+			p.nextToken()
+		}
+		p.nextToken()
+
+		// Parse end if available
+		if !p.curTokenIs(lexer.RBRACKET) {
+			if p.curTokenIs(lexer.INT) {
+				slice.End = p.parseIntegerLiteral()
+			} else if p.curTokenIs(lexer.IDENT) {
+				slice.End = p.parseIdentifier()
+			} else if p.curTokenIs(lexer.STRING) {
+				slice.End = p.parseStringLiteral()
+			} else if p.curTokenIs(lexer.LPAREN) {
+				slice.End = p.parseGroupedExpression()
+			}
+		}
+
+		// Expect closing ]
+		if !p.expectPeek(lexer.RBRACKET) {
+			return nil
+		}
+
+		return slice
+	}
+
+	// Normal index expression
+	exp := &ast.IndexExpression{Token: "[", Left: left}
 	exp.Index = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(lexer.RBRACKET) {

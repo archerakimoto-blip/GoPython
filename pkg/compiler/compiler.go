@@ -32,6 +32,7 @@ const (
 	OpArray
 	OpHash
 	OpIndex
+	OpSlice
 	OpCall
 	OpReturnValue
 	OpReturn
@@ -87,8 +88,9 @@ func (c *Compiler) registerBuiltins() {
 			}
 		},
 	}
-	c.symbolTable.Define("len")
+	lenIndex := len(c.constants)
 	c.constants = append(c.constants, lenBuiltin)
+	c.symbolTable.DefineBuiltin("len", lenIndex)
 
 	appendBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -103,8 +105,9 @@ func (c *Compiler) registerBuiltins() {
 			return objects.None_
 		},
 	}
-	c.symbolTable.Define("append")
+	appendIndex := len(c.constants)
 	c.constants = append(c.constants, appendBuiltin)
+	c.symbolTable.DefineBuiltin("append", appendIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -343,6 +346,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 		c.emit(OpIndex)
+	case *ast.SliceExpression:
+		err := c.Compile(node.Left)
+		if err != nil {
+			return err
+		}
+		if node.Start == nil {
+			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+		} else {
+			err = c.Compile(node.Start)
+			if err != nil {
+				return err
+			}
+		}
+		if node.End == nil {
+			// 我们用一个特殊的标记 -1 表示未指定结束
+			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: -1}))
+		} else {
+			err = c.Compile(node.End)
+			if err != nil {
+				return err
+			}
+		}
+		// 添加一个简单的操作码，让我们先定义它！
+		c.emit(OpSlice)
 
 	case *ast.FunctionLiteral:
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
@@ -586,9 +613,10 @@ func (cf *CompiledFunction) Inspect() string {
 type SymbolScope string
 
 const (
-	GlobalScope SymbolScope = "GLOBAL"
-	LocalScope  SymbolScope = "LOCAL"
-	FreeScope   SymbolScope = "FREE"
+	GlobalScope  SymbolScope = "GLOBAL"
+	LocalScope   SymbolScope = "LOCAL"
+	FreeScope    SymbolScope = "FREE"
+	BuiltinScope SymbolScope = "BUILTIN"
 )
 
 type Symbol struct {
@@ -626,6 +654,12 @@ func (s *SymbolTable) Define(name string) Symbol {
 	return symbol
 }
 
+func (s *SymbolTable) DefineBuiltin(name string, index int) Symbol {
+	symbol := Symbol{Name: name, Index: index, Scope: BuiltinScope}
+	s.store[name] = symbol
+	return symbol
+}
+
 func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 	symbol, ok := s.store[name]
 	if !ok && s.Outer != nil {
@@ -653,130 +687,132 @@ func (s *SymbolTable) defineFree(original Symbol) Symbol {
 }
 
 func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
-	resultVar := &ast.Identifier{Token: "_lc_result", Value: "_lc_result"}
-	iterVar := &ast.Identifier{Token: "_lc_i", Value: "_lc_i"}
-	elemVar := node.Variable
+	// 定义临时变量
+	resultSym := c.symbolTable.Define("_lc_result")
+	iterSym := c.symbolTable.Define("_lc_i")
+	elemSym := c.symbolTable.Define(node.Variable.Value)
 
-	c.emit(OpConstant, c.addConstant(&objects.List{Elements: []objects.Object{}}))
-	c.Compile(&ast.AssignStatement{
-		Token: "=",
-		Name:  resultVar,
-		Value: &ast.ListLiteral{Token: "[", Elements: []ast.Expression{}},
-	})
-
-	c.Compile(&ast.AssignStatement{
-		Token: "=",
-		Name:  iterVar,
-		Value: &ast.IntegerLiteral{Token: "0", Value: 0},
-	})
-
-	conditionPos := len(c.instructions)
-	c.Compile(&ast.InfixExpression{
-		Token:    "<",
-		Left:     iterVar,
-		Operator: "<",
-		Right: &ast.CallExpression{
-			Token:    "len",
-			Function: &ast.Identifier{Token: "len", Value: "len"},
-			Arguments: []ast.Expression{desugarExpression(node.Iterable)},
-		},
-	})
-
-	jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-
-	c.Compile(&ast.AssignStatement{
-		Token: "=",
-		Name:  elemVar,
-		Value: &ast.IndexExpression{
-			Token: "[",
-			Left:  desugarExpression(node.Iterable),
-			Index: iterVar,
-		},
-	})
-
-	if node.Condition != nil {
-		condPos := len(c.instructions)
-		c.Compile(desugarExpression(node.Condition))
-		jumpCondNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-
-		c.Compile(&ast.CallExpression{
-			Token:    "append",
-			Function: &ast.Identifier{Token: "append", Value: "append"},
-			Arguments: []ast.Expression{resultVar, desugarExpression(node.Element)},
-		})
-
-		condEndPos := len(c.instructions)
-		c.changeOperand(jumpCondNotTruthyPos, condEndPos)
-		_ = condPos
+	// 1. 创建空结果数组
+	c.emit(OpArray, 0)
+	if resultSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, resultSym.Index)
 	} else {
-		c.Compile(&ast.CallExpression{
-			Token:    "append",
-			Function: &ast.Identifier{Token: "append", Value: "append"},
-			Arguments: []ast.Expression{resultVar, desugarExpression(node.Element)},
-		})
+		c.emit(OpSetLocal, resultSym.Index)
 	}
 
-	c.Compile(&ast.AugAssignStatement{
-		Token:    "+=",
-		Name:     iterVar,
-		Operator: "+",
-		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
-	})
+	// 2. 初始化迭代索引为 0
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpSetLocal, iterSym.Index)
+	}
 
-	c.emit(OpJump, conditionPos)
+	// 3. 循环开始
+	loopStart := len(c.instructions)
 
-	afterLoopPos := len(c.instructions)
-	c.changeOperand(jumpNotTruthyPos, afterLoopPos)
+	// 4. 编译可迭代对象并获取其长度
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	// 使用 len
+	c.emit(OpConstant, 0)
+	c.emit(OpCall, 1)
 
-	c.Compile(resultVar)
+	// 5. i < len(iterable)
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpLessThan)
+
+	// 6. 如果条件不满足则跳出
+	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
+
+	// 7. elemVar = iterable[i]
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpIndex)
+	if elemSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, elemSym.Index)
+	} else {
+		c.emit(OpSetLocal, elemSym.Index)
+	}
+
+	// 8. 如果有条件，检查一下
+	if node.Condition != nil {
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
+
+		// 9. append 元素到结果
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit(OpConstant, 1)
+		c.emit(OpCall, 2)
+		c.emit(OpPop)
+
+		jumpAfterCondPos := len(c.instructions)
+		c.changeOperand(jumpCondPos, jumpAfterCondPos)
+	} else {
+		// 9. append 元素到结果
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit(OpConstant, 1)
+		c.emit(OpCall, 2)
+		c.emit(OpPop)
+	}
+
+	// 10. i += 1
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
+	c.emit(OpAdd)
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpSetLocal, iterSym.Index)
+	}
+
+	// 11. 跳转回循环开始
+	c.emit(OpJump, loopStart)
+
+	// 12. 设置跳出循环的跳转位置
+	loopEnd := len(c.instructions)
+	c.changeOperand(jumpEndPos, loopEnd)
+
+	// 13. 返回结果数组
+	if resultSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, resultSym.Index)
+	} else {
+		c.emit(OpGetLocal, resultSym.Index)
+	}
 
 	return nil
 }
 
-func desugarExpression(expr ast.Expression) ast.Expression {
-	if expr == nil {
-		return nil
-	}
 
-	switch e := expr.(type) {
-	case *ast.IntegerLiteral:
-		return e
-	case *ast.Identifier:
-		return e
-	case *ast.InfixExpression:
-		return &ast.InfixExpression{
-			Token:    e.Token,
-			Left:     desugarExpression(e.Left),
-			Operator: e.Operator,
-			Right:    desugarExpression(e.Right),
-		}
-	case *ast.PrefixExpression:
-		return &ast.PrefixExpression{
-			Token:    e.Token,
-			Operator: e.Operator,
-			Right:    desugarExpression(e.Right),
-		}
-	case *ast.CallExpression:
-		args := make([]ast.Expression, len(e.Arguments))
-		for i, arg := range e.Arguments {
-			args[i] = desugarExpression(arg)
-		}
-		return &ast.CallExpression{
-			Token:    e.Token,
-			Function: e.Function,
-			Arguments: args,
-		}
-	case *ast.ListLiteral:
-		elements := make([]ast.Expression, len(e.Elements))
-		for i, el := range e.Elements {
-			elements[i] = desugarExpression(el)
-		}
-		return &ast.ListLiteral{
-			Token:    e.Token,
-			Elements: elements,
-		}
-	default:
-		return e
-	}
-}
 

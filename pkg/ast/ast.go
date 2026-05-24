@@ -242,6 +242,31 @@ func (ie *IndexExpression) String() string {
 	return out.String()
 }
 
+type SliceExpression struct {
+	Token string
+	Left  Expression
+	Start Expression
+	End   Expression
+}
+
+func (se *SliceExpression) expressionNode()      {}
+func (se *SliceExpression) TokenLiteral() string { return se.Token }
+func (se *SliceExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(se.Left.String())
+	out.WriteString("[")
+	if se.Start != nil {
+		out.WriteString(se.Start.String())
+	}
+	out.WriteString(":")
+	if se.End != nil {
+		out.WriteString(se.End.String())
+	}
+	out.WriteString("])")
+	return out.String()
+}
+
 type DictLiteral struct {
 	Token string
 	Pairs map[Expression]Expression

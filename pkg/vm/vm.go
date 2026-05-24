@@ -205,6 +205,15 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+		case compiler.OpSlice:
+			end := vm.pop()
+			start := vm.pop()
+			left := vm.pop()
+
+			err := vm.executeSliceExpression(left, start, end)
+			if err != nil {
+				return err
+			}
 
 		case compiler.OpCall:
 			numArgs := int(ins[ip+1])
@@ -528,5 +537,119 @@ func (vm *VM) executeHashIndex(hash, index objects.Object) error {
 	}
 
 	return vm.push(pair)
+}
+
+func (vm *VM) executeSliceExpression(left, start, end objects.Object) error {
+	switch {
+	case left.Type() == objects.LIST_OBJ:
+		return vm.executeListSlice(left, start, end)
+	case left.Type() == objects.STRING_OBJ:
+		return vm.executeStringSlice(left, start, end)
+	default:
+		return fmt.Errorf("slice operator not supported: %s", left.Type())
+	}
+}
+
+func (vm *VM) executeListSlice(left, start, end objects.Object) error {
+	list := left.(*objects.List)
+	length := len(list.Elements)
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+		if startIdx < 0 {
+			startIdx = int64(length) + startIdx
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > int64(length) {
+			startIdx = int64(length)
+		}
+	default:
+		startIdx = 0
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		if e.Value == -1 { // 我们用 -1 表示未指定
+			endIdx = int64(length)
+		} else {
+			endIdx = e.Value
+			if endIdx < 0 {
+				endIdx = int64(length) + endIdx
+			}
+			if endIdx < 0 {
+				endIdx = 0
+			}
+			if endIdx > int64(length) {
+				endIdx = int64(length)
+			}
+		}
+	default:
+		endIdx = int64(length)
+	}
+
+	if startIdx > endIdx {
+		return vm.push(&objects.List{Elements: []objects.Object{}})
+	}
+
+	elements := make([]objects.Object, endIdx-startIdx)
+	for i := startIdx; i < endIdx; i++ {
+		elements[i-startIdx] = list.Elements[i]
+	}
+
+	return vm.push(&objects.List{Elements: elements})
+}
+
+func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
+	str := left.(*objects.String)
+	length := len(str.Value)
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+		if startIdx < 0 {
+			startIdx = int64(length) + startIdx
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > int64(length) {
+			startIdx = int64(length)
+		}
+	default:
+		startIdx = 0
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		if e.Value == -1 {
+			endIdx = int64(length)
+		} else {
+			endIdx = e.Value
+			if endIdx < 0 {
+				endIdx = int64(length) + endIdx
+			}
+			if endIdx < 0 {
+				endIdx = 0
+			}
+			if endIdx > int64(length) {
+				endIdx = int64(length)
+			}
+		}
+	default:
+		endIdx = int64(length)
+	}
+
+	if startIdx > endIdx {
+		return vm.push(&objects.String{Value: ""})
+	}
+
+	return vm.push(&objects.String{Value: str.Value[startIdx:endIdx]})
 }
 
