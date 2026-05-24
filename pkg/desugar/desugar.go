@@ -35,11 +35,25 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AssignStatement:
-		// 将赋值语句转换为 let 语句
-		return &ast.LetStatement{
+		// 保持赋值语句不变，编译器会专门处理它
+		return &ast.AssignStatement{
 			Token: s.Token,
 			Name:  s.Name,
 			Value: desugarExpression(s.Value),
+		}
+	case *ast.AugAssignStatement:
+		// 将增强赋值转换为: name = name op value
+		leftIdent := &ast.Identifier{Token: s.Name.Token, Value: s.Name.Value}
+		infixExpr := &ast.InfixExpression{
+			Token:    s.Token,
+			Left:     leftIdent,
+			Operator: s.Operator,
+			Right:    desugarExpression(s.Value),
+		}
+		return &ast.AssignStatement{
+			Token: s.Token,
+			Name:  s.Name,
+			Value: infixExpr,
 		}
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{

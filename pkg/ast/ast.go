@@ -328,3 +328,22 @@ func (as *AssignStatement) String() string {
 	return out.String()
 }
 
+type AugAssignStatement struct {
+	Token    string
+	Name     *Identifier
+	Operator string
+	Value    Expression
+}
+
+func (aas *AugAssignStatement) statementNode()       {}
+func (aas *AugAssignStatement) TokenLiteral() string { return aas.Token }
+func (aas *AugAssignStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString(aas.Name.String())
+	out.WriteString(" " + aas.Operator + " ")
+	if aas.Value != nil {
+		out.WriteString(aas.Value.String())
+	}
+	return out.String()
+}
+

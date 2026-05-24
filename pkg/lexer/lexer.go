@@ -19,6 +19,10 @@ const (
 	SLASH    = "/"
 	LT       = "<"
 	GT       = ">"
+	PLUS_EQ  = "+="
+	MINUS_EQ = "-="
+	MUL_EQ   = "*="
+	DIV_EQ   = "/="
 
 	EQ     = "=="
 	NOT_EQ = "!="
@@ -102,9 +106,37 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(ASSIGN, l.ch)
 		}
 	case '+':
-		tok = newToken(PLUS, l.ch)
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: PLUS_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(PLUS, l.ch)
+		}
 	case '-':
-		tok = newToken(MINUS, l.ch)
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: MINUS_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(MINUS, l.ch)
+		}
+	case '*':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: MUL_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(ASTERISK, l.ch)
+		}
+	case '/':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: DIV_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(SLASH, l.ch)
+		}
 	case '!':
 		if l.peekChar() == '=' {
 			ch := l.ch
@@ -113,10 +145,6 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok = newToken(BANG, l.ch)
 		}
-	case '/':
-		tok = newToken(SLASH, l.ch)
-	case '*':
-		tok = newToken(ASTERISK, l.ch)
 	case '<':
 		tok = newToken(LT, l.ch)
 	case '>':

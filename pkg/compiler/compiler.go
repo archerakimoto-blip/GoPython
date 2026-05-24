@@ -225,6 +225,25 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpSetLocal, symbol.Index)
 		}
 
+	case *ast.AssignStatement:
+		// 编译右侧表达式
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+
+		// 查找变量，如果不存在就自动定义
+		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
+		if !ok {
+			symbol = c.symbolTable.Define(node.Name.Value)
+		}
+
+		if symbol.Scope == GlobalScope {
+			c.emit(OpSetGlobal, symbol.Index)
+		} else {
+			c.emit(OpSetLocal, symbol.Index)
+		}
+
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {

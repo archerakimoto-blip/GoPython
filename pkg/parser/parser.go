@@ -158,11 +158,15 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.RETURN:
 		return p.parseReturnStatement()
 	case lexer.IDENT:
-		// 检查是否是赋值语句
-		if p.peekTokenIs(lexer.ASSIGN) {
+		// 检查是否是赋值语句或增强赋值语句
+		switch p.peekToken.Type {
+		case lexer.ASSIGN:
 			return p.parseAssignStatement()
+		case lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ:
+			return p.parseAugAssignStatement()
+		default:
+			return p.parseExpressionStatement()
 		}
-		return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -213,6 +217,35 @@ func (p *Parser) parseAssignStatement() *ast.AssignStatement {
 
 	if !p.expectPeek(lexer.ASSIGN) {
 		return nil
+	}
+
+	p.nextToken()
+
+	stmt.Value = p.parseExpression(LOWEST)
+
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
+	stmt := &ast.AugAssignStatement{Token: p.curToken.Literal}
+
+	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	// 获取运算符
+	p.nextToken()
+	switch p.curToken.Type {
+	case lexer.PLUS_EQ:
+		stmt.Operator = "+"
+	case lexer.MINUS_EQ:
+		stmt.Operator = "-"
+	case lexer.MUL_EQ:
+		stmt.Operator = "*"
+	case lexer.DIV_EQ:
+		stmt.Operator = "/"
 	}
 
 	p.nextToken()
