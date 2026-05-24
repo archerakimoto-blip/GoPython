@@ -11,6 +11,7 @@ const (
 	STRING_OBJ       ObjectType = "STRING"
 	NONE_OBJ         ObjectType = "NONE"
 	LIST_OBJ         ObjectType = "LIST"
+	SET_OBJ          ObjectType = "SET"
 	DICT_OBJ         ObjectType = "DICT"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
 	BUILTIN_OBJ      ObjectType = "BUILTIN"
@@ -72,6 +73,23 @@ func (l *List) Inspect() string {
 	return result
 }
 
+type Set struct {
+	Elements []Object
+}
+
+func (s *Set) Type() ObjectType { return SET_OBJ }
+func (s *Set) Inspect() string {
+	result := "{"
+	for i, el := range s.Elements {
+		if i > 0 {
+			result += ", "
+		}
+		result += el.Inspect()
+	}
+	result += "}"
+	return result
+}
+
 type Dict struct {
 	Pairs map[Object]Object
 }
@@ -115,5 +133,27 @@ var (
 
 func NewError(format string, a ...interface{}) *Error {
 	return &Error{Message: fmt.Sprintf(format, a...)}
+}
+
+func Equal(a, b Object) bool {
+	if a.Type() != b.Type() {
+		return false
+	}
+	switch a := a.(type) {
+	case *Integer:
+		b := b.(*Integer)
+		return a.Value == b.Value
+	case *Float:
+		b := b.(*Float)
+		return a.Value == b.Value
+	case *String:
+		b := b.(*String)
+		return a.Value == b.Value
+	case *Boolean:
+		b := b.(*Boolean)
+		return a.Value == b.Value
+	default:
+		return false
+	}
 }
 

@@ -524,3 +524,48 @@ func (cs *ContinueStatement) String() string {
 	return "continue"
 }
 
+type SetLiteral struct {
+	Token    string
+	Elements []Expression
+}
+
+func (sl *SetLiteral) expressionNode()      {}
+func (sl *SetLiteral) TokenLiteral() string { return sl.Token }
+func (sl *SetLiteral) String() string {
+	var out bytes.Buffer
+	elements := []string{}
+	for _, el := range sl.Elements {
+		elements = append(elements, el.String())
+	}
+	out.WriteString("{")
+	out.WriteString(strings.Join(elements, ", "))
+	out.WriteString("}")
+	return out.String()
+}
+
+type SetComprehension struct {
+	Token     string
+	Element   Expression
+	Variable  *Identifier
+	Iterable  Expression
+	Condition Expression
+}
+
+func (sc *SetComprehension) expressionNode()      {}
+func (sc *SetComprehension) TokenLiteral() string { return "{" }
+func (sc *SetComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("{")
+	out.WriteString(sc.Element.String())
+	out.WriteString(" for ")
+	out.WriteString(sc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(sc.Iterable.String())
+	if sc.Condition != nil {
+		out.WriteString(" if ")
+		out.WriteString(sc.Condition.String())
+	}
+	out.WriteString("}")
+	return out.String()
+}
+

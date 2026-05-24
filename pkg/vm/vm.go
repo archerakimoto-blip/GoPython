@@ -198,6 +198,18 @@ func (vm *VM) Run() error {
 				return err
 			}
 
+		case compiler.OpSet:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+
+			set := vm.buildSet(vm.sp-numElements, vm.sp)
+			vm.sp = vm.sp - numElements
+
+			err := vm.push(set)
+			if err != nil {
+				return err
+			}
+
 		case compiler.OpIndex:
 			index := vm.pop()
 			left := vm.pop()
@@ -540,6 +552,16 @@ func (vm *VM) buildHash(startIndex, endIndex int) (objects.Object, error) {
 	}
 
 	return &objects.Dict{Pairs: hashedPairs}, nil
+}
+
+func (vm *VM) buildSet(startIndex, endIndex int) objects.Object {
+	elements := make([]objects.Object, endIndex-startIndex)
+
+	for i := startIndex; i < endIndex; i++ {
+		elements[i-startIndex] = vm.stack[i]
+	}
+
+	return &objects.Set{Elements: elements}
 }
 
 func (vm *VM) executeIndexExpression(left, index objects.Object) error {

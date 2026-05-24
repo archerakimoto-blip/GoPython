@@ -31,6 +31,7 @@ const (
 	OpSetGlobal
 	OpArray
 	OpHash
+	OpSet
 	OpIndex
 	OpSlice
 	OpCall
@@ -126,6 +127,28 @@ func (c *Compiler) registerBuiltins() {
 	setitemIndex := len(c.constants)
 	c.constants = append(c.constants, setitemBuiltin)
 	c.symbolTable.DefineBuiltin("setitem", setitemIndex)
+
+	setaddBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewError("setadd() takes exactly 2 arguments")
+			}
+			set, ok := args[0].(*objects.Set)
+			if !ok {
+				return objects.NewError("first argument to setadd() must be a set")
+			}
+			for _, el := range set.Elements {
+				if objects.Equal(el, args[1]) {
+					return objects.None_
+				}
+			}
+			set.Elements = append(set.Elements, args[1])
+			return objects.None_
+		},
+	}
+	setaddIndex := len(c.constants)
+	c.constants = append(c.constants, setaddBuiltin)
+	c.symbolTable.DefineBuiltin("setadd", setaddIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -334,8 +357,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(OpArray, len(node.Elements))
 
+	case *ast.SetLiteral:
+		for _, el := range node.Elements {
+			err := c.Compile(el)
+			if err != nil {
+				return err
+			}
+		}
+		c.emit(OpSet, len(node.Elements))
+
 	case *ast.ListComprehension:
 		return c.compileListComprehension(node)
+
+	case *ast.SetComprehension:
+		return c.compileSetComprehension(node)
 
 	case *ast.DictComprehension:
 		return c.compileDictComprehension(node)
@@ -610,6 +645,7 @@ var definitions = map[Opcode]*Definition{
 	OpSetGlobal:     {"OpSetGlobal", []int{2}},
 	OpArray:         {"OpArray", []int{2}},
 	OpHash:          {"OpHash", []int{2}},
+	OpSet:           {"OpSet", []int{2}},
 	OpIndex:         {"OpIndex", []int{}},
 	OpSlice:         {"OpSlice", []int{}},
 	OpCall:          {"OpCall", []int{1}},
@@ -941,6 +977,109 @@ func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
 	c.changeOperand(jumpEndPos, loopEnd)
 
 	// 13. 返回结果字典
+	if resultSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, resultSym.Index)
+	} else {
+		c.emit(OpGetLocal, resultSym.Index)
+	}
+
+	return nil
+}
+
+func (c *Compiler) compileSetComprehension(node *ast.SetComprehension) error {
+	resultSym := c.symbolTable.Define("_sc_result")
+	iterSym := c.symbolTable.Define("_sc_i")
+	elemSym := c.symbolTable.Define(node.Variable.Value)
+
+	c.emit(OpSet, 0)
+	c.emit(OpSetGlobal, resultSym.Index)
+
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+	c.emit(OpSetGlobal, iterSym.Index)
+
+	loopStart := len(c.instructions)
+
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpConstant, 0)
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	c.emit(OpCall, 1)
+	c.emit(OpLessThan)
+
+	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
+
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpIndex)
+	if elemSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, elemSym.Index)
+	} else {
+		c.emit(OpSetLocal, elemSym.Index)
+	}
+
+	if node.Condition != nil {
+		if err := c.Compile(node.Condition); err != nil {
+			return err
+		}
+		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
+
+		c.emit(OpConstant, 3)
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit(OpCall, 2)
+		c.emit(OpPop)
+
+		jumpAfterCondPos := len(c.instructions)
+		c.changeOperand(jumpCondPos, jumpAfterCondPos)
+	} else {
+		c.emit(OpConstant, 3)
+		if resultSym.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultSym.Index)
+		} else {
+			c.emit(OpGetLocal, resultSym.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit(OpCall, 2)
+		c.emit(OpPop)
+	}
+
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpGetLocal, iterSym.Index)
+	}
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
+	c.emit(OpAdd)
+	if iterSym.Scope == GlobalScope {
+		c.emit(OpSetGlobal, iterSym.Index)
+	} else {
+		c.emit(OpSetLocal, iterSym.Index)
+	}
+
+	c.emit(OpJump, loopStart)
+
+	loopEnd := len(c.instructions)
+	c.changeOperand(jumpEndPos, loopEnd)
+
 	if resultSym.Scope == GlobalScope {
 		c.emit(OpGetGlobal, resultSym.Index)
 	} else {

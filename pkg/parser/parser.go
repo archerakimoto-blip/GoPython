@@ -76,7 +76,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.IF, p.parseIfExpression)
 	p.registerPrefix(lexer.FUNCTION, p.parseFunctionLiteral)
 	p.registerPrefix(lexer.LBRACKET, p.parseListLiteral)
-	p.registerPrefix(lexer.LBRACE, p.parseDictLiteral)
+	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	// Register an empty prefix function for colon and ] to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
@@ -309,7 +309,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
@@ -606,7 +606,7 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	// Now, check if it's a list comprehension or a normal list
 	// Let's try to parse an expression and see if next token is FOR
 	p.nextToken()
-	firstExpr := p.parseExpression(LOWEST)
+	firstExpr := p.parseExpression(EQUALS)
 	if firstExpr == nil {
 		return nil
 	}
@@ -683,6 +683,111 @@ func (p *Parser) parseListLiteral() ast.Expression {
 func (p *Parser) parseListComprehension() ast.Expression {
 	// Keep this as a fallback, but most of the logic is now in parseListLiteral
 	return nil
+}
+
+func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
+	if p.peekTokenIs(lexer.RBRACE) {
+		p.nextToken()
+		return &ast.SetLiteral{Token: p.curToken.Literal}
+	}
+
+	firstExpr := element
+	if firstExpr == nil {
+		return nil
+	}
+
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		comp := &ast.SetComprehension{Token: p.curToken.Literal}
+		comp.Element = firstExpr
+
+		if !p.curTokenIs(lexer.FOR) {
+			p.nextToken()
+		}
+		if !p.curTokenIs(lexer.FOR) {
+			p.errors = append(p.errors, "expected FOR in set comprehension")
+			return nil
+		}
+		p.nextToken()
+
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, "expected IDENT after FOR")
+			return nil
+		}
+		comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken()
+
+		if !p.curTokenIs(lexer.IN) {
+			p.errors = append(p.errors, "expected IN after variable")
+			return nil
+		}
+		p.nextToken()
+		comp.Iterable = p.parseExpression(LOWEST)
+
+		// Parse optional IF condition
+		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+			if !p.curTokenIs(lexer.IF) {
+				p.nextToken()
+			}
+			p.nextToken() // past IF
+			comp.Condition = p.parseExpression(LOWEST)
+		}
+
+		if p.curTokenIs(lexer.RBRACE) {
+			p.nextToken()
+		} else if p.peekTokenIs(lexer.RBRACE) {
+			p.nextToken()
+		} else {
+			p.errors = append(p.errors, "expected RBRACE at end of set comprehension")
+		}
+		return comp
+	}
+
+	set := &ast.SetLiteral{Token: p.curToken.Literal}
+	elements := []ast.Expression{firstExpr}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		exp := p.parseExpression(LOWEST)
+		if exp != nil {
+			elements = append(elements, exp)
+		}
+	}
+
+	if !p.curTokenIs(lexer.RBRACE) {
+		if !p.expectPeek(lexer.RBRACE) {
+			return nil
+		}
+	} else {
+		p.nextToken()
+	}
+
+	set.Elements = elements
+	return set
+}
+
+func (p *Parser) parseBraceLiteral() ast.Expression {
+	if p.peekTokenIs(lexer.RBRACE) {
+		p.nextToken()
+		return &ast.DictLiteral{Token: p.curToken.Literal}
+	}
+
+	p.nextToken()
+
+	firstExpr := p.parseExpression(EQUALS)
+	if firstExpr == nil {
+		return nil
+	}
+
+	if p.curTokenIs(lexer.COLON) {
+		return p.parseDictLiteral()
+	}
+
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		return p.parseSetLiteral(firstExpr)
+	}
+
+	return p.parseDictLiteral()
 }
 
 func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) []ast.Expression {
