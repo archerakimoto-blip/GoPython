@@ -347,3 +347,22 @@ func (aas *AugAssignStatement) String() string {
 	return out.String()
 }
 
+type TernaryExpression struct {
+	Token       string
+	Consequence Expression
+	Condition   Expression
+	Alternative Expression
+}
+
+func (te *TernaryExpression) expressionNode()      {}
+func (te *TernaryExpression) TokenLiteral() string { return te.Token }
+func (te *TernaryExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString(te.Consequence.String())
+	out.WriteString(" if ")
+	out.WriteString(te.Condition.String())
+	out.WriteString(" else ")
+	out.WriteString(te.Alternative.String())
+	return out.String()
+}
+

@@ -98,6 +98,88 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Right:    desugarExpression(e.Right),
 		}
 	case *ast.InfixExpression:
+		// 先检查是否是链式比较（不先脱糖，保持结构）
+		if nextInfix, ok := e.Right.(*ast.InfixExpression); ok && isComparisonOp(e.Operator) && isComparisonOp(nextInfix.Operator) {
+			// 构建 a < b
+			firstComp := &ast.InfixExpression{
+				Token:    e.Token,
+				Left:     e.Left,
+				Operator: e.Operator,
+				Right:    nextInfix.Left,
+			}
+
+			// 构建 AND 表达式 (a < b) AND (b < c)
+			andExpr := &ast.InfixExpression{
+				Token:    "and",
+				Left:     firstComp,
+				Operator: "and",
+				Right:    nextInfix,
+			}
+
+			// 递归地脱糖这个 AND 表达式
+			return desugarExpression(andExpr)
+		}
+
+		// 检查是否是 AND 或 OR，特殊处理
+		if e.Operator == "and" {
+			// a AND b -> if a then b else a
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			consequence := &ast.BlockStatement{
+				Token: e.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      e.Token,
+						Expression: right,
+					},
+				},
+			}
+			alternative := &ast.BlockStatement{
+				Token: e.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      e.Token,
+						Expression: left,
+					},
+				},
+			}
+			return &ast.IfExpression{
+				Token:       e.Token,
+				Condition:   left,
+				Consequence: consequence,
+				Alternative: alternative,
+			}
+		} else if e.Operator == "or" {
+			// a OR b -> if a then a else b
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			consequence := &ast.BlockStatement{
+				Token: e.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      e.Token,
+						Expression: left,
+					},
+				},
+			}
+			alternative := &ast.BlockStatement{
+				Token: e.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      e.Token,
+						Expression: right,
+					},
+				},
+			}
+			return &ast.IfExpression{
+				Token:       e.Token,
+				Condition:   left,
+				Consequence: consequence,
+				Alternative: alternative,
+			}
+		}
+
+		// 对于其他运算符，正常脱糖
 		return &ast.InfixExpression{
 			Token:    e.Token,
 			Left:     desugarExpression(e.Left),
@@ -110,6 +192,38 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Condition:   desugarExpression(e.Condition),
 			Consequence: desugarBlockStatement(e.Consequence),
 			Alternative: desugarBlockStatement(e.Alternative),
+		}
+	case *ast.TernaryExpression:
+		// 将三元表达式转换为 IfExpression
+		// a if b else c -> if b { a } else { c }
+		consequenceBlock := &ast.BlockStatement{
+			Token: e.Token,
+			Statements: []ast.Statement{
+				&ast.ExpressionStatement{
+					Token:      e.Token,
+					Expression: desugarExpression(e.Consequence),
+				},
+			},
+		}
+
+		var alternativeBlock *ast.BlockStatement
+		if e.Alternative != nil {
+			alternativeBlock = &ast.BlockStatement{
+				Token: e.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      e.Token,
+						Expression: desugarExpression(e.Alternative),
+					},
+				},
+			}
+		}
+
+		return &ast.IfExpression{
+			Token:       e.Token,
+			Condition:   desugarExpression(e.Condition),
+			Consequence: consequenceBlock,
+			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
 		return &ast.FunctionLiteral{
@@ -155,4 +269,8 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 	default:
 		return expr
 	}
+}
+
+func isComparisonOp(op string) bool {
+	return op == "==" || op == "!=" || op == "<" || op == ">"
 }

@@ -16,6 +16,7 @@ type (
 const (
 	_ int = iota
 	LOWEST
+	TERNARY // a if b else c
 	OR
 	AND
 	EQUALS
@@ -40,6 +41,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.LBRACKET: INDEX,
 	lexer.AND:      AND,
 	lexer.OR:       OR,
+	lexer.IF:       TERNARY,
 }
 
 type Parser struct {
@@ -88,6 +90,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
+	p.registerInfix(lexer.IF, p.parseTernaryExpression)
 
 	p.nextToken()
 	p.nextToken()
@@ -566,5 +569,26 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	}
 
 	return list
+}
+
+func (p *Parser) parseTernaryExpression(consequence ast.Expression) ast.Expression {
+	exp := &ast.TernaryExpression{
+		Token:       p.curToken.Literal,
+		Consequence: consequence,
+	}
+
+	p.nextToken()
+
+	exp.Condition = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(lexer.ELSE) {
+		return nil
+	}
+
+	p.nextToken()
+
+	exp.Alternative = p.parseExpression(LOWEST)
+
+	return exp
 }
 

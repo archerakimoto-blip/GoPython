@@ -129,6 +129,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpEqual)
 		case "!=":
 			c.emit(OpNotEqual)
+		case "and", "or":
+			// 为了测试链式比较，我们暂时把 AND/OR 当作普通运算符传递给虚拟机
+			// 我们会在虚拟机里处理它们，或者用其他方法
+			// 先暂时不实现短路逻辑，直接让它们通过编译器
+			// 让我们先不处理它们，看看我们的脱糖阶段能不能处理好
+			return fmt.Errorf("unknown operator %s", node.Operator)
 		default:
 			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
