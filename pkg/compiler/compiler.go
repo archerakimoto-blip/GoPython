@@ -50,6 +50,9 @@ const (
 	OpExitContext
 	OpMakeGenerator
 	OpYieldValue
+	OpCreateClass
+	OpGetAttribute
+	OpSetAttribute
 )
 
 type EmittedInstruction struct {
@@ -957,6 +960,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(OpYieldValue)
 		return nil
+	case *ast.ClassStatement:
+		return c.compileClassStatement(node)
+	case *ast.MemberAccess:
+		return c.compileMemberAccess(node)
 	}
 
 	return nil
@@ -1063,590 +1070,68 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 	return nil
 }
 
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func (c *Compiler) Bytecode() *Bytecode {
-	return &Bytecode{
-		Instructions: c.instructions,
-		Constants:    c.constants,
-	}
-}
-
 func (c *Compiler) addConstant(obj objects.Object) int {
 	c.constants = append(c.constants, obj)
 	return len(c.constants) - 1
 }
 
-func (c *Compiler) emit(op Opcode, operands ...int) int {
-	ins := Make(op, operands...)
-	pos := c.addInstruction(ins)
-
-	c.setLastInstruction(op, pos)
-
-	return pos
-}
-
-func (c *Compiler) addInstruction(ins []byte) int {
-	posNewInstruction := len(c.instructions)
-	c.instructions = append(c.instructions, ins...)
-	return posNewInstruction
-}
-
-func (c *Compiler) setLastInstruction(op Opcode, pos int) {
-	previous := c.lastInstruction
-	c.previousInstruction = previous
-
-	last := EmittedInstruction{Opcode: op, Position: pos}
-	c.lastInstruction = last
-}
-
-func (c *Compiler) removeLastPop() {
-	c.instructions = c.instructions[:c.lastInstruction.Position]
-	c.lastInstruction = c.previousInstruction
-}
-
-func (c *Compiler) lastInstructionIs(op Opcode) bool {
-	if len(c.instructions) == 0 {
-		return false
-	}
-	return c.lastInstruction.Opcode == op
-}
-
-func (c *Compiler) replaceLastPopWithReturn() {
-	lastPos := c.lastInstruction.Position
-	c.replaceInstruction(lastPos, Make(OpReturnValue))
-	c.lastInstruction.Opcode = OpReturnValue
-}
-
-func (c *Compiler) replaceInstruction(pos int, newInstruction []byte) {
-	for i := 0; i < len(newInstruction); i++ {
-		c.instructions[pos+i] = newInstruction[i]
-	}
-}
-
-func (c *Compiler) changeOperand(opPos int, operand int) {
-	op := Opcode(c.instructions[opPos])
-	newInstruction := Make(op, operand)
-	c.replaceInstruction(opPos, newInstruction)
-}
-
-func Make(op Opcode, operands ...int) []byte {
-	def, ok := definitions[op]
-	if !ok {
-		return []byte{}
+func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
+	class := &objects.Class{
+		Name:    node.Name.Value,
+		Methods: make(map[string]objects.Object),
+		Fields:  make(map[string]objects.Object),
 	}
 
-	instructionLen := 1
-	for _, w := range def.OperandWidths {
-		instructionLen += w
-	}
-
-	instruction := make([]byte, instructionLen)
-	instruction[0] = byte(op)
-
-	offset := 1
-	for i, o := range operands {
-		width := def.OperandWidths[i]
-		switch width {
-		case 2:
-			instruction[offset] = byte(o & 0xFF)
-			instruction[offset+1] = byte((o >> 8) & 0xFF)
-		case 1:
-			instruction[offset] = byte(o & 0xFF)
+	for _, method := range node.Methods {
+		compiledFn := c.compileFunction(method)
+		if compiledFn != nil {
+			class.Methods[method.Name] = compiledFn
 		}
-		offset += width
 	}
 
-	return instruction
-}
-
-type Definition struct {
-	Name          string
-	OperandWidths []int
-}
-
-var definitions = map[Opcode]*Definition{
-	OpConstant:      {"OpConstant", []int{2}},
-	OpPop:           {"OpPop", []int{}},
-	OpAdd:           {"OpAdd", []int{}},
-	OpSub:           {"OpSub", []int{}},
-	OpMul:           {"OpMul", []int{}},
-	OpDiv:           {"OpDiv", []int{}},
-	OpTrue:          {"OpTrue", []int{}},
-	OpFalse:         {"OpFalse", []int{}},
-	OpEqual:         {"OpEqual", []int{}},
-	OpNotEqual:      {"OpNotEqual", []int{}},
-	OpGreaterThan:   {"OpGreaterThan", []int{}},
-	OpLessThan:      {"OpLessThan", []int{}},
-	OpMinus:         {"OpMinus", []int{}},
-	OpBang:          {"OpBang", []int{}},
-	OpJump:          {"OpJump", []int{2}},
-	OpJumpNotTruthy: {"OpJumpNotTruthy", []int{2}},
-	OpNull:          {"OpNull", []int{}},
-	OpGetGlobal:     {"OpGetGlobal", []int{2}},
-	OpSetGlobal:     {"OpSetGlobal", []int{2}},
-	OpArray:         {"OpArray", []int{2}},
-	OpHash:          {"OpHash", []int{2}},
-	OpSet:           {"OpSet", []int{2}},
-	OpIndex:         {"OpIndex", []int{}},
-	OpSlice:         {"OpSlice", []int{}},
-	OpCall:          {"OpCall", []int{1}},
-	OpReturnValue:   {"OpReturnValue", []int{}},
-	OpReturn:        {"OpReturn", []int{}},
-	OpGetLocal:      {"OpGetLocal", []int{1}},
-	OpSetLocal:      {"OpSetLocal", []int{1}},
-	OpBeginTry:      {"OpBeginTry", []int{2, 2}},
-	OpEndTry:        {"OpEndTry", []int{}},
-	OpRaise:         {"OpRaise", []int{}},
-	OpDupTop:        {"OpDupTop", []int{}},
-	OpExceptHandler: {"OpExceptHandler", []int{2, 2}},
-	OpFinally:       {"OpFinally", []int{2}},
-	OpYield:         {"OpYield", []int{}},
-	OpEnterContext:  {"OpEnterContext", []int{}},
-	OpExitContext:   {"OpExitContext", []int{}},
-	OpMakeGenerator: {"OpMakeGenerator", []int{}},
-	OpYieldValue:    {"OpYieldValue", []int{}},
-}
-
-type CompiledFunction struct {
-	Instructions  Instructions
-	NumLocals     int
-	NumParameters int
-	IsGenerator   bool
-}
-
-func (cf *CompiledFunction) Type() objects.ObjectType { return "COMPILED_FUNCTION" }
-func (cf *CompiledFunction) Inspect() string {
-	return fmt.Sprintf("CompiledFunction[%p]", cf)
-}
-
-type SymbolScope string
-
-const (
-	GlobalScope  SymbolScope = "GLOBAL"
-	LocalScope   SymbolScope = "LOCAL"
-	FreeScope    SymbolScope = "FREE"
-	BuiltinScope SymbolScope = "BUILTIN"
-)
-
-type Symbol struct {
-	Name  string
-	Scope SymbolScope
-	Index int
-}
-
-type SymbolTable struct {
-	Outer          *SymbolTable
-	store          map[string]Symbol
-	numDefinitions int
-	FreeSymbols    []Symbol
-}
-
-func NewSymbolTable() *SymbolTable {
-	s := make(map[string]Symbol)
-	free := []Symbol{}
-	return &SymbolTable{store: s, FreeSymbols: free}
-}
-
-func NewEnclosedSymbolTable(outer *SymbolTable) *SymbolTable {
-	s := NewSymbolTable()
-	s.Outer = outer
-	return s
-}
-
-func (s *SymbolTable) Define(name string) Symbol {
-	symbol := Symbol{Name: name, Index: s.numDefinitions, Scope: LocalScope}
-	if s.Outer == nil {
-		symbol.Scope = GlobalScope
-	}
-	s.store[name] = symbol
-	s.numDefinitions++
-	return symbol
-}
-
-func (s *SymbolTable) DefineBuiltin(name string, index int) Symbol {
-	symbol := Symbol{Name: name, Index: index, Scope: BuiltinScope}
-	s.store[name] = symbol
-	return symbol
-}
-
-func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
-	symbol, ok := s.store[name]
-	if !ok && s.Outer != nil {
-		symbol, ok = s.Outer.Resolve(name)
-		if !ok {
-			return symbol, ok
-		}
-
-		if symbol.Scope == GlobalScope {
-			return symbol, ok
-		}
-
-		free := s.defineFree(symbol)
-		return free, true
-	}
-	return symbol, ok
-}
-
-func (s *SymbolTable) defineFree(original Symbol) Symbol {
-	s.FreeSymbols = append(s.FreeSymbols, original)
-
-	symbol := Symbol{Name: original.Name, Index: len(s.FreeSymbols) - 1, Scope: FreeScope}
-	s.store[original.Name] = symbol
-	return symbol
-}
-
-func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
-	// 使用全局临时变量
-	resultSym := c.symbolTable.Define("_lc_result")
-	iterSym := c.symbolTable.Define("_lc_i")
-	elemSym := c.symbolTable.Define(node.Variable.Value)
-
-	// 1. 创建空结果数组
-	c.emit(OpArray, 0)
-	c.emit(OpSetGlobal, resultSym.Index)
-
-	// 2. 初始化迭代索引为0
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
-	c.emit(OpSetGlobal, iterSym.Index)
-
-	// 3. 循环开始
-	loopStart := len(c.instructions)
-
-	// 5. 先 push i
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	// 4. 编译可迭代对象并获取其长度: 先 push len builtin，再 push iterable
-	c.emit(OpConstant, 0) // len builtin
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	c.emit(OpCall, 1)
-	// 现在栈上是 [i, len_val]，比较 i < len_val
-	c.emit(OpLessThan)
-
-	// 6. 如果条件不满足则跳出
-	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
-
-	// 7. elemVar = iterable[i]: compile node.Iterable, push i, index, assign
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpIndex)
-	if elemSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, elemSym.Index)
-	} else {
-		c.emit(OpSetLocal, elemSym.Index)
-	}
-
-	// 8. 如果有条件，检查一下
-	if node.Condition != nil {
-		if err := c.Compile(node.Condition); err != nil {
-			return err
-		}
-		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
-
-		// 9. append 元素到结果: push append builtin, push list, push elem, call, pop
-		c.emit(OpConstant, 1)
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Element); err != nil {
-			return err
-		}
-		c.emit(OpCall, 2)
-		c.emit(OpPop)
-
-		jumpAfterCondPos := len(c.instructions)
-		c.changeOperand(jumpCondPos, jumpAfterCondPos)
-	} else {
-		// 9. append 元素到结果
-		c.emit(OpConstant, 1)
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Element); err != nil {
-			return err
-		}
-		c.emit(OpCall, 2)
-		c.emit(OpPop)
-	}
-
-	// 10. i +=1
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
-	c.emit(OpAdd)
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpSetLocal, iterSym.Index)
-	}
-
-	// 11. 跳转回循环开始
-	c.emit(OpJump, loopStart)
-
-	// 12. 设置跳出循环的跳转位置
-	loopEnd := len(c.instructions)
-	c.changeOperand(jumpEndPos, loopEnd)
-
-	// 13. 返回结果数组
-	if resultSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, resultSym.Index)
-	} else {
-		c.emit(OpGetLocal, resultSym.Index)
-	}
-
+	c.emit(OpCreateClass, c.addConstant(class))
 	return nil
 }
 
-func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
-	// 使用全局临时变量
-	resultSym := c.symbolTable.Define("_dc_result")
-	iterSym := c.symbolTable.Define("_dc_i")
-	elemSym := c.symbolTable.Define(node.Variable.Value)
+func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
+	instructions := c.instructions
+	c.instructions = []byte{}
 
-	// 1. 创建空结果字典
-	c.emit(OpHash, 0)
-	c.emit(OpSetGlobal, resultSym.Index)
+	c.enterScope()
 
-	// 2. 初始化迭代索引为0
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
-	c.emit(OpSetGlobal, iterSym.Index)
-
-	// 3. 循环开始
-	loopStart := len(c.instructions)
-
-	// 5. 先 push i
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	// 4. 编译可迭代对象并获取其长度: 先 push len builtin，再 push iterable
-	c.emit(OpConstant, 0) // len builtin
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	c.emit(OpCall, 1)
-	// 现在栈上是 [i, len_val]，比较 i < len_val
-	c.emit(OpLessThan)
-
-	// 6. 如果条件不满足则跳出
-	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
-
-	// 7. elemVar = iterable[i]: compile node.Iterable, push i, index, assign
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpIndex)
-	if elemSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, elemSym.Index)
-	} else {
-		c.emit(OpSetLocal, elemSym.Index)
+	for _, param := range fn.Parameters {
+		c.symbolTable.Define(param.Value)
 	}
 
-	// 8. 如果有条件，检查一下
-	if node.Condition != nil {
-		if err := c.Compile(node.Condition); err != nil {
-			return err
+	for _, stmt := range fn.Body.Statements {
+		if err := c.Compile(stmt); err != nil {
+			return nil
 		}
-		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
-
-		// 9. setitem(dict, key, value)
-		c.emit(OpConstant, 2) // setitem builtin index is 2 (len is 0, append is 1)
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Key); err != nil {
-			return err
-		}
-		if err := c.Compile(node.Value); err != nil {
-			return err
-		}
-		c.emit(OpCall, 3)
-		c.emit(OpPop)
-
-		jumpAfterCondPos := len(c.instructions)
-		c.changeOperand(jumpCondPos, jumpAfterCondPos)
-	} else {
-		// 9. setitem(dict, key, value)
-		c.emit(OpConstant, 2) // setitem builtin index is 2
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Key); err != nil {
-			return err
-		}
-		if err := c.Compile(node.Value); err != nil {
-			return err
-		}
-		c.emit(OpCall, 3)
-		c.emit(OpPop)
 	}
 
-	// 10. i +=1
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
-	c.emit(OpAdd)
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpSetLocal, iterSym.Index)
+	if c.lastInstruction.opcode != OpReturnValue && c.lastInstruction.opcode != OpReturn {
+		c.emit(OpReturnValue)
+		c.emit(OpNull)
 	}
 
-	// 11. 跳转回循环开始
-	c.emit(OpJump, loopStart)
+	numLocals := c.symbolTable.numDefinitions
+	free := c.symbolTable.Free
+	c.exitScope()
 
-	// 12. 设置跳出循环的跳转位置
-	loopEnd := len(c.instructions)
-	c.changeOperand(jumpEndPos, loopEnd)
+	c.instructions = append(instructions, c.instructions...)
 
-	// 13. 返回结果字典
-	if resultSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, resultSym.Index)
-	} else {
-		c.emit(OpGetLocal, resultSym.Index)
+	return &CompiledFunction{
+		Instructions:  c.instructions,
+		NumLocals:    numLocals,
+		NumParameters: len(fn.Parameters),
+		Free:         free,
 	}
-
-	return nil
 }
 
-func (c *Compiler) compileSetComprehension(node *ast.SetComprehension) error {
-	resultSym := c.symbolTable.Define("_sc_result")
-	iterSym := c.symbolTable.Define("_sc_i")
-	elemSym := c.symbolTable.Define(node.Variable.Value)
-
-	c.emit(OpSet, 0)
-	c.emit(OpSetGlobal, resultSym.Index)
-
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
-	c.emit(OpSetGlobal, iterSym.Index)
-
-	loopStart := len(c.instructions)
-
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpConstant, 0)
-	if err := c.Compile(node.Iterable); err != nil {
+func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
+	if err := c.Compile(node.Object); err != nil {
 		return err
 	}
-	c.emit(OpCall, 1)
-	c.emit(OpLessThan)
-
-	jumpEndPos := c.emit(OpJumpNotTruthy, 9999)
-
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpIndex)
-	if elemSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, elemSym.Index)
-	} else {
-		c.emit(OpSetLocal, elemSym.Index)
-	}
-
-	if node.Condition != nil {
-		if err := c.Compile(node.Condition); err != nil {
-			return err
-		}
-		jumpCondPos := c.emit(OpJumpNotTruthy, 9999)
-
-		c.emit(OpConstant, 3)
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Element); err != nil {
-			return err
-		}
-		c.emit(OpCall, 2)
-		c.emit(OpPop)
-
-		jumpAfterCondPos := len(c.instructions)
-		c.changeOperand(jumpCondPos, jumpAfterCondPos)
-	} else {
-		c.emit(OpConstant, 3)
-		if resultSym.Scope == GlobalScope {
-			c.emit(OpGetGlobal, resultSym.Index)
-		} else {
-			c.emit(OpGetLocal, resultSym.Index)
-		}
-		if err := c.Compile(node.Element); err != nil {
-			return err
-		}
-		c.emit(OpCall, 2)
-		c.emit(OpPop)
-	}
-
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpGetLocal, iterSym.Index)
-	}
-	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
-	c.emit(OpAdd)
-	if iterSym.Scope == GlobalScope {
-		c.emit(OpSetGlobal, iterSym.Index)
-	} else {
-		c.emit(OpSetLocal, iterSym.Index)
-	}
-
-	c.emit(OpJump, loopStart)
-
-	loopEnd := len(c.instructions)
-	c.changeOperand(jumpEndPos, loopEnd)
-
-	if resultSym.Scope == GlobalScope {
-		c.emit(OpGetGlobal, resultSym.Index)
-	} else {
-		c.emit(OpGetLocal, resultSym.Index)
-	}
-
+	c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Member.Value}))
 	return nil
 }
-
-
-

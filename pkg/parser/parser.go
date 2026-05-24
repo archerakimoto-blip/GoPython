@@ -44,6 +44,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.IF:       TERNARY,
 	lexer.COLON:    0,
 	lexer.AS:       LOWEST + 1,
+	lexer.DOT:     CALL,
 }
 
 type Parser struct {
@@ -179,6 +180,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseWithStatement()
 	case lexer.YIELD:
 		return p.parseYieldStatement()
+	case lexer.CLASS:
+		return p.parseClassStatement()
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
 		switch p.peekToken.Type {
@@ -399,7 +402,19 @@ func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
-	return &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	for p.peekTokenIs(lexer.DOT) {
+		p.nextToken()
+		p.nextToken()
+		member := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		ident = &ast.MemberAccess{
+			Object: ident,
+			Member: member,
+		}
+	}
+
+	return ident
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
@@ -1269,5 +1284,45 @@ func (p *Parser) parseYieldStatement() *ast.YieldStatement {
 	}
 
 	return stmt
+}
+
+func (p *Parser) parseClassStatement() ast.Statement {
+	token := p.curToken
+
+	if !p.expectPeek(lexer.IDENT) {
+		return nil
+	}
+	name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	p.nextToken()
+
+	if !p.expectPeek(lexer.LBRACE) {
+		return nil
+	}
+
+	body := p.parseBlockStatement()
+
+	if !p.expectPeek(lexer.RBRACE) {
+		return nil
+	}
+
+	methods := []*ast.FunctionLiteral{}
+	for _, stmt := range body.Statements {
+		if es, ok := stmt.(*ast.ExpressionStatement); ok {
+			if fl, ok := es.Expression.(*ast.FunctionLiteral); ok {
+				methods = append(methods, fl)
+			}
+		}
+	}
+
+	return &ast.ClassStatement{
+		Token:   token.Literal,
+		Name:    name,
+		Body:    body,
+		Methods: methods,
+	}
 }
 

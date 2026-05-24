@@ -616,6 +616,26 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+		case compiler.OpCreateClass:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			class := vm.constants[idx].(*objects.Class)
+			return vm.push(class)
+		case compiler.OpGetAttribute:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			attrName := vm.constants[idx].(*objects.String).Value
+
+			obj := vm.pop()
+			if instance, ok := obj.(*objects.Instance); ok {
+				if val, ok := instance.GetAttr(attrName); ok {
+					return vm.push(val)
+				}
+				if method, ok := instance.Class.Methods[attrName]; ok {
+					vm.push(instance)
+					return vm.push(method)
+				}
+				return vm.push(objects.None_)
+			}
+			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
 			// 获取要产出的值
@@ -670,6 +690,30 @@ func (vm *VM) Run() error {
 func (vm *VM) executeCall(numArgs int) error {
 	calleeIndex := vm.sp - 1 - numArgs
 	calleeObj := vm.stack[calleeIndex]
+
+	if classObj, ok := calleeObj.(*objects.Class); ok {
+		instance := &objects.Instance{
+			Class:  classObj,
+			Fields: make(map[string]objects.Object),
+		}
+
+		for i := 0; i < numArgs; i++ {
+			instance.Fields[fmt.Sprintf("arg%d", i)] = vm.stack[vm.sp-numArgs+i]
+		}
+
+		vm.sp = vm.sp - numArgs
+		vm.stack[vm.sp] = instance
+		vm.sp++
+
+		if initMethod, ok := classObj.Methods["__init__"]; ok {
+			if fn, ok := initMethod.(*compiler.CompiledFunction); ok {
+				frame := NewFrame(fn, instance)
+				vm.pushFrame(frame)
+			}
+		}
+
+		return nil
+	}
 
 	if gen, ok := calleeObj.(*objects.Generator); ok {
 		if gen.Done {
