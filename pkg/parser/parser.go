@@ -78,6 +78,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACKET, p.parseListLiteral)
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
+	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
 	// Register an empty prefix function for colon and ] to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RBRACKET, func() ast.Expression { return nil })
@@ -299,6 +300,45 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	}
 
 	return stmt
+}
+
+func (p *Parser) parseLambdaExpression() ast.Expression {
+	lambda := &ast.LambdaExpression{Token: p.curToken.Literal}
+
+	// 解析参数（不需要括号）
+	p.nextToken()
+
+	// 如果有参数
+	if !p.curTokenIs(lexer.COLON) {
+		// 第一个参数
+		if p.curTokenIs(lexer.IDENT) {
+			param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			lambda.Parameters = append(lambda.Parameters, param)
+
+			// 继续解析更多参数
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken() // 跳过逗号
+				p.nextToken() // 移动到下一个参数
+				param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+				lambda.Parameters = append(lambda.Parameters, param)
+			}
+		}
+
+		// 期望冒号
+		if !p.expectPeek(lexer.COLON) {
+			return nil
+		}
+	} else {
+		// 没有参数，直接到冒号
+	}
+
+	// 跳过冒号
+	p.nextToken()
+
+	// 解析函数体
+	lambda.Body = p.parseExpression(LOWEST)
+
+	return lambda
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {

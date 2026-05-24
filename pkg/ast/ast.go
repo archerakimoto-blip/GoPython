@@ -524,6 +524,50 @@ func (cs *ContinueStatement) String() string {
 	return "continue"
 }
 
+type LambdaExpression struct {
+	Token     string
+	Parameters []*Identifier
+	Body      Expression
+}
+
+func (le *LambdaExpression) expressionNode()      {}
+func (le *LambdaExpression) TokenLiteral() string { return le.Token }
+func (le *LambdaExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("lambda ")
+	params := []string{}
+	for _, p := range le.Parameters {
+		params = append(params, p.String())
+	}
+	out.WriteString(strings.Join(params, ", "))
+	out.WriteString(": ")
+	out.WriteString(le.Body.String())
+	return out.String()
+}
+
+type ChainedComparison struct {
+	Token        string
+	Left        Expression
+	Comparisons []Comparison
+}
+
+type Comparison struct {
+	Operator string
+	Right    Expression
+}
+
+func (cc *ChainedComparison) expressionNode()      {}
+func (cc *ChainedComparison) TokenLiteral() string { return cc.Token }
+func (cc *ChainedComparison) String() string {
+	var out bytes.Buffer
+	out.WriteString(cc.Left.String())
+	for _, comp := range cc.Comparisons {
+		out.WriteString(" " + comp.Operator + " ")
+		out.WriteString(comp.Right.String())
+	}
+	return out.String()
+}
+
 type SetLiteral struct {
 	Token    string
 	Elements []Expression

@@ -110,25 +110,59 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Right:    desugarExpression(e.Right),
 		}
 	case *ast.InfixExpression:
-		// 先检查是否是链式比较（不先脱糖，保持结构）
+		// 检查是否是链式比较：left 是比较表达式，operator 是比较运算符
+		if leftInfix, ok := e.Left.(*ast.InfixExpression); ok && isComparisonOp(leftInfix.Operator) && isComparisonOp(e.Operator) {
+			// a < b < c -> (a < b) AND (b < c)
+			// 提取第一个比较 a < b
+			firstComp := &ast.InfixExpression{
+				Token:    leftInfix.Token,
+				Left:     leftInfix.Left,
+				Operator: leftInfix.Operator,
+				Right:    leftInfix.Right,
+			}
+			// 第二个比较使用 leftInfix.Right 和 e.Right
+			secondComp := &ast.InfixExpression{
+				Token:    e.Token,
+				Left:     leftInfix.Right,
+				Operator: e.Operator,
+				Right:    e.Right,
+			}
+			// 构建 AND 表达式 (a < b) AND (b < c)
+			andExpr := &ast.InfixExpression{
+				Token:    "and",
+				Left:     firstComp,
+				Operator: "and",
+				Right:    secondComp,
+			}
+			// 递归地脱糖这个 AND 表达式
+			return desugarExpression(andExpr)
+		}
+
+		// 继续检查单个比较表达式后是否还有链式比较
 		if nextInfix, ok := e.Right.(*ast.InfixExpression); ok && isComparisonOp(e.Operator) && isComparisonOp(nextInfix.Operator) {
-			// 构建 a < b
+			// a < b < c -> (a < b) AND (b < c) (right-associative)
+			// 第一个比较
 			firstComp := &ast.InfixExpression{
 				Token:    e.Token,
 				Left:     e.Left,
 				Operator: e.Operator,
 				Right:    nextInfix.Left,
 			}
-
-			// 构建 AND 表达式 (a < b) AND (b < c)
+			// 第二个比较
+			secondComp := &ast.InfixExpression{
+				Token:    nextInfix.Token,
+				Left:     nextInfix.Left,
+				Operator: nextInfix.Operator,
+				Right:    nextInfix.Right,
+			}
+			// 构建 AND 表达式
 			andExpr := &ast.InfixExpression{
 				Token:    "and",
 				Left:     firstComp,
 				Operator: "and",
-				Right:    nextInfix,
+				Right:    secondComp,
 			}
-
-			// 递归地脱糖这个 AND 表达式
+			// 递归地脱糖
 			return desugarExpression(andExpr)
 		}
 
@@ -244,6 +278,12 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Parameters: e.Parameters,
 			Body:       desugarBlockStatement(e.Body),
 		}
+	case *ast.LambdaExpression:
+		return &ast.LambdaExpression{
+			Token:     e.Token,
+			Parameters: e.Parameters,
+			Body:      desugarExpression(e.Body),
+		}
 	case *ast.CallExpression:
 		desugaredArgs := make([]ast.Expression, 0, len(e.Arguments))
 		for _, arg := range e.Arguments {
@@ -316,7 +356,7 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 }
 
 func isComparisonOp(op string) bool {
-	return op == "==" || op == "!=" || op == "<" || op == ">"
+	return op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {

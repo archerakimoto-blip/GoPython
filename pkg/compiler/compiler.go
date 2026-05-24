@@ -426,6 +426,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpSlice)
 
 	case *ast.FunctionLiteral:
+		// 保存当前指令列表
+		outerInstructions := c.instructions
+		// 创建新的指令列表用于函数体
+		c.instructions = make(Instructions, 0)
+
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 
 		for _, p := range node.Parameters {
@@ -444,12 +449,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpReturn)
 		}
 
+		// 获取函数体的指令
+		fnInstructions := c.instructions
+
+		// 恢复外部符号表和指令列表
+		c.symbolTable = c.symbolTable.Outer
+		c.instructions = outerInstructions
+
 		freeSymbols := c.symbolTable.FreeSymbols
 		numLocals := c.symbolTable.numDefinitions
-		instructions := c.instructions
 
-		c.symbolTable = c.symbolTable.Outer
-
+		// 处理自由符号（需要从外部作用域获取）
 		for _, s := range freeSymbols {
 			if s.Scope == GlobalScope {
 				c.emit(OpGetGlobal, s.Index)
@@ -459,12 +469,28 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:  instructions,
+			Instructions:  fnInstructions,
 			NumLocals:     numLocals,
 			NumParameters: len(node.Parameters),
 		}
 
 		c.emit(OpConstant, c.addConstant(compiledFn))
+
+	case *ast.LambdaExpression:
+		funcLit := &ast.FunctionLiteral{
+			Token:      node.Token,
+			Parameters: node.Parameters,
+			Body: &ast.BlockStatement{
+				Token: node.Token,
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Token:      node.Token,
+						Expression: node.Body,
+					},
+				},
+			},
+		}
+		return c.Compile(funcLit)
 
 	case *ast.CallExpression:
 		err := c.Compile(node.Function)

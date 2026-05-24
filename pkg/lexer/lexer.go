@@ -54,6 +54,7 @@ const (
 	NOT      = "NOT"
 	NONE     = "NONE"
 	CLASS    = "CLASS"
+	LAMBDA   = "LAMBDA"
 )
 
 type Token struct {
@@ -77,6 +78,7 @@ var keywords = map[string]TokenType{
 	"not":    NOT,
 	"None":   NONE,
 	"class":  CLASS,
+	"lambda": LAMBDA,
 }
 
 type Lexer struct {
