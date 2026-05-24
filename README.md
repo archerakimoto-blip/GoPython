@@ -1,4 +1,3 @@
-
 # Go Python 解释器 (GoPy)
 
 一个用 Go 语言编写的高效 Python 解释器，包含 JIT 编译基础架构。
@@ -23,11 +22,13 @@
 │   ├── ast/            # 抽象语法树定义
 │   ├── lexer/          # 词法分析器
 │   ├── parser/         # 语法分析器
+│   ├── desugar/        # 语法脱糖（for/while循环转换）
 │   ├── compiler/       # 字节码编译器
 │   ├── vm/             # 虚拟机
 │   ├── objects/        # 核心对象系统
 │   └── jit/            # JIT 编译器基础架构
-├── internal/           # 内部工具和测试
+├── tests/              # 测试用例
+├── debug/              # 调试工具
 ├── test.py             # 示例测试脚本
 └── go.mod              # Go 模块定义
 ```
@@ -59,7 +60,11 @@ go build -o gopy ./cmd/gopy
 - [x] 比较运算 (==, !=, >, <)
 - [x] 变量绑定和作用域
 - [x] 函数定义和调用
-- [x] 条件语句 (if)
+- [x] 条件语句 (if/else)
+- [x] 循环语句 (for/while)
+- [x] **异常处理 (try/except/finally)**
+- [x] **上下文管理器 (with 语句)**
+- [x] **生成器 (yield 语句)**
 - [x] 基础数据结构
 - [ ] JIT 编译 (正在开发)
 - [ ] 完整 Python 语法支持
@@ -69,28 +74,74 @@ go build -o gopy ./cmd/gopy
 
 ### 简单算术
 
-```
-let a = 10
-let b = 20
+```python
+a = 10
+b = 20
 a + b
 ```
 
 ### 函数
 
-```
+```python
 def add(x, y):
-    x + y
+    return x + y
 add(5, 3)
 ```
 
 ### 条件
 
-```
-let a = 10
+```python
+a = 10
 if a > 5:
-    "greater"
+    print("greater")
 else:
-    "less"
+    print("less")
+```
+
+### 异常处理
+
+```python
+try:
+    x = 1 / 0
+except Exception as e:
+    print("Caught exception:", e)
+finally:
+    print("Always runs")
+```
+
+### 上下文管理器 (with 语句)
+
+```python
+with open("test.txt", "r") as f:
+    print("File opened:", f)
+```
+
+### 生成器 (yield 语句)
+
+```python
+def counter(n):
+    for i in range(n):
+        yield i
+
+gen = counter(3)
+print(next(gen))  # 0
+print(next(gen))  # 1
+```
+
+## 测试用例
+
+项目包含完整的测试套件：
+
+- `tests/test_try_multiline.py` - try/except 基本测试
+- `tests/test_try_finally_multiline.py` - try/except/finally 测试
+- `tests/test_with_simple.py` - with 语句测试
+- `tests/test_yield_simple.py` - 生成器基本测试
+- `debug/debug_try_except.go` - 字节码调试工具
+
+运行测试：
+
+```bash
+./gopy tests/test_try_multiline.py
 ```
 
 ## 未来计划
