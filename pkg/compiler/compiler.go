@@ -709,79 +709,69 @@ func (c *Compiler) hasYieldInBody(node ast.Node) bool {
 func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 	hasExcept := len(ts.Excepts) > 0
 	hasFinally := ts.Finally != nil
+
 	c.emit(OpBeginTry, boolToInt(hasExcept), boolToInt(hasFinally))
 
 	if err := c.Compile(ts.Body); err != nil {
 		return err
 	}
 
-	jumpAfterTry := c.emit(OpJump, 0)
+	jumpPositions := []int{}
+	if hasFinally {
+		jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
+	}
 
 	if hasExcept {
-		ex := ts.Excepts[0]
-
-		var typeIdx int
-		if ex.Type != nil {
-			if typeStr, ok := ex.Type.(*ast.Identifier); ok {
-				typeIdx = c.addConstant(&objects.String{Value: typeStr.Value})
+		for _, ex := range ts.Excepts {
+			var typeIdx int
+			if ex.Type != nil {
+				if typeStr, ok := ex.Type.(*ast.Identifier); ok {
+					typeIdx = c.addConstant(&objects.String{Value: typeStr.Value})
+				} else {
+					typeIdx = c.addConstant(&objects.String{Value: "Exception"})
+				}
 			} else {
-				typeIdx = c.addConstant(&objects.String{Value: "Exception"})
+				typeIdx = c.addConstant(&objects.String{Value: ""})
 			}
-		} else {
-			typeIdx = c.addConstant(&objects.String{Value: ""})
-		}
 
-		var varIdx int
-		var varSymbol Symbol
-		if ex.Name != nil {
-			varIdx = c.addConstant(&objects.String{Value: ex.Name.Value})
-			varSymbol = c.symbolTable.Define(ex.Name.Value)
-		} else {
-			varIdx = c.addConstant(&objects.String{Value: ""})
-		}
-
-		c.emit(OpExceptHandler, typeIdx, varIdx)
-
-		if ex.Name != nil {
-			c.emit(OpDupTop)
-			if varSymbol.Scope == GlobalScope {
-				c.emit(OpSetGlobal, varSymbol.Index)
+			var varIdx int
+			var varSymbol Symbol
+			if ex.Name != nil {
+				varIdx = c.addConstant(&objects.String{Value: ex.Name.Value})
+				varSymbol = c.symbolTable.Define(ex.Name.Value)
 			} else {
-				c.emit(OpSetLocal, varSymbol.Index)
+				varIdx = c.addConstant(&objects.String{Value: ""})
+			}
+
+			c.emit(OpExceptHandler, typeIdx, varIdx)
+
+			if ex.Name != nil {
+				c.emit(OpDupTop)
+				if varSymbol.Scope == GlobalScope {
+					c.emit(OpSetGlobal, varSymbol.Index)
+				} else {
+					c.emit(OpSetLocal, varSymbol.Index)
+				}
+			}
+
+			if err := c.Compile(ex.Body); err != nil {
+				return err
+			}
+
+			if hasFinally {
+				jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
 			}
 		}
+	}
 
-		if err := c.Compile(ex.Body); err != nil {
+	if hasFinally {
+		finallyStartPos := len(c.instructions)
+		c.emit(OpFinally, 0)
+		if err := c.Compile(ts.Finally); err != nil {
 			return err
 		}
-
-		jumpAfterExcept := c.emit(OpJump, 0)
-
-		if hasFinally {
-			finallyPos := len(c.instructions)
-			c.emit(OpFinally)
-			if err := c.Compile(ts.Finally); err != nil {
-				return err
-			}
-			endPos := len(c.instructions)
-			c.changeOperand(jumpAfterTry, finallyPos)
-			c.changeOperand(jumpAfterExcept, endPos)
-		} else {
-			endPos := len(c.instructions)
-			c.changeOperand(jumpAfterTry, endPos)
-			c.changeOperand(jumpAfterExcept, endPos)
-		}
-	} else {
-		if hasFinally {
-			finallyPos := len(c.instructions)
-			c.emit(OpFinally)
-			if err := c.Compile(ts.Finally); err != nil {
-				return err
-			}
-			c.changeOperand(jumpAfterTry, finallyPos)
-		} else {
-			endPos := len(c.instructions)
-			c.changeOperand(jumpAfterTry, endPos)
+		for _, pos := range jumpPositions {
+			c.changeOperand(pos, finallyStartPos)
 		}
 	}
 
@@ -932,7 +922,7 @@ var definitions = map[Opcode]*Definition{
 	OpRaise:         {"OpRaise", []int{}},
 	OpDupTop:        {"OpDupTop", []int{}},
 	OpExceptHandler: {"OpExceptHandler", []int{2, 2}},
-	OpFinally:       {"OpFinally", []int{}},
+	OpFinally:       {"OpFinally", []int{2}},
 	OpYield:         {"OpYield", []int{}},
 	OpEnterContext:  {"OpEnterContext", []int{}},
 	OpExitContext:   {"OpExitContext", []int{}},

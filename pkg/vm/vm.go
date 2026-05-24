@@ -21,6 +21,10 @@ type ExceptionHandler struct {
 	exceptCount     int
 	baseIP          int
 	tryBlockStartIP int
+	hasFinally      bool
+	finallyStartIP  int
+	finallyEndIP    int
+	pendingError    objects.Object
 }
 
 type Frame struct {
@@ -42,6 +46,7 @@ type VM struct {
 
 	exceptionStack []ExceptionHandler // 异常处理器栈
 	pendingError   objects.Object     // 待处理的异常
+	inFinally      bool               // 是否正在执行 finally 块
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -319,23 +324,88 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpBeginTry:
-		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+		exceptCount := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+		hasFinally := int(uint16(ins[ip+4])<<8 | uint16(ins[ip+3]))
 		vm.currentFrame().ip += 4
 		tryBlockStartIP := ip + 5
 		handler := ExceptionHandler{
 			handlerIP:       -1,
 			stackPtr:        vm.sp,
-			exceptionType:  "",
+			exceptionType:   "",
 			varName:         "",
-			handlerStartIP: -1,
+			handlerStartIP:  -1,
 			tryBlockStartIP: tryBlockStartIP,
+			hasFinally:      hasFinally == 1,
+			finallyStartIP:  -1,
+			finallyEndIP:    -1,
+			pendingError:    nil,
 		}
 		handler.exceptCount = exceptCount
 		handler.baseIP = vm.currentFrame().ip + 1
 		vm.exceptionStack = append(vm.exceptionStack, handler)
 		case compiler.OpEndTry:
 			if len(vm.exceptionStack) > 0 {
-				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+				lastIdx := len(vm.exceptionStack) - 1
+				pendingError := vm.exceptionStack[lastIdx].pendingError
+				vm.exceptionStack = vm.exceptionStack[:lastIdx]
+				vm.inFinally = false
+
+				if pendingError != nil {
+					err := vm.push(pendingError)
+					if err != nil {
+						return err
+					}
+					caught := false
+
+					for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
+						handler := vm.exceptionStack[i]
+						if handler.handlerIP == -1 {
+							continue
+						}
+
+						if handler.hasFinally {
+							vm.exceptionStack[i].pendingError = pendingError
+							vm.currentFrame().ip = handler.finallyStartIP - 1
+							caught = true
+							break
+						}
+
+						ip := handler.tryBlockStartIP
+						for ip < len(vm.currentFrame().fn.Instructions) {
+							op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
+							if op == compiler.OpExceptHandler {
+								typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+								var exceptionType string
+								if typeIdx > 0 && typeIdx < len(vm.constants) {
+									if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+										exceptionType = typeObj.Value
+									}
+								}
+								if exceptionType == "" || matchesException(pendingError, exceptionType) {
+									vm.sp = handler.stackPtr
+									if err := vm.push(pendingError); err != nil {
+										return err
+									}
+									vm.currentFrame().ip = ip + 5 - 1
+									caught = true
+								}
+								break
+							}
+							if op == compiler.OpFinally {
+								break
+							}
+							ip++
+						}
+						if caught {
+							break
+						}
+					}
+
+					if !caught {
+						vm.pendingError = pendingError
+						return fmt.Errorf("unhandled exception: %s", pendingError.Inspect())
+					}
+				}
 			}
 		case compiler.OpRaise:
 			errObj := vm.pop()
@@ -347,19 +417,35 @@ func (vm *VM) Run() error {
 					continue
 				}
 
-				// 从 tryBlockStartIP 开始向后搜索 OpExceptHandler
+				if handler.hasFinally {
+					vm.exceptionStack[i].pendingError = errObj
+					vm.currentFrame().ip = handler.finallyStartIP - 1
+					caught = true
+					break
+				}
+
 				ip := handler.tryBlockStartIP
 				for ip < len(vm.currentFrame().fn.Instructions) {
 					op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
 					if op == compiler.OpExceptHandler {
-						if handler.exceptionType == "" || matchesException(errObj, handler.exceptionType) {
+						typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+						var exceptionType string
+						if typeIdx > 0 && typeIdx < len(vm.constants) {
+							if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+								exceptionType = typeObj.Value
+							}
+						}
+						if exceptionType == "" || matchesException(errObj, exceptionType) {
 							vm.sp = handler.stackPtr
 							if err := vm.push(errObj); err != nil {
 								return err
 							}
-							vm.currentFrame().ip = handler.handlerStartIP - 1
+							vm.currentFrame().ip = ip + 5 - 1
 							caught = true
 						}
+						break
+					}
+					if op == compiler.OpFinally {
 						break
 					}
 					ip++
@@ -374,8 +460,8 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 			}
 		case compiler.OpExceptHandler:
-			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
+			typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			varIdx := int(uint16(ins[ip+4])<<8 | uint16(ins[ip+3]))
 			vm.currentFrame().ip += 4
 
 			var exceptionType, varName string
@@ -398,17 +484,52 @@ func (vm *VM) Run() error {
 					lastIdx--
 				}
 				if lastIdx >= 0 {
+					existingHandler := vm.exceptionStack[lastIdx]
 					vm.exceptionStack[lastIdx] = ExceptionHandler{
 						handlerIP:       vm.currentFrame().ip,
 						stackPtr:        vm.sp - 1,
 						exceptionType:   exceptionType,
 						varName:         varName,
 						handlerStartIP:  handlerStartIP,
-						tryBlockStartIP: vm.exceptionStack[lastIdx].tryBlockStartIP,
+						tryBlockStartIP: existingHandler.tryBlockStartIP,
+						hasFinally:      existingHandler.hasFinally,
+						finallyStartIP:  existingHandler.finallyStartIP,
+						finallyEndIP:    existingHandler.finallyEndIP,
+						pendingError:    existingHandler.pendingError,
 					}
 				}
 			}
 		case compiler.OpFinally:
+			finallyEndIP := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			vm.currentFrame().ip += 2
+
+			if len(vm.exceptionStack) > 0 {
+				lastIdx := len(vm.exceptionStack) - 1
+				for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP == -1 {
+					lastIdx--
+				}
+				if lastIdx >= 0 {
+					vm.exceptionStack[lastIdx].finallyStartIP = ip + 3
+					vm.exceptionStack[lastIdx].finallyEndIP = finallyEndIP
+				}
+			}
+
+			vm.inFinally = true
+
+			pendingError := vm.pendingError
+			vm.pendingError = nil
+
+			if pendingError != nil {
+				if len(vm.exceptionStack) > 0 {
+					lastIdx := len(vm.exceptionStack) - 1
+					for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP == -1 {
+						lastIdx--
+					}
+					if lastIdx >= 0 {
+						vm.exceptionStack[lastIdx].pendingError = pendingError
+					}
+				}
+			}
 		case compiler.OpEnterContext:
 			ctxManager := vm.pop()
 			if cm, ok := ctxManager.(*objects.ContextManager); ok {
@@ -978,32 +1099,59 @@ func matchesException(errObj objects.Object, exceptionType string) bool {
 func (vm *VM) raiseException(errObj objects.Object) bool {
 	ins := vm.currentFrame().fn.Instructions
 
-	searchStartIP := 0
 	for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
 		handler := vm.exceptionStack[i]
-		if handler.handlerIP == -1 && handler.tryBlockStartIP > 0 {
-			searchStartIP = handler.tryBlockStartIP
-			break
+		
+		if handler.tryBlockStartIP <= 0 {
+			continue
 		}
-	}
 
-	for ip := searchStartIP; ip < len(ins); ip++ {
-		op := compiler.Opcode(ins[ip])
-		if op == compiler.OpExceptHandler {
-			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-
-			var exceptionType string
-			if typeIdx > 0 && typeIdx < len(vm.constants) {
-				if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
-					exceptionType = typeObj.Value
+		foundHandler := false
+		ip := handler.tryBlockStartIP
+		
+		for ip < len(ins) {
+			op := compiler.Opcode(ins[ip])
+			if op == compiler.OpExceptHandler {
+				typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+				var exceptionType string
+				if typeIdx > 0 && typeIdx < len(vm.constants) {
+					if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+						exceptionType = typeObj.Value
+					}
 				}
+				if exceptionType == "" || matchesException(errObj, exceptionType) {
+					vm.sp = handler.stackPtr
+					if err := vm.push(errObj); err != nil {
+						return false
+					}
+					vm.currentFrame().ip = ip + 5 - 1
+					foundHandler = true
+					break
+				}
+				ip += 5
+			} else if op == compiler.OpFinally {
+				break
+			} else if op == compiler.OpJump || op == compiler.OpJumpNotTruthy {
+				ip += 3
+			} else if op == compiler.OpConstant || op == compiler.OpGetGlobal || op == compiler.OpSetGlobal || op == compiler.OpArray || op == compiler.OpHash || op == compiler.OpSet {
+				ip += 3
+			} else if op == compiler.OpCall {
+				ip += 2
+			} else if op == compiler.OpGetLocal || op == compiler.OpSetLocal {
+				ip += 2
+			} else {
+				ip++
 			}
+		}
 
-			if exceptionType == "" || vm.matchesExceptionType(errObj, exceptionType) {
-				handlerStartIP := ip + 5
-				vm.currentFrame().ip = handlerStartIP
-				return true
-			}
+		if foundHandler {
+			return true
+		}
+
+		if handler.hasFinally && handler.finallyStartIP > 0 {
+			vm.exceptionStack[i].pendingError = errObj
+			vm.currentFrame().ip = handler.finallyStartIP - 1
+			return true
 		}
 	}
 	return false
