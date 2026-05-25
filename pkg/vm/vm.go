@@ -627,7 +627,6 @@ func (vm *VM) Run() error {
 		case compiler.OpGetAttribute:
 			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			attrName := vm.constants[idx].(*objects.String).Value
-			vm.currentFrame().ip += 2
 
 			obj := vm.pop()
 			
@@ -638,34 +637,24 @@ func (vm *VM) Run() error {
 						vm.push(method)
 						continue
 					}
-					err := vm.push(val)
-					if err != nil {
-						return err
-					}
-				} else if classMethod, ok := instance.Class.Methods[attrName]; ok {
+					return vm.push(val)
+				}
+				if classMethod, ok := instance.Class.Methods[attrName]; ok {
 					vm.push(instance)
 					vm.push(classMethod)
-				} else {
-					err := vm.push(objects.None_)
-					if err != nil {
-						return err
-					}
+					continue
 				}
-			} else if module, ok := obj.(*objects.Module); ok {
-				if val, ok := module.GetAttr(attrName); ok {
-					err := vm.push(val)
-					if err != nil {
-						return err
-					}
-				} else {
-					err := vm.push(objects.None_)
-					if err != nil {
-						return err
-					}
-				}
-			} else {
-				return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
+				return vm.push(objects.None_)
 			}
+			
+			if module, ok := obj.(*objects.Module); ok {
+				if val, ok := module.GetAttr(attrName); ok {
+					return vm.push(val)
+				}
+				return vm.push(objects.None_)
+			}
+			
+			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			attrName := vm.constants[idx].(*objects.String).Value

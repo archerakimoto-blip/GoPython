@@ -1,2 +1,3 @@
-x = lambda: 5
-print(x())
+f = lambda x: x + 1
+result = f(5)
+print(result)
