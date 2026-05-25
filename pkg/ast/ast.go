@@ -423,10 +423,11 @@ func (ys *YieldStatement) String() string {
 }
 
 type ClassStatement struct {
-	Token   string
-	Name    *Identifier
-	Body    *BlockStatement
-	Methods []*FunctionLiteral
+	Token       string
+	Name        *Identifier
+	SuperClass  *Identifier
+	Body        *BlockStatement
+	Methods     []*FunctionLiteral
 }
 
 func (cs *ClassStatement) statementNode()       {}

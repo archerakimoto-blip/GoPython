@@ -54,6 +54,7 @@ const (
 	OpMakeGenerator
 	OpYieldValue
 	OpCreateClass
+	OpCreateClassWithSuper
 	OpGetAttribute
 	OpSetAttribute
 )
@@ -740,8 +741,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err != nil {
 			return err
 		}
-		if _, ok := node.Expression.(*ast.CallExpression); !ok {
-			c.emit(OpPop)
+		if fl, ok := node.Expression.(*ast.FunctionLiteral); ok {
+			if fl.Name != "" {
+				symbol := c.symbolTable.DefineFunctionName(fl.Name)
+				c.emit(OpSetLocal, symbol.Index)
+			} else {
+				c.emit(OpPop)
+			}
+		} else if _, ok := node.Expression.(*ast.CallExpression); !ok {
+			if _, ok := node.Expression.(*ast.MethodCall); !ok {
+				c.emit(OpPop)
+			}
 		}
 
 	case *ast.InfixExpression:
@@ -1329,7 +1339,19 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 		}
 	}
 
-	c.emit(OpCreateClass, c.addConstant(class))
+	// Handle inheritance
+	if node.SuperClass != nil {
+		// First, emit instruction to get the super class
+		superClassIdx, ok := c.symbolTable.Resolve(node.SuperClass.Value)
+		if ok && superClassIdx.Scope == GlobalScope {
+			c.emit(OpGetGlobal, superClassIdx.Index)
+		}
+		// Emit OpCreateClass with inheritance
+		c.emit(OpCreateClassWithSuper, c.addConstant(class))
+	} else {
+		c.emit(OpCreateClass, c.addConstant(class))
+	}
+	
 	return nil
 }
 
@@ -1381,9 +1403,7 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 		return err
 	}
 	
-	if err := c.Compile(node.Method); err != nil {
-		return err
-	}
+	c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Method.Value}))
 	
 	for _, arg := range node.Arguments {
 		if err := c.Compile(arg); err != nil {

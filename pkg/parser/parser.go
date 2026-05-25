@@ -81,9 +81,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
-	// Register an empty prefix function for colon and ] to avoid errors
+	// Register an empty prefix function for colon, semicolon, ] and RETURN to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.SEMICOLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RBRACKET, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.RETURN, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -163,6 +165,10 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 }
 
 func (p *Parser) parseStatement() ast.Statement {
+	for p.curTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+	
 	switch p.curToken.Type {
 	case lexer.LET:
 		return p.parseLetStatement()
@@ -182,6 +188,11 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseYieldStatement()
 	case lexer.CLASS:
 		return p.parseClassStatement()
+	case lexer.FUNCTION:
+		return &ast.ExpressionStatement{
+			Token:      p.curToken.Literal,
+			Expression: p.parseFunctionLiteral(),
+		}
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
 		switch p.peekToken.Type {
@@ -602,17 +613,23 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) &&
 		!p.curTokenIs(lexer.EXCEPT) && !p.curTokenIs(lexer.FINALLY) &&
-		!p.curTokenIs(lexer.ELSE) && !p.curTokenIs(lexer.FUNCTION) {
+		!p.curTokenIs(lexer.ELSE) {
+		for p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		
+		if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
+			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+			p.curTokenIs(lexer.ELSE) {
+			break
+		}
+		
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
+		} else {
+			p.nextToken()
 		}
-		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
-			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-			p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.FUNCTION) {
-			break
-		}
-		p.nextToken()
 	}
 
 	return block
@@ -633,6 +650,10 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit.Parameters = p.parseFunctionParameters()
 
 	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.LBRACE) {
 		return nil
 	}
 
@@ -1298,10 +1319,20 @@ func (p *Parser) parseClassStatement() ast.Statement {
 	}
 	name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
+	var superClass *ast.Identifier
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken()
+		if p.curTokenIs(lexer.IDENT) {
+			superClass = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		}
+		if !p.expectPeek(lexer.RPAREN) {
+			return nil
+		}
+	}
+
 	if !p.expectPeek(lexer.COLON) {
 		return nil
 	}
-	p.nextToken()
 
 	if !p.expectPeek(lexer.LBRACE) {
 		return nil
@@ -1309,8 +1340,12 @@ func (p *Parser) parseClassStatement() ast.Statement {
 
 	body := p.parseBlockStatement()
 
-	if !p.expectPeek(lexer.RBRACE) {
-		return nil
+	if !p.curTokenIs(lexer.RBRACE) {
+		if !p.expectPeek(lexer.RBRACE) {
+			return nil
+		}
+	} else {
+		p.nextToken()
 	}
 
 	methods := []*ast.FunctionLiteral{}
@@ -1323,10 +1358,11 @@ func (p *Parser) parseClassStatement() ast.Statement {
 	}
 
 	return &ast.ClassStatement{
-		Token:   token.Literal,
-		Name:    name,
-		Body:    body,
-		Methods: methods,
+		Token:       token.Literal,
+		Name:        name,
+		SuperClass:  superClass,
+		Body:        body,
+		Methods:     methods,
 	}
 }
 

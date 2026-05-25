@@ -1,0 +1,1 @@
+class Animal: {def speak(self): return "Animal speaks"} class Dog(Animal): {def speak(self): return "Woof!"} class Cat(Animal): {def speak(self): return "Meow!"} animal = Animal() dog = Dog() cat = Cat() print("Animal:", animal.speak()) print("Dog:", dog.speak()) print("Cat:", cat.speak())

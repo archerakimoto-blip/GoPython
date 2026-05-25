@@ -685,6 +685,29 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+		case compiler.OpCreateClassWithSuper:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			class := vm.constants[idx].(*objects.Class)
+			vm.currentFrame().ip += 2
+			
+			// Pop super class from stack
+			superClass := vm.pop()
+			if superClass != nil {
+				if superCls, ok := superClass.(*objects.Class); ok {
+					class.SuperClass = superCls
+					// Inherit methods from super class
+					for name, method := range superCls.Methods {
+						if _, exists := class.Methods[name]; !exists {
+							class.Methods[name] = method
+						}
+					}
+				}
+			}
+			
+			err := vm.push(class)
+			if err != nil {
+				return err
+			}
 		case compiler.OpGetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			attrName := vm.constants[idx].(*objects.String).Value
@@ -863,7 +886,7 @@ func (vm *VM) executeCall(numArgs int) error {
 	callee, ok := calleeObj.(*compiler.CompiledFunction)
 	if !ok {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
-			args := vm.stack[vm.sp-1-numArgs : vm.sp-1]
+			args := vm.stack[vm.sp-numArgs : vm.sp]
 			result := builtin.Fn(args...)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)

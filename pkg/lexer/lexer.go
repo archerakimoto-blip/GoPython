@@ -119,7 +119,8 @@ func (l *Lexer) NextToken() Token {
 	// 如果刚刚跳过了换行符，并且前一个 token 适合结束语句，就返回分号
 	if l.justSkippedNewline {
 		// 检查前一个非空白字符，判断是否应该插入分号
-		if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || l.prevNonWhiteCh == '0' || l.prevNonWhiteCh == '1' || l.prevNonWhiteCh == '2' || l.prevNonWhiteCh == '3' || l.prevNonWhiteCh == '4' || l.prevNonWhiteCh == '5' || l.prevNonWhiteCh == '6' || l.prevNonWhiteCh == '7' || l.prevNonWhiteCh == '8' || l.prevNonWhiteCh == '9' {
+		// 注意：不在冒号后插入分号，因为冒号后面通常是缩进块
+		if l.prevNonWhiteCh != ':' && (isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || l.prevNonWhiteCh == '0' || l.prevNonWhiteCh == '1' || l.prevNonWhiteCh == '2' || l.prevNonWhiteCh == '3' || l.prevNonWhiteCh == '4' || l.prevNonWhiteCh == '5' || l.prevNonWhiteCh == '6' || l.prevNonWhiteCh == '7' || l.prevNonWhiteCh == '8' || l.prevNonWhiteCh == '9') {
 			l.justSkippedNewline = false // we will use this
 			return Token{Type: SEMICOLON, Literal: ";"}
 		}
