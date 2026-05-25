@@ -357,12 +357,12 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Start: desugarExpression(e.Start),
 			End:   desugarExpression(e.End),
 		}
-	case *ast.DictLiteral:
+	case *ast.HashLiteral:
 		desugaredPairs := make(map[ast.Expression]ast.Expression)
 		for key, value := range e.Pairs {
 			desugaredPairs[desugarExpression(key)] = desugarExpression(value)
 		}
-		return &ast.DictLiteral{
+		return &ast.HashLiteral{
 			Token: e.Token,
 			Pairs: desugaredPairs,
 		}
@@ -405,8 +405,8 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	// 我们需要在这里脱糖子表达式
 	lc.Element = desugarExpression(lc.Element)
 	lc.Iterable = desugarExpression(lc.Iterable)
-	if lc.Condition != nil {
-		lc.Condition = desugarExpression(lc.Condition)
+	if lc.Filter != nil {
+		lc.Filter = desugarExpression(lc.Filter)
 	}
 	return lc
 }
@@ -429,7 +429,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 	bodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
-			Name:  forStmt.Variable,
+			Name:  forStmt.Value,
 			Value: &ast.IndexExpression{
 				Token: "[",
 				Left:  iterable,

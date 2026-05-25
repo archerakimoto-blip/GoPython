@@ -402,15 +402,27 @@ func (p *Parser) noPrefixParseFnError(t lexer.TokenType) {
 }
 
 func (p *Parser) parseIdentifier() ast.Expression {
-	ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	var ident ast.Expression = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	for p.peekTokenIs(lexer.DOT) {
 		p.nextToken()
 		p.nextToken()
 		member := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		ident = &ast.MemberAccess{
-			Object: ident,
-			Member: member,
+		
+		if p.peekTokenIs(lexer.LPAREN) {
+			p.nextToken()
+			args := p.parseExpressionList(lexer.RPAREN)
+			ident = &ast.MethodCall{
+				Token:     p.curToken.Literal,
+				Object:    ident,
+				Method:    member,
+				Arguments: args,
+			}
+		} else {
+			ident = &ast.MemberAccess{
+				Object: ident,
+				Member: member,
+			}
 		}
 	}
 
@@ -804,7 +816,7 @@ func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
 				p.nextToken()
 			}
 			p.nextToken() // past IF
-			comp.Condition = p.parseExpression(LOWEST)
+			comp.Filter = p.parseExpression(LOWEST)
 		}
 
 		if p.curTokenIs(lexer.RBRACE) {
@@ -844,7 +856,7 @@ func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
 func (p *Parser) parseBraceLiteral() ast.Expression {
 	if p.peekTokenIs(lexer.RBRACE) {
 		p.nextToken()
-		return &ast.DictLiteral{Token: p.curToken.Literal}
+		return &ast.HashLiteral{Token: p.curToken.Literal}
 	}
 
 	p.nextToken()
@@ -940,7 +952,7 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseDictLiteral() ast.Expression {
-	dict := &ast.DictLiteral{Token: p.curToken.Literal}
+	dict := &ast.HashLiteral{Token: p.curToken.Literal}
 	dict.Pairs = make(map[ast.Expression]ast.Expression)
 
 	// First check: is there a RBRACE immediately?
@@ -1034,7 +1046,7 @@ func (p *Parser) parseDictLiteral() ast.Expression {
 
 func (p *Parser) parseNormalDictLiteral() ast.Expression {
 	// Parse normal dict literal (already called p.nextToken() once to get past {)
-	dict := &ast.DictLiteral{Token: "{"}
+	dict := &ast.HashLiteral{Token: "{"}
 	dict.Pairs = make(map[ast.Expression]ast.Expression)
 	// Reset: let's make sure we parse from the start of dict again
 	// Wait, we can't easily reset, so for simplicity let's implement parseNormalDictLiteral by just parsing pairs
@@ -1140,7 +1152,7 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		p.errors = append(p.errors, "expected identifier after 'for'")
 		return nil
 	}
-	stmt.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Value = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	if !p.expectPeek(lexer.IN) {
 		return nil

@@ -76,6 +76,89 @@ type Bytecode struct {
 
 type Instructions []byte
 
+func (c *Compiler) emit(op Opcode, operands ...int) int {
+	ins := c.make(op, operands...)
+	pos := len(c.instructions)
+	c.instructions = append(c.instructions, ins...)
+	c.lastInstruction = c.previousInstruction
+	c.previousInstruction = EmittedInstruction{Opcode: op, Position: pos}
+	return pos
+}
+
+func (c *Compiler) make(op Opcode, operands ...int) []byte {
+	ins := []byte{byte(op)}
+	for _, o := range operands {
+		ins = append(ins, c.makeOperand(o)...)
+	}
+	return ins
+}
+
+func (c *Compiler) makeOperand(op int) []byte {
+	if op < 256 {
+		return []byte{byte(op)}
+	}
+	hi := byte(op >> 8)
+	lo := byte(op & 0xFF)
+	return []byte{hi, lo}
+}
+
+func (c *Compiler) lastInstructionIs(op Opcode) bool {
+	if len(c.instructions) == 0 {
+		return false
+	}
+	return c.lastInstruction.Opcode == op
+}
+
+func (c *Compiler) removeLastPop() {
+	last := c.lastInstruction
+	prev := c.previousInstruction
+
+	c.instructions = c.instructions[:last.Position]
+	c.lastInstruction = prev
+	
+	if len(c.instructions) > 0 {
+		prevPrev := EmittedInstruction{}
+		for i := len(c.instructions) - 1; i >= 0; i-- {
+			if c.instructions[i] != byte(OpPop) {
+				break
+			}
+			prevPrev.Opcode = OpPop
+			prevPrev.Position = i
+		}
+		if prevPrev.Position > 0 {
+			c.previousInstruction = prevPrev
+		}
+	}
+}
+
+func (c *Compiler) replaceLastPopWithReturn() {
+	lastPos := c.lastInstruction.Position
+	c.instructions[lastPos] = byte(OpReturnValue)
+	c.instructions = append(c.instructions, byte(OpNull))
+}
+
+func (c *Compiler) changeOperand(opPos int, operand int) {
+	oldInstruction := c.instructions[opPos]
+	c.instructions[opPos] = byte(oldInstruction)
+	c.instructions[opPos+1] = byte(operand >> 8)
+	c.instructions[opPos+2] = byte(operand & 0xFF)
+}
+
+func (c *Compiler) enterScope() {
+	c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
+}
+
+func (c *Compiler) exitScope() {
+	c.symbolTable = c.symbolTable.outer
+}
+
+func (c *Compiler) Bytecode() *Bytecode {
+	return &Bytecode{
+		Instructions: c.instructions,
+		Constants:    c.constants,
+	}
+}
+
 func New() *Compiler {
 	c := &Compiler{
 		constants:   []objects.Object{},
@@ -86,6 +169,11 @@ func New() *Compiler {
 }
 
 func (c *Compiler) registerBuiltins() {
+	mathModule := objects.CreateMathModule()
+	mathIndex := len(c.constants)
+	c.constants = append(c.constants, mathModule)
+	c.symbolTable.DefineBuiltin("math", mathIndex)
+
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) != 1 {
@@ -98,6 +186,8 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.Integer{Value: int64(len(arg.Value))}
 			case *objects.Dict:
 				return &objects.Integer{Value: int64(len(arg.Pairs))}
+			case *objects.Set:
+				return &objects.Integer{Value: int64(len(arg.Elements))}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -515,6 +605,69 @@ func (c *Compiler) registerBuiltins() {
 	sumIndex := len(c.constants)
 	c.constants = append(c.constants, sumBuiltin)
 	c.symbolTable.DefineBuiltin("sum", sumIndex)
+
+	formatBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("format() takes at least 1 argument")
+			}
+			template, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewError("format() first argument must be a string")
+			}
+			result := objects.FormatString(template.Value, args[1:]...)
+			return &objects.String{Value: result}
+		},
+	}
+	formatIndex := len(c.constants)
+	c.constants = append(c.constants, formatBuiltin)
+	c.symbolTable.DefineBuiltin("format", formatIndex)
+
+	inputBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			return &objects.String{Value: ""}
+		},
+	}
+	inputIndex := len(c.constants)
+	c.constants = append(c.constants, inputBuiltin)
+	c.symbolTable.DefineBuiltin("input", inputIndex)
+
+	roundBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 || len(args) > 2 {
+				return objects.NewError("round() takes 1 or 2 arguments")
+			}
+			arg := args[0]
+			var ndigits int64 = 0
+			if len(args) == 2 {
+				nd, ok := args[1].(*objects.Integer)
+				if !ok {
+					return objects.NewError("round() second argument must be an integer")
+				}
+				ndigits = nd.Value
+			}
+			
+			switch v := arg.(type) {
+			case *objects.Float:
+				multiplier := 1.0
+				for i := int64(0); i < ndigits; i++ {
+					multiplier *= 10.0
+				}
+				if ndigits > 0 {
+					rounded := float64(int64(v.Value*multiplier+0.5)) / multiplier
+					return &objects.Float{Value: rounded}
+				}
+				return &objects.Integer{Value: int64(v.Value + 0.5)}
+			case *objects.Integer:
+				return arg
+			default:
+				return objects.NewError("round() argument must be a number")
+			}
+		},
+	}
+	roundIndex := len(c.constants)
+	c.constants = append(c.constants, roundBuiltin)
+	c.symbolTable.DefineBuiltin("round", roundIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -741,7 +894,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.DictComprehension:
 		return c.compileDictComprehension(node)
 
-	case *ast.DictLiteral:
+	case *ast.HashLiteral:
 		keys := []ast.Expression{}
 		for k := range node.Pairs {
 			keys = append(keys, k)
@@ -819,7 +972,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		fnInstructions := c.instructions
 
 		// 恢复外部符号表和指令列表
-		c.symbolTable = c.symbolTable.Outer
+		c.symbolTable = c.symbolTable.outer
 		c.instructions = outerInstructions
 
 		freeSymbols := c.symbolTable.FreeSymbols
@@ -964,6 +1117,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return c.compileClassStatement(node)
 	case *ast.MemberAccess:
 		return c.compileMemberAccess(node)
+	case *ast.MethodCall:
+		return c.compileMethodCall(node)
 	}
 
 	return nil
@@ -1109,7 +1264,7 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 		}
 	}
 
-	if c.lastInstruction.opcode != OpReturnValue && c.lastInstruction.opcode != OpReturn {
+	if c.lastInstruction.Opcode != OpReturnValue && c.lastInstruction.Opcode != OpReturn {
 		c.emit(OpReturnValue)
 		c.emit(OpNull)
 	}
@@ -1133,5 +1288,139 @@ func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
 		return err
 	}
 	c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Member.Value}))
+	return nil
+}
+
+func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
+	if err := c.Compile(node.Object); err != nil {
+		return err
+	}
+	
+	if err := c.Compile(node.Method); err != nil {
+		return err
+	}
+	
+	for _, arg := range node.Arguments {
+		if err := c.Compile(arg); err != nil {
+			return err
+		}
+	}
+	
+	c.emit(OpCall, len(node.Arguments))
+	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
+	compilationScope := c.instructions
+	c.instructions = []byte{}
+	c.enterScope()
+
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit(OpCall, 0)
+	
+	loopStart := len(c.instructions)
+
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+
+	c.changeOperand(endPos, len(c.instructions))
+
+	c.exitScope()
+	compilationScope = append(compilationScope, c.instructions...)
+
+	c.enterScope()
+
+	if err := c.Compile(node.Element); err != nil {
+		return err
+	}
+
+	if node.Filter != nil {
+		if err := c.Compile(node.Filter); err != nil {
+			return err
+		}
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
+	}
+
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
+
+	c.exitScope()
+
+	c.instructions = append(c.instructions, compilationScope...)
+
+	return nil
+}
+
+func (c *Compiler) compileSetComprehension(node *ast.SetComprehension) error {
+	if err := c.compileListComprehension(&ast.ListComprehension{
+		Token:    node.Token,
+		Element:  node.Element,
+		Variable: node.Variable,
+		Iterable: node.Iterable,
+		Filter:  node.Filter,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
+	compilationScope := c.instructions
+	c.instructions = []byte{}
+	c.enterScope()
+
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit(OpCall, 0)
+
+	loopStart := len(c.instructions)
+
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+	c.changeOperand(endPos, len(c.instructions))
+	c.exitScope()
+
+	compilationScope = append(compilationScope, c.instructions...)
+
+	c.enterScope()
+
+	if err := c.Compile(node.Key); err != nil {
+		return err
+	}
+	if err := c.Compile(node.Value); err != nil {
+		return err
+	}
+	c.emit(OpHash, 2)
+
+	if node.Filter != nil {
+		if err := c.Compile(node.Filter); err != nil {
+			return err
+		}
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
+	}
+
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
+
+	c.exitScope()
+
+	c.instructions = append(c.instructions, compilationScope...)
+
 	return nil
 }

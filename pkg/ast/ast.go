@@ -204,14 +204,14 @@ func (ce *CallExpression) String() string {
 	return out.String()
 }
 
-type ArrayLiteral struct {
+type ListLiteral struct {
 	Token    string
 	Elements []Expression
 }
 
-func (al *ArrayLiteral) expressionNode()      {}
-func (al *ArrayLiteral) TokenLiteral() string { return al.Token }
-func (al *ArrayLiteral) String() string {
+func (al *ListLiteral) expressionNode()      {}
+func (al *ListLiteral) TokenLiteral() string { return al.Token }
+func (al *ListLiteral) String() string {
 	var out bytes.Buffer
 	elements := []string{}
 	for _, el := range al.Elements {
@@ -236,7 +236,7 @@ func (ie *IndexExpression) String() string {
 }
 
 type HashLiteral struct {
-	Token Map
+	Token string
 	Pairs map[Expression]Expression
 }
 
@@ -374,6 +374,35 @@ func (sc *SetComprehension) String() string {
 	if sc.Filter != nil {
 		out.WriteString(" if ")
 		out.WriteString(sc.Filter.String())
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
+type DictComprehension struct {
+	Token    string
+	Key      Expression
+	Value    Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (dc *DictComprehension) expressionNode()      {}
+func (dc *DictComprehension) TokenLiteral() string { return dc.Token }
+func (dc *DictComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("{")
+	out.WriteString(dc.Key.String())
+	out.WriteString(": ")
+	out.WriteString(dc.Value.String())
+	out.WriteString(" for ")
+	out.WriteString(dc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(dc.Iterable.String())
+	if dc.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(dc.Filter.String())
 	}
 	out.WriteString("}")
 	return out.String()

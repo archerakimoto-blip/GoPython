@@ -625,17 +625,47 @@ func (vm *VM) Run() error {
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
+			
 			if instance, ok := obj.(*objects.Instance); ok {
 				if val, ok := instance.GetAttr(attrName); ok {
+					if method, ok := val.(*compiler.CompiledFunction); ok {
+						vm.push(instance)
+						vm.push(method)
+						vm.currentFrame().ip += 2
+						continue
+					}
 					return vm.push(val)
 				}
-				if method, ok := instance.Class.Methods[attrName]; ok {
+				if classMethod, ok := instance.Class.Methods[attrName]; ok {
 					vm.push(instance)
-					return vm.push(method)
+					vm.push(classMethod)
+					vm.currentFrame().ip += 2
+					continue
 				}
 				return vm.push(objects.None_)
 			}
+			
+			if module, ok := obj.(*objects.Module); ok {
+				if val, ok := module.GetAttr(attrName); ok {
+					return vm.push(val)
+				}
+				return vm.push(objects.None_)
+			}
+			
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
+		case compiler.OpSetAttribute:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			attrName := vm.constants[idx].(*objects.String).Value
+			
+			value := vm.pop()
+			obj := vm.pop()
+			
+			if instance, ok := obj.(*objects.Instance); ok {
+				instance.SetAttr(attrName, value)
+				return vm.push(value)
+			}
+			
+			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
 			// 获取要产出的值
@@ -707,7 +737,7 @@ func (vm *VM) executeCall(numArgs int) error {
 
 		if initMethod, ok := classObj.Methods["__init__"]; ok {
 			if fn, ok := initMethod.(*compiler.CompiledFunction); ok {
-				frame := NewFrame(fn, instance)
+				frame := NewFrame(fn, vm.sp-numArgs)
 				vm.pushFrame(frame)
 			}
 		}

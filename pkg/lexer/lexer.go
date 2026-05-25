@@ -31,6 +31,7 @@ const (
 	COMMA     = ","
 	COLON     = ":"
 	SEMICOLON = ";"
+	DOT       = "."
 
 	LPAREN = "("
 	RPAREN = ")"
