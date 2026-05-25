@@ -22,6 +22,9 @@ func Desugar(program *ast.Program) *ast.Program {
 
 // desugarStatement 脱糖单个语句
 func desugarStatement(stmt ast.Statement) ast.Statement {
+	if stmt == nil {
+		return nil
+	}
 	switch s := stmt.(type) {
 	case *ast.ExpressionStatement:
 		return &ast.ExpressionStatement{

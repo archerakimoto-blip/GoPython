@@ -336,6 +336,10 @@ func (vm *VM) Run() error {
 
 			frame := vm.popFrame()
 			
+			if vm.framesIndex == 0 {
+				return nil
+			}
+			
 			// 检查是否是从生成器返回
 			if len(vm.frames) > 0 && vm.sp > 0 {
 				calleeIndex := vm.sp - 1
@@ -355,6 +359,10 @@ func (vm *VM) Run() error {
 
 		case compiler.OpReturn:
 			frame := vm.popFrame()
+			
+			if vm.framesIndex == 0 {
+				return nil
+			}
 			
 			// 检查是否是从生成器返回
 			if len(vm.frames) > 0 && vm.sp > 0 {

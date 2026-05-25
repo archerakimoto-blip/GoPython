@@ -431,6 +431,7 @@ type ClassStatement struct {
 }
 
 func (cs *ClassStatement) statementNode()       {}
+func (cs *ClassStatement) expressionNode()      {}
 func (cs *ClassStatement) TokenLiteral() string { return cs.Token }
 func (cs *ClassStatement) String() string {
 	var out bytes.Buffer
@@ -543,6 +544,14 @@ func (as *AugAssignStatement) TokenLiteral() string { return as.Token }
 func (as *AugAssignStatement) String() string {
 	return as.Name.String() + " " + as.Operator + "= " + as.Value.String()
 }
+
+type PassStatement struct {
+	Token string
+}
+
+func (ps *PassStatement) statementNode()       {}
+func (ps *PassStatement) TokenLiteral() string { return ps.Token }
+func (ps *PassStatement) String() string       { return ps.Token }
 
 type ReturnStatement struct {
 	Token       string

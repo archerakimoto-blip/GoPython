@@ -63,8 +63,9 @@ func (s *SymbolTable) Define(name string) Symbol {
 }
 
 func (s *SymbolTable) DefineFunctionName(name string) Symbol {
-	symbol := Symbol{Name: name, Index: 0, Scope: FunctionScope}
+	symbol := Symbol{Name: name, Index: len(s.Free) + s.numDefinitions, Scope: FunctionScope}
 	s.store[name] = symbol
+	s.numDefinitions++
 	return symbol
 }
 

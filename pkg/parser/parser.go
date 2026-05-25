@@ -81,10 +81,12 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
-	// Register an empty prefix function for colon, semicolon, ] and RETURN to avoid errors
+	// Register an empty prefix function for colon, semicolon, ], RBRACE, DOT and RETURN to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.SEMICOLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RBRACKET, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.RBRACE, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.DOT, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RETURN, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -116,13 +118,25 @@ func (p *Parser) nextToken() {
 func (p *Parser) ParseProgram() *ast.Program {
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
-
-	for !p.curTokenIs(lexer.EOF) {
+	iterations := 0
+	
+	for {
+		if p.curTokenIs(lexer.EOF) {
+			break
+		}
+		if iterations > 10000 {
+			panic("parseProgram infinite loop detected")
+		}
+		iterations++
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
+			p.nextToken()
+		} else {
+			if !p.curTokenIs(lexer.EOF) {
+				p.nextToken()
+			}
 		}
-		p.nextToken()
 	}
 
 	return program
@@ -186,6 +200,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseWithStatement()
 	case lexer.YIELD:
 		return p.parseYieldStatement()
+	case lexer.PASS:
+		return p.parsePassStatement()
 	case lexer.CLASS:
 		return p.parseClassStatement()
 	case lexer.FUNCTION:
@@ -203,6 +219,12 @@ func (p *Parser) parseStatement() ast.Statement {
 		default:
 			return p.parseExpressionStatement()
 		}
+	case lexer.ASSIGN, lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ:
+		return nil
+	case lexer.RBRACE:
+		return nil
+	case lexer.EOF:
+		return nil
 	case lexer.LBRACKET:
 		return p.parseExpressionStatement()
 	default:
@@ -248,6 +270,10 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 	}
 
 	return stmt
+}
+
+func (p *Parser) parsePassStatement() *ast.PassStatement {
+	return &ast.PassStatement{Token: p.curToken.Literal}
 }
 
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
@@ -318,6 +344,10 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	stmt := &ast.ExpressionStatement{Token: p.curToken.Literal}
 
 	stmt.Expression = p.parseExpression(LOWEST)
+	
+	if stmt.Expression == nil {
+		return nil
+	}
 
 	if p.peekTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
@@ -611,6 +641,9 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
+	// Skip the opening brace
+	p.nextToken()
+
 	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) &&
 		!p.curTokenIs(lexer.EXCEPT) && !p.curTokenIs(lexer.FINALLY) &&
 		!p.curTokenIs(lexer.ELSE) {
@@ -627,9 +660,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
-		} else {
-			p.nextToken()
 		}
+		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
+			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+			p.curTokenIs(lexer.ELSE) {
+			break
+		}
+		p.nextToken()
 	}
 
 	return block
@@ -657,7 +694,6 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		return nil
 	}
 
-	p.nextToken()
 	lit.Body = p.parseBlockStatement()
 
 	return lit
@@ -870,6 +906,13 @@ func (p *Parser) parseBraceLiteral() ast.Expression {
 	if p.peekTokenIs(lexer.RBRACE) {
 		p.nextToken()
 		return &ast.HashLiteral{Token: p.curToken.Literal}
+	}
+
+	// Check if this is an empty block (just contains pass or comments)
+	if p.peekTokenIs(lexer.PASS) {
+		// This is an empty class/function body
+		// Return a special marker that will be handled by the caller
+		return nil
 	}
 
 	p.nextToken()

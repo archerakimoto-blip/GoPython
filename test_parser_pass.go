@@ -2,14 +2,12 @@ package main
 
 import (
 	"fmt"
-
 	"github.com/go-py/go-python/pkg/lexer"
 	"github.com/go-py/go-python/pkg/parser"
 )
 
 func main() {
-	input := `class Animal:{def speak(self): return "Animal"}`
-	
+	input := `class Dog: { pass }`
 	l := lexer.New(input)
 	p := parser.New(l)
 	

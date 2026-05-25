@@ -744,7 +744,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if fl, ok := node.Expression.(*ast.FunctionLiteral); ok {
 			if fl.Name != "" {
 				symbol := c.symbolTable.DefineFunctionName(fl.Name)
-				c.emit(OpSetLocal, symbol.Index)
+				c.emit(OpSetGlobal, symbol.Index)
 			} else {
 				c.emit(OpPop)
 			}
@@ -921,7 +921,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		if symbol.Scope == BuiltinScope {
 			c.emit(OpConstant, symbol.Index)
-		} else if symbol.Scope == GlobalScope {
+		} else if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
 			c.emit(OpGetGlobal, symbol.Index)
 		} else if symbol.Scope == FreeScope {
 			c.emit1(OpGetFree, symbol.Index)
@@ -1124,6 +1124,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.emit1(OpCall, len(node.Arguments))
+
+	case *ast.PassStatement:
+		// pass is a no-op, do nothing
 
 	case *ast.ReturnStatement:
 		err := c.Compile(node.ReturnValue)
@@ -1351,6 +1354,10 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 	} else {
 		c.emit(OpCreateClass, c.addConstant(class))
 	}
+
+	// Define class name in symbol table (after OpCreateClass so stack has the value)
+	symbol := c.symbolTable.Define(node.Name.Value)
+	c.emit(OpSetGlobal, symbol.Index)
 	
 	return nil
 }
@@ -1372,8 +1379,8 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 	}
 
 	if c.lastInstruction.Opcode != OpReturnValue && c.lastInstruction.Opcode != OpReturn {
-		c.emit(OpReturnValue)
 		c.emit(OpNull)
+		c.emit(OpReturnValue)
 	}
 
 	numLocals := c.symbolTable.numDefinitions

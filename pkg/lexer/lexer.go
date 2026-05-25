@@ -63,6 +63,7 @@ const (
 	AS       = "AS"
 	WITH     = "WITH"
 	YIELD    = "YIELD"
+	PASS     = "PASS"
 )
 
 type Token struct {
@@ -92,8 +93,9 @@ var keywords = map[string]TokenType{
 	"finally": FINALLY,
 	"raise": RAISE,
 	"as": AS,
-	"with": WITH,
-	"yield": YIELD,
+	"with":   WITH,
+	"yield":  YIELD,
+	"pass":   PASS,
 }
 
 type Lexer struct {
@@ -183,6 +185,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(SEMICOLON, l.ch)
 	case ':':
 		tok = newToken(COLON, l.ch)
+	case '.':
+		tok = newToken(DOT, l.ch)
 	case ',':
 		tok = newToken(COMMA, l.ch)
 	case '(':
