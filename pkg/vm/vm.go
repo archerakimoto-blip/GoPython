@@ -718,7 +718,7 @@ func (vm *VM) Run() error {
 }
 
 func (vm *VM) executeCall(numArgs int) error {
-	calleeIndex := vm.sp - 1 - numArgs
+	calleeIndex := vm.sp - 1
 	calleeObj := vm.stack[calleeIndex]
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
@@ -771,7 +771,7 @@ func (vm *VM) executeCall(numArgs int) error {
 	callee, ok := calleeObj.(*compiler.CompiledFunction)
 	if !ok {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
-			args := vm.stack[vm.sp-numArgs : vm.sp]
+			args := vm.stack[vm.sp-1-numArgs : vm.sp-1]
 			result := builtin.Fn(args...)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)
@@ -989,8 +989,7 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		return err
 	}
 
-	err = vm.push(objects.None_)
-	return err
+	return nil
 }
 
 func (vm *VM) executeBinaryFloatOperation(op compiler.Opcode, left, right objects.Object) error {

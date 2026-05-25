@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/objects"
@@ -85,6 +86,15 @@ func (c *Compiler) emit(op Opcode, operands ...int) int {
 	return pos
 }
 
+func (c *Compiler) emit1(op Opcode, operand int) int {
+	ins := []byte{byte(op), byte(operand & 0xFF)}
+	pos := len(c.instructions)
+	c.instructions = append(c.instructions, ins...)
+	c.lastInstruction = c.previousInstruction
+	c.previousInstruction = EmittedInstruction{Opcode: op, Position: pos}
+	return pos
+}
+
 func (c *Compiler) make(op Opcode, operands ...int) []byte {
 	ins := []byte{byte(op)}
 	for _, o := range operands {
@@ -94,12 +104,13 @@ func (c *Compiler) make(op Opcode, operands ...int) []byte {
 }
 
 func (c *Compiler) makeOperand(op int) []byte {
-	if op < 256 {
-		return []byte{byte(op)}
-	}
 	hi := byte(op >> 8)
 	lo := byte(op & 0xFF)
 	return []byte{hi, lo}
+}
+
+func (c *Compiler) makeOperand1(op int) []byte {
+	return []byte{byte(op & 0xFF)}
 }
 
 func (c *Compiler) lastInstructionIs(op Opcode) bool {
@@ -263,6 +274,7 @@ func (c *Compiler) registerBuiltins() {
 				fmt.Print(arg.Inspect())
 			}
 			fmt.Println()
+			os.Stdout.Sync()
 			return objects.None_
 		},
 	}
@@ -945,9 +957,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpSlice)
 
 	case *ast.FunctionLiteral:
-		// 保存当前指令列表
 		outerInstructions := c.instructions
-		// 创建新的指令列表用于函数体
 		c.instructions = make(Instructions, 0)
 
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
@@ -968,33 +978,30 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpReturn)
 		}
 
-		// 获取函数体的指令
 		fnInstructions := c.instructions
 
-		// 恢复外部符号表和指令列表
 		c.symbolTable = c.symbolTable.outer
-		c.instructions = outerInstructions
 
 		freeSymbols := c.symbolTable.FreeSymbols
 		numLocals := c.symbolTable.numDefinitions
 
-		// 处理自由符号（需要从外部作用域获取）
 		for _, s := range freeSymbols {
 			if s.Scope == GlobalScope {
-				c.emit(OpGetGlobal, s.Index)
+				fnInstructions = append(fnInstructions, c.make(OpGetGlobal, s.Index)...)
 			} else {
-				c.emit(OpGetLocal, s.Index)
+				fnInstructions = append(fnInstructions, c.make(OpGetLocal, s.Index)...)
 			}
 		}
 
 		compiledFn := &CompiledFunction{
-		Instructions:  fnInstructions,
-		NumLocals:     numLocals,
-		NumParameters: len(node.Parameters),
-		IsGenerator:   c.hasYieldInBody(node.Body),
-	}
+			Instructions:  fnInstructions,
+			NumLocals:    numLocals,
+			NumParameters: len(node.Parameters),
+			IsGenerator:   c.hasYieldInBody(node.Body),
+		}
 
-	c.emit(OpConstant, c.addConstant(compiledFn))
+		c.instructions = outerInstructions
+		c.emit(OpConstant, c.addConstant(compiledFn))
 	if compiledFn.IsGenerator {
 		c.emit(OpMakeGenerator)
 	}
@@ -1016,19 +1023,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return c.Compile(funcLit)
 
 	case *ast.CallExpression:
-		err := c.Compile(node.Function)
-		if err != nil {
-			return err
-		}
-
 		for _, a := range node.Arguments {
-			err := c.Compile(a)
-			if err != nil {
+			if err := c.Compile(a); err != nil {
 				return err
 			}
 		}
 
-		c.emit(OpCall, len(node.Arguments))
+		if err := c.Compile(node.Function); err != nil {
+			return err
+		}
+
+		c.emit1(OpCall, len(node.Arguments))
 
 	case *ast.ReturnStatement:
 		err := c.Compile(node.ReturnValue)
@@ -1306,7 +1311,7 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 		}
 	}
 	
-	c.emit(OpCall, len(node.Arguments))
+	c.emit1(OpCall, len(node.Arguments))
 	return nil
 }
 
@@ -1324,12 +1329,12 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 
 	iterSymbol := c.symbolTable.Define("__iter__")
 	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit(OpCall, 0)
+	c.emit1(OpCall, 0)
 	
 	loopStart := len(c.instructions)
 
 	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit(OpCall, 0)
+	c.emit1(OpCall, 0)
 	c.emit(OpMakeGenerator)
 
 	endPos := c.emit(OpJump, 0)
@@ -1383,12 +1388,12 @@ func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
 
 	iterSymbol := c.symbolTable.Define("__iter__")
 	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit(OpCall, 0)
+	c.emit1(OpCall, 0)
 
 	loopStart := len(c.instructions)
 
 	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit(OpCall, 0)
+	c.emit1(OpCall, 0)
 	c.emit(OpMakeGenerator)
 
 	endPos := c.emit(OpJump, 0)
