@@ -41,6 +41,8 @@ const (
 	OpReturn
 	OpGetLocal
 	OpSetLocal
+	OpGetFree
+	OpClosure
 	OpBeginTry
 	OpEndTry
 	OpRaise
@@ -92,6 +94,15 @@ func (c *Compiler) emit1(op Opcode, operand int) int {
 	c.instructions = append(c.instructions, ins...)
 	c.previousInstruction = c.lastInstruction
 	c.lastInstruction = EmittedInstruction{Opcode: op, Position: pos}
+	return pos
+}
+
+func (c *Compiler) emitClosure(constIndex int, numFree int) int {
+	ins := []byte{byte(OpClosure), byte(constIndex >> 8), byte(constIndex & 0xFF), byte(numFree)}
+	pos := len(c.instructions)
+	c.instructions = append(c.instructions, ins...)
+	c.previousInstruction = c.lastInstruction
+	c.lastInstruction = EmittedInstruction{Opcode: OpClosure, Position: pos}
 	return pos
 }
 
@@ -153,6 +164,31 @@ func (c *Compiler) changeOperand(opPos int, operand int) {
 	c.instructions[opPos] = byte(oldInstruction)
 	c.instructions[opPos+1] = byte(operand >> 8)
 	c.instructions[opPos+2] = byte(operand & 0xFF)
+}
+
+func (c *Compiler) adjustLocalIndices(instructions []byte, numFree int) []byte {
+	if numFree == 0 {
+		return append([]byte{}, instructions...)
+	}
+
+	result := make([]byte, len(instructions))
+	copy(result, instructions)
+
+	for i := 0; i < len(result); i++ {
+		op := Opcode(result[i])
+		switch op {
+		case OpGetLocal, OpSetLocal:
+			// Next byte is the local index
+			if i+1 < len(result) {
+				oldIndex := int(result[i+1])
+				newIndex := oldIndex + numFree
+				result[i+1] = byte(newIndex)
+				i++ // Skip the index byte
+			}
+		}
+	}
+
+	return result
 }
 
 func (c *Compiler) enterScope() {
@@ -877,6 +913,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpConstant, symbol.Index)
 		} else if symbol.Scope == GlobalScope {
 			c.emit(OpGetGlobal, symbol.Index)
+		} else if symbol.Scope == FreeScope {
+			c.emit1(OpGetFree, symbol.Index)
 		} else {
 			c.emit1(OpGetLocal, symbol.Index)
 		}
@@ -981,33 +1019,72 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		fnInstructions := c.instructions
+		numLocals := c.symbolTable.numDefinitions
+		freeVars := c.symbolTable.Free
+		numFree := len(freeVars)
+
+		// Get the nested free symbols before exiting scope
+		// These are the locals from this scope that nested functions reference
+		nestedFreeSymbols := c.symbolTable.NestedFreeSymbols
 
 		c.symbolTable = c.symbolTable.outer
 
-		freeSymbols := c.symbolTable.FreeSymbols
-		numLocals := c.symbolTable.numDefinitions
+		// Note: We don't need to adjust local variable indices anymore
+		// because free variables are stored in the closure object, not in the local variable table
+		// Local variables always start at index 0
 
-		for _, s := range freeSymbols {
-			if s.Scope == GlobalScope {
-				fnInstructions = append(fnInstructions, c.make(OpGetGlobal, s.Index)...)
-			} else {
-				fnInstructions = append(fnInstructions, byte(OpGetLocal), byte(s.Index))
-			}
+		// Combine freeVars and nestedFreeSymbols for the CompiledFunction
+		// nestedFreeSymbols are locals that nested functions need as free variables
+		allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
+		allFreeVars = append(allFreeVars, freeVars...)
+		for _, nfs := range nestedFreeSymbols {
+			// Convert nested free symbol to FreeScope
+			allFreeVars = append(allFreeVars, Symbol{
+				Name:  nfs.Name,
+				Scope: FreeScope,
+				Index: len(allFreeVars),
+			})
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:  append([]byte{}, fnInstructions...),
-			NumLocals:    numLocals,
+			Instructions:  fnInstructions,
+			NumLocals:     numLocals,
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
+			Free:          allFreeVars,
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
 		c.instructions = append(c.instructions, outerInstructions...)
-		c.emit(OpConstant, c.addConstant(compiledFn))
-	if compiledFn.IsGenerator {
-		c.emit(OpMakeGenerator)
-	}
+
+		// Determine if this function needs to be a closure
+		// It needs to be a closure if:
+		// 1. It has its own free variables (references outer scope), OR
+		// 2. Nested functions reference this function's locals
+		needsClosure := numFree > 0 || len(nestedFreeSymbols) > 0
+
+		if needsClosure {
+			// Emit instructions to load free variables onto stack
+			// First, load this function's own free variables
+			for _, free := range freeVars {
+				if free.Scope == GlobalScope {
+					c.emit(OpGetGlobal, free.Index)
+				} else {
+					c.emit1(OpGetLocal, free.Index)
+				}
+			}
+			// Then, load the nested free variables (locals that nested functions need)
+			for _, nestedFree := range nestedFreeSymbols {
+				c.emit1(OpGetLocal, nestedFree.Index)
+			}
+			totalFree := numFree + len(nestedFreeSymbols)
+			c.emitClosure(c.addConstant(compiledFn), totalFree)
+		} else {
+			c.emit(OpConstant, c.addConstant(compiledFn))
+		}
+		if compiledFn.IsGenerator {
+			c.emit(OpMakeGenerator)
+		}
 
 	case *ast.LambdaExpression:
 		funcLit := &ast.FunctionLiteral{

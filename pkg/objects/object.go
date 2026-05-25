@@ -161,6 +161,17 @@ type Generator struct {
 func (g *Generator) Type() ObjectType { return GENERATOR_OBJ }
 func (g *Generator) Inspect() string  { return fmt.Sprintf("generator[%p]", g) }
 
+type Closure struct {
+	Instructions  []byte
+	NumLocals     int
+	NumParameters int
+	IsGenerator   bool
+	Free          []Object
+}
+
+func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
+func (c *Closure) Inspect() string  { return "closure" }
+
 type Class struct {
 	Name       string
 	Methods    map[string]Object

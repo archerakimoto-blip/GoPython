@@ -19,33 +19,39 @@ type Symbol struct {
 }
 
 type SymbolTable struct {
-	outer          *SymbolTable
-	store          map[string]Symbol
-	numDefinitions int
-	FreeSymbols    []Symbol
-	Free          []Symbol
-	numFree        int
+	outer           *SymbolTable
+	store           map[string]Symbol
+	numDefinitions  int
+	FreeSymbols     []Symbol
+	Free            []Symbol
+	numFree         int
+	// NestedFreeSymbols tracks which of this scope's locals are referenced by nested functions
+	// This allows outer functions to know what to capture for their closures
+	NestedFreeSymbols []Symbol
 }
 
 func NewSymbolTable() *SymbolTable {
 	return &SymbolTable{
-		store:   make(map[string]Symbol),
-		Free:    []Symbol{},
-		FreeSymbols: []Symbol{},
+		store:             make(map[string]Symbol),
+		Free:              []Symbol{},
+		FreeSymbols:       []Symbol{},
+		NestedFreeSymbols: []Symbol{},
 	}
 }
 
 func NewEnclosedSymbolTable(outer *SymbolTable) *SymbolTable {
 	return &SymbolTable{
-		outer:   outer,
-		store:   make(map[string]Symbol),
-		Free:    []Symbol{},
-		FreeSymbols: []Symbol{},
+		outer:             outer,
+		store:             make(map[string]Symbol),
+		Free:              []Symbol{},
+		FreeSymbols:       []Symbol{},
+		NestedFreeSymbols: []Symbol{},
 	}
 }
 
 func (s *SymbolTable) Define(name string) Symbol {
-	symbol := Symbol{Name: name, Index: s.numDefinitions}
+	// Local variables start after free variables
+	symbol := Symbol{Name: name, Index: len(s.Free) + s.numDefinitions}
 	if s.outer == nil {
 		symbol.Scope = GlobalScope
 	} else {
@@ -79,10 +85,24 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 				if s.Free == nil {
 					s.Free = []Symbol{}
 				}
-				
+
 				s.FreeSymbols = append(s.FreeSymbols, obj)
 				newSymbol := Symbol{Name: obj.Name, Scope: FreeScope, Index: len(s.Free)}
 				s.Free = append(s.Free, newSymbol)
+
+				// Notify the outer scope that one of its locals is being referenced by a nested function
+				// This is crucial for closure support - outer function needs to know what to capture
+				// We need to find the immediate outer scope that defines this variable
+				// and add it to that scope's NestedFreeSymbols
+				current := s.outer
+				for current != nil {
+					if outerSymbol, exists := current.store[obj.Name]; exists {
+						current.NestedFreeSymbols = append(current.NestedFreeSymbols, outerSymbol)
+						break
+					}
+					current = current.outer
+				}
+
 				return newSymbol, true
 			}
 			return obj, true

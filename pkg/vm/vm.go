@@ -32,6 +32,7 @@ type Frame struct {
 	ip          int
 	basePointer int
 	generator   *objects.Generator // 指向创建此帧的生成器（如果是生成器帧）
+	freeVars    []objects.Object   // 闭包的自由变量值
 }
 
 type VM struct {
@@ -84,6 +85,17 @@ func NewFrame(fn *compiler.CompiledFunction, basePointer int) *Frame {
 		ip:          -1,
 		basePointer: basePointer,
 		generator:   nil,
+		freeVars:    nil,
+	}
+}
+
+func NewFrameWithFreeVars(fn *compiler.CompiledFunction, basePointer int, freeVars []objects.Object) *Frame {
+	return &Frame{
+		fn:          fn,
+		ip:          -1,
+		basePointer: basePointer,
+		generator:   nil,
+		freeVars:    freeVars,
 	}
 }
 
@@ -133,6 +145,35 @@ func (vm *VM) Run() error {
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 			err := vm.push(vm.constants[constIndex])
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpClosure:
+			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			numFree := int(ins[ip+3])
+			vm.currentFrame().ip += 3
+
+			fn, ok := vm.constants[constIndex].(*compiler.CompiledFunction)
+			if !ok {
+				return fmt.Errorf("not a function: %T", vm.constants[constIndex])
+			}
+
+			// Pop free variables from stack
+			free := make([]objects.Object, numFree)
+			for i := numFree - 1; i >= 0; i-- {
+				free[i] = vm.pop()
+			}
+
+			closure := &objects.Closure{
+				Instructions:  fn.Instructions,
+				NumLocals:     fn.NumLocals,
+				NumParameters: fn.NumParameters,
+				IsGenerator:   fn.IsGenerator,
+				Free:          free,
+			}
+
+			err := vm.push(closure)
 			if err != nil {
 				return err
 			}
@@ -348,6 +389,26 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+
+		case compiler.OpGetFree:
+			freeIndex := int(ins[ip+1])
+			vm.currentFrame().ip += 1
+
+			frame := vm.currentFrame()
+			// Use the stored free variables from the closure
+			if frame.freeVars != nil && freeIndex < len(frame.freeVars) {
+				err := vm.push(frame.freeVars[freeIndex])
+				if err != nil {
+					return err
+				}
+			} else {
+				// Fallback: try to get from stack (for non-closure functions)
+				err := vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
+				if err != nil {
+					return err
+				}
+			}
+
 		case compiler.OpBeginTry:
 		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
@@ -771,6 +832,34 @@ func (vm *VM) executeCall(numArgs int) error {
 		return nil
 	}
 
+	// Check if it's a closure
+	if closure, ok := calleeObj.(*objects.Closure); ok {
+		if numArgs != closure.NumParameters {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				closure.NumParameters, numArgs)
+		}
+
+		// Create a CompiledFunction from the closure
+		fn := &compiler.CompiledFunction{
+			Instructions:  closure.Instructions,
+			NumLocals:     closure.NumLocals,
+			NumParameters: closure.NumParameters,
+			IsGenerator:   closure.IsGenerator,
+		}
+
+		// Store a copy of free variables for OpGetFree to use
+		freeVarsCopy := make([]objects.Object, len(closure.Free))
+		copy(freeVarsCopy, closure.Free)
+
+		// basePointer points to the first argument
+		// Free variables are stored before basePointer
+		frame := NewFrameWithFreeVars(fn, vm.sp-numArgs, freeVarsCopy)
+		vm.pushFrame(frame)
+		vm.sp = frame.basePointer + closure.NumLocals
+
+		return nil
+	}
+
 	callee, ok := calleeObj.(*compiler.CompiledFunction)
 	if !ok {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
@@ -1042,7 +1131,10 @@ func (vm *VM) pop() objects.Object {
 }
 
 func (vm *VM) LastPoppedStackElem() objects.Object {
-	return vm.stack[vm.sp]
+	if vm.sp > 0 {
+		return vm.stack[vm.sp-1]
+	}
+	return nil
 }
 
 func (vm *VM) buildArray(startIndex, endIndex int) objects.Object {
