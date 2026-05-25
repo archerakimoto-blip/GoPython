@@ -1137,6 +1137,13 @@ func (vm *VM) LastPoppedStackElem() objects.Object {
 	return nil
 }
 
+func (vm *VM) TopStackElem() objects.Object {
+	if vm.sp > 0 {
+		return vm.stack[vm.sp-1]
+	}
+	return nil
+}
+
 func (vm *VM) buildArray(startIndex, endIndex int) objects.Object {
 	elements := make([]objects.Object, endIndex-startIndex)
 
