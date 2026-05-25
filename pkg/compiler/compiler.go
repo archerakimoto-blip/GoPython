@@ -1410,7 +1410,6 @@ func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
 }
 
 func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
-	fmt.Printf("DEBUG compileMethodCall: Object=%T, Method=%s\n", node.Object, node.Method.Value)
 	if err := c.Compile(node.Object); err != nil {
 		return err
 	}

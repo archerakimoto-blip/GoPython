@@ -130,7 +130,6 @@ func (vm *VM) popFrame() *Frame {
 }
 
 func (vm *VM) Run() error {
-	fmt.Println("DEBUG: VM.Run() started")
 	var ip int
 	var ins compiler.Instructions
 	var op compiler.Opcode
@@ -140,7 +139,6 @@ func (vm *VM) Run() error {
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().fn.Instructions
 		op = compiler.Opcode(ins[ip])
-		fmt.Printf("DEBUG: ip=%d, op=%d\n", ip, op)
 
 		switch op {
 		case compiler.OpConstant:
@@ -325,7 +323,6 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpCall:
-			fmt.Println("DEBUG: OpCall found")
 			numArgs := int(ins[ip+1])
 			vm.currentFrame().ip += 1
 
@@ -721,6 +718,7 @@ func (vm *VM) Run() error {
 			}
 		case compiler.OpGetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
@@ -816,18 +814,9 @@ func (vm *VM) Run() error {
 }
 
 func (vm *VM) executeCall(numArgs int) error {
-	fmt.Printf("DEBUG executeCall: numArgs=%d, sp=%d\n", numArgs, vm.sp)
 	calleeIndex := vm.sp - numArgs - 1
-	fmt.Printf("DEBUG: calleeIndex=%d\n", calleeIndex)
-	
-	for i := 0; i < vm.sp; i++ {
-		if vm.stack[i] != nil {
-			fmt.Printf("  stack[%d]=%s (type=%T)\n", i, vm.stack[i].Inspect(), vm.stack[i])
-		}
-	}
 	
 	calleeObj := vm.stack[calleeIndex]
-	fmt.Printf("DEBUG: calleeObj=%T\n", calleeObj)
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
 		instance := &objects.Instance{
