@@ -347,7 +347,9 @@ func (p *Parser) parseLambdaExpression() ast.Expression {
 	// 跳过冒号
 	p.nextToken()
 
-	// 解析函数体
+	// 现在直接使用常规 parseExpression，没问题，我们在 parseExpression 里已经有 !p.peekTokenIs(lexer.SEMICOLON) 了！
+	// 问题不在 lambda 的 body 是在 parseAssignStatement 里的 parseExpression！让我们修改 parseAssignStatement 函数！
+	// 哦！对！问题不在 parseAssignStatement 里调用 parseExpression！让我们修改 parseAssignStatement 函数！
 	lambda.Body = p.parseExpression(LOWEST)
 
 	return lambda

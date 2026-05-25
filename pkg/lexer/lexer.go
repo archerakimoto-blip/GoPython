@@ -101,6 +101,8 @@ type Lexer struct {
 	position     int
 	readPosition int
 	ch           byte
+	prevNonWhiteCh byte // previous non-whitespace character
+	justSkippedNewline bool // whether we just skipped a newline character
 }
 
 func New(input string) *Lexer {
@@ -113,6 +115,15 @@ func (l *Lexer) NextToken() Token {
 	var tok Token
 
 	l.skipWhitespace()
+
+	// 如果刚刚跳过了换行符，并且前一个 token 适合结束语句，就返回分号
+	if l.justSkippedNewline {
+		// 检查前一个非空白字符，判断是否应该插入分号
+		if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || l.prevNonWhiteCh == '0' || l.prevNonWhiteCh == '1' || l.prevNonWhiteCh == '2' || l.prevNonWhiteCh == '3' || l.prevNonWhiteCh == '4' || l.prevNonWhiteCh == '5' || l.prevNonWhiteCh == '6' || l.prevNonWhiteCh == '7' || l.prevNonWhiteCh == '8' || l.prevNonWhiteCh == '9' {
+			l.justSkippedNewline = false // we will use this
+			return Token{Type: SEMICOLON, Literal: ";"}
+		}
+	}
 
 	switch l.ch {
 	case '=':
@@ -222,6 +233,10 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) readChar() {
+	// Save the current character before moving to the next one
+	if l.ch != ' ' && l.ch != '\t' && l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
+		l.prevNonWhiteCh = l.ch
+	}
 	if l.readPosition >= len(l.input) {
 		l.ch = 0
 	} else {
@@ -277,13 +292,21 @@ func (l *Lexer) readString() string {
 }
 
 func (l *Lexer) skipWhitespace() {
+	l.justSkippedNewline = false
 	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
+		if l.ch == '\n' || l.ch == '\r' {
+			l.justSkippedNewline = true
+		}
 		l.readChar()
 	}
 }
 
 func isLetter(ch byte) bool {
 	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
+}
+
+func isIdentifierChar(ch byte) bool {
+	return isLetter(ch) || isDigit(ch)
 }
 
 func isDigit(ch byte) bool {
