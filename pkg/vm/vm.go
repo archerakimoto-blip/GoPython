@@ -54,7 +54,7 @@ func New(bytecode *compiler.Bytecode) *VM {
 	mainFn := &compiler.CompiledFunction{
 		Instructions: bytecode.Instructions,
 	}
-	mainFrame := NewFrame(mainFn, 0)
+	mainFrame := NewFrame(mainFn, 1)
 
 	frames := make([]*Frame, MaxFrames)
 	frames[0] = mainFrame
@@ -721,7 +721,7 @@ func (vm *VM) Run() error {
 }
 
 func (vm *VM) executeCall(numArgs int) error {
-	calleeIndex := vm.sp - 1
+	calleeIndex := vm.sp - numArgs - 1
 	calleeObj := vm.stack[calleeIndex]
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {

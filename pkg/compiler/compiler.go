@@ -81,8 +81,8 @@ func (c *Compiler) emit(op Opcode, operands ...int) int {
 	ins := c.make(op, operands...)
 	pos := len(c.instructions)
 	c.instructions = append(c.instructions, ins...)
-	c.lastInstruction = c.previousInstruction
-	c.previousInstruction = EmittedInstruction{Opcode: op, Position: pos}
+	c.previousInstruction = c.lastInstruction
+	c.lastInstruction = EmittedInstruction{Opcode: op, Position: pos}
 	return pos
 }
 
@@ -90,8 +90,8 @@ func (c *Compiler) emit1(op Opcode, operand int) int {
 	ins := []byte{byte(op), byte(operand & 0xFF)}
 	pos := len(c.instructions)
 	c.instructions = append(c.instructions, ins...)
-	c.lastInstruction = c.previousInstruction
-	c.previousInstruction = EmittedInstruction{Opcode: op, Position: pos}
+	c.previousInstruction = c.lastInstruction
+	c.lastInstruction = EmittedInstruction{Opcode: op, Position: pos}
 	return pos
 }
 
@@ -145,7 +145,7 @@ func (c *Compiler) removeLastPop() {
 func (c *Compiler) replaceLastPopWithReturn() {
 	lastPos := c.lastInstruction.Position
 	c.instructions[lastPos] = byte(OpReturnValue)
-	c.instructions = append(c.instructions, byte(OpNull))
+	c.lastInstruction.Opcode = OpReturnValue
 }
 
 func (c *Compiler) changeOperand(opPos int, operand int) {
@@ -704,7 +704,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err != nil {
 			return err
 		}
-		c.emit(OpPop)
+		if _, ok := node.Expression.(*ast.CallExpression); !ok {
+			c.emit(OpPop)
+		}
 
 	case *ast.InfixExpression:
 		if node.Operator == "<" {
@@ -989,7 +991,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if s.Scope == GlobalScope {
 				fnInstructions = append(fnInstructions, c.make(OpGetGlobal, s.Index)...)
 			} else {
-				fnInstructions = append(fnInstructions, c.make(OpGetLocal, s.Index)...)
+				fnInstructions = append(fnInstructions, byte(OpGetLocal), byte(s.Index))
 			}
 		}
 
@@ -1000,7 +1002,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			IsGenerator:   c.hasYieldInBody(node.Body),
 		}
 
-		c.instructions = outerInstructions
+		c.instructions = make(Instructions, 0, len(outerInstructions))
+		c.instructions = append(c.instructions, outerInstructions...)
 		c.emit(OpConstant, c.addConstant(compiledFn))
 	if compiledFn.IsGenerator {
 		c.emit(OpMakeGenerator)
@@ -1023,14 +1026,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return c.Compile(funcLit)
 
 	case *ast.CallExpression:
+		if err := c.Compile(node.Function); err != nil {
+			return err
+		}
+
 		for _, a := range node.Arguments {
 			if err := c.Compile(a); err != nil {
 				return err
 			}
-		}
-
-		if err := c.Compile(node.Function); err != nil {
-			return err
 		}
 
 		c.emit1(OpCall, len(node.Arguments))

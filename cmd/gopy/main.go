@@ -101,11 +101,6 @@ func runFile(filename string) {
 
 	code := comp.Bytecode()
 
-	fmt.Printf("DEBUG: Instructions len=%d, constants len=%d\n", len(code.Instructions), len(code.Constants))
-	for i := 0; i < len(code.Instructions) && i < 20; i++ {
-		fmt.Printf("  [%d]: 0x%02x\n", i, code.Instructions[i])
-	}
-
 	machine := vm.New(code)
 	err = machine.Run()
 	if err != nil {
