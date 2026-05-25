@@ -644,29 +644,37 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	// Skip the opening brace
 	p.nextToken()
 
-	for !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) &&
-		!p.curTokenIs(lexer.EXCEPT) && !p.curTokenIs(lexer.FINALLY) &&
-		!p.curTokenIs(lexer.ELSE) {
-		for p.curTokenIs(lexer.SEMICOLON) {
-			p.nextToken()
-		}
-		
+	for {
 		if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
 			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
 			p.curTokenIs(lexer.ELSE) {
 			break
 		}
-		
+
+		for p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+
+		if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
+			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+			p.curTokenIs(lexer.ELSE) {
+			break
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
 		}
+
 		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
 			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
 			p.curTokenIs(lexer.ELSE) {
 			break
 		}
-		p.nextToken()
+
+		if stmt != nil {
+			p.nextToken()
+		}
 	}
 
 	return block

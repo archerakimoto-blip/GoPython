@@ -130,6 +130,7 @@ func (vm *VM) popFrame() *Frame {
 }
 
 func (vm *VM) Run() error {
+	fmt.Println("DEBUG: VM.Run() started")
 	var ip int
 	var ins compiler.Instructions
 	var op compiler.Opcode
@@ -139,6 +140,7 @@ func (vm *VM) Run() error {
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().fn.Instructions
 		op = compiler.Opcode(ins[ip])
+		fmt.Printf("DEBUG: ip=%d, op=%d\n", ip, op)
 
 		switch op {
 		case compiler.OpConstant:
@@ -323,6 +325,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpCall:
+			fmt.Println("DEBUG: OpCall found")
 			numArgs := int(ins[ip+1])
 			vm.currentFrame().ip += 1
 
@@ -813,8 +816,18 @@ func (vm *VM) Run() error {
 }
 
 func (vm *VM) executeCall(numArgs int) error {
+	fmt.Printf("DEBUG executeCall: numArgs=%d, sp=%d\n", numArgs, vm.sp)
 	calleeIndex := vm.sp - numArgs - 1
+	fmt.Printf("DEBUG: calleeIndex=%d\n", calleeIndex)
+	
+	for i := 0; i < vm.sp; i++ {
+		if vm.stack[i] != nil {
+			fmt.Printf("  stack[%d]=%s (type=%T)\n", i, vm.stack[i].Inspect(), vm.stack[i])
+		}
+	}
+	
 	calleeObj := vm.stack[calleeIndex]
+	fmt.Printf("DEBUG: calleeObj=%T\n", calleeObj)
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
 		instance := &objects.Instance{
@@ -838,6 +851,24 @@ func (vm *VM) executeCall(numArgs int) error {
 		}
 
 		return nil
+	}
+
+	// Check if this is a method call where instance is on the stack
+	// Stack is [..., prev, instance, method] and we're calling method with numArgs
+	// We need to arrange stack as [..., prev, method, self, arg0, arg1, ...]
+	// where calleeIndex points to method and method will be called with self + numArgs arguments
+	if calleeIndex > 0 && numArgs == 0 {
+		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
+			if instance, isInstance := vm.stack[calleeIndex-1].(*objects.Instance); isInstance {
+				// This is a method call with no additional arguments
+				// Current stack: [..., prev, instance, method]
+				// Rearrange to: [..., prev, method, self]
+				vm.stack[calleeIndex-1] = calleeObj  // method
+				vm.stack[calleeIndex] = instance       // self
+				// vm.sp stays the same (method is already at calleeIndex)
+				numArgs = 1  // method needs self as its only argument
+			}
+		}
 	}
 
 	if gen, ok := calleeObj.(*objects.Generator); ok {

@@ -92,6 +92,9 @@ func runFile(filename string) {
 	// 进行脱糖转换
 	program = desugar.Desugar(program)
 
+	// 调试：打印 AST
+	fmt.Printf("DEBUG: AST = %s\n", program.String())
+
 	comp := compiler.New()
 	err = comp.Compile(program)
 	if err != nil {

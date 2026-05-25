@@ -1363,7 +1363,7 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 }
 
 func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
-	instructions := c.instructions
+	savedInstructions := c.instructions
 	c.instructions = []byte{}
 
 	c.enterScope()
@@ -1387,13 +1387,17 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 	free := c.symbolTable.Free
 	c.exitScope()
 
-	c.instructions = append(instructions, c.instructions...)
+	// Get function instructions before restoring outer scope instructions
+	fnInstructions := c.instructions
+	
+	// Restore outer scope instructions
+	c.instructions = savedInstructions
 
 	return &CompiledFunction{
-		Instructions:  c.instructions,
-		NumLocals:    numLocals,
-		NumParameters: len(fn.Parameters),
-		Free:         free,
+		Instructions:   fnInstructions,
+		NumLocals:      numLocals,
+		NumParameters:  len(fn.Parameters),
+		Free:           free,
 	}
 }
 
@@ -1406,6 +1410,7 @@ func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
 }
 
 func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
+	fmt.Printf("DEBUG compileMethodCall: Object=%T, Method=%s\n", node.Object, node.Method.Value)
 	if err := c.Compile(node.Object); err != nil {
 		return err
 	}
