@@ -24,12 +24,13 @@
 │   ├── parser/         # 语法分析器
 │   ├── desugar/        # 语法脱糖（for/while循环转换）
 │   ├── compiler/       # 字节码编译器
-│   ├── vm/             # 虚拟机
+│   ├── vm/             # 虚拟机（包含单元测试）
 │   ├── objects/        # 核心对象系统
 │   └── jit/            # JIT 编译器基础架构
-├── tests/              # 测试用例
+├── tests/
+│   └── python/         # Python 测试脚本
 ├── debug/              # 调试工具
-├── test.py             # 示例测试脚本
+├── gopy                # 编译后的可执行文件
 └── go.mod              # Go 模块定义
 ```
 
@@ -60,11 +61,14 @@ go build -o gopy ./cmd/gopy
 - [x] 支持整数、浮点数、布尔值、字符串、数组、字典、集合
 - [x] 基本算术运算 (+, -, *, /)
 - [x] 比较运算 (==, !=, >, <)
+- [x] 布尔运算 (and, or, not)
 - [x] 变量绑定和作用域
 - [x] 函数定义和调用
 - [x] 条件语句 (if/else)
 - [x] 循环语句 (for/while)
+- [x] break/continue 语句
 - [x] 列表推导式和集合推导式
+- [x] 字典推导式
 - [x] 切片操作
 - [x] 索引和切片赋值
 
@@ -73,7 +77,12 @@ go build -o gopy ./cmd/gopy
 - [x] **异常处理 (try/except/finally)**
 - [x] **上下文管理器 (with 语句)**
 - [x] **生成器 (yield 语句)**
+- [x] **Lambda 表达式**
+- [x] **闭包和自由变量**
+- [x] **类和对象系统**
+- [x] **成员访问和方法调用**
 - [x] **丰富的内置函数库**
+- [x] **math 数学模块**
 
 ### 内置函数
 
@@ -186,25 +195,73 @@ print(sum([1, 2, 3, 4]))  # 10
 nums = range(1, 10, 2)     # [1, 3, 5, 7, 9]
 ```
 
+### Lambda 表达式和闭包
+
+```python
+# 简单 lambda
+add = lambda x, y: x + y
+print(add(5, 3))  # 8
+
+# 嵌套闭包
+make_adder = lambda x: lambda y: x + y
+add5 = make_adder(5)
+print(add5(10))   # 15
+```
+
+### 类和对象
+
+```python
+class Person {
+    def __init__(self, name):
+        self.name = name
+    
+    def greet(self):
+        print("Hello, my name is " + self.name)
+}
+
+p = Person("Alice")
+p.greet()  # Hello, my name is Alice
+print(p.name)  # Alice
+```
+
+### 数学模块
+
+```python
+import math
+
+print(math.pi)      # 3.14159...
+print(math.e)       # 2.71828...
+print(math.sqrt(16)) # 4.0
+print(math.sin(0))   # 0.0
+print(math.cos(math.pi)) # -1.0
+```
+
 ## 测试用例
 
 项目包含完整的测试套件：
 
 ### 异常处理测试
-- `tests/test_try_multiline.py` - try/except 基本测试
-- `tests/test_try_finally_multiline.py` - try/except/finally 测试
+- `tests/python/test_try_multiline.py` - try/except 基本测试
+- `tests/python/test_try_finally_multiline.py` - try/except/finally 测试
 
 ### 上下文管理器测试
-- `tests/test_with_simple.py` - with 语句测试
-- `tests/test_with_multiline.py` - 包含函数的 with 语句测试
+- `tests/python/test_with_simple.py` - with 语句测试
+- `tests/python/test_with_multiline.py` - 包含函数的 with 语句测试
 
 ### 生成器测试
-- `tests/test_yield_simple.py` - 生成器基本测试
-- `tests/test_yield_multiline.py` - 更复杂的生成器测试
+- `tests/python/test_yield_simple.py` - 生成器基本测试
+- `tests/python/test_yield_multiline.py` - 更复杂的生成器测试
+
+### Lambda 和闭包测试
+- `tests/python/test_lambda_simple.py` - Lambda 表达式基本测试
+- `tests/python/test_lambda_call.py` - Lambda 调用测试
 
 ### 内置函数测试
-- `tests/test_builtins_new.py` - 新增内置函数测试
-- `tests/test_all_comprehensive.py` - 综合功能测试
+- `tests/python/test_builtins_new.py` - 新增内置函数测试
+- `tests/python/test_all_comprehensive.py` - 综合功能测试
+
+### Go 单元测试
+- `pkg/vm/vm_test.go` - 虚拟机单元测试（包含算术、lambda、布尔运算测试）
 
 ### 调试工具
 - `debug/debug_try_except.go` - 字节码调试工具
@@ -213,22 +270,28 @@ nums = range(1, 10, 2)     # [1, 3, 5, 7, 9]
 运行测试：
 
 ```bash
-./gopy tests/test_try_multiline.py
-./gopy tests/test_all_comprehensive.py
+# 运行 Python 测试脚本
+./gopy tests/python/test_try_multiline.py
+./gopy tests/python/test_all_comprehensive.py
+
+# 运行 Go 单元测试
+go test ./pkg/vm -v
+go test ./...
 ```
 
 ## 未来计划
 
-- [ ] 实现完整的 Python 语法支持
+- [ ] 实现类继承和多态
+- [ ] 支持更多异常类型（ValueError, TypeError 等）
 - [ ] 开发完整的 JIT 编译器
 - [ ] 实现与现有 Python 库的兼容性
 - [ ] 添加性能优化和缓存机制
 - [ ] 实现垃圾回收
-- [ ] 开发调试工具
-- [ ] 实现类和对象系统
-- [ ] 支持 lambda 表达式
-- [ ] 添加字符串格式化
+- [ ] 开发调试工具（调试器、性能分析器）
+- [ ] 添加字符串格式化（f-string 支持）
 - [ ] 实现更多内置模块（os, sys, json 等）
+- [ ] 支持模块导入系统
+- [ ] 添加更多 Python 标准库功能
 
 ## 贡献
 
