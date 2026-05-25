@@ -106,7 +106,7 @@ func (c *Compiler) make(op Opcode, operands ...int) []byte {
 func (c *Compiler) makeOperand(op int) []byte {
 	hi := byte(op >> 8)
 	lo := byte(op & 0xFF)
-	return []byte{hi, lo}
+	return []byte{lo, hi}
 }
 
 func (c *Compiler) makeOperand1(op int) []byte {

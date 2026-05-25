@@ -266,6 +266,7 @@ func (p *Parser) parseAssignStatement() *ast.AssignStatement {
 
 	stmt.Value = p.parseExpression(LOWEST)
 
+	// 检查是否到了分号或新语句
 	if p.peekTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
 	}
@@ -317,39 +318,28 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 func (p *Parser) parseLambdaExpression() ast.Expression {
 	lambda := &ast.LambdaExpression{Token: p.curToken.Literal}
 
-	// 解析参数（不需要括号）
 	p.nextToken()
 
-	// 如果有参数
 	if !p.curTokenIs(lexer.COLON) {
-		// 第一个参数
 		if p.curTokenIs(lexer.IDENT) {
 			param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 			lambda.Parameters = append(lambda.Parameters, param)
 
-			// 继续解析更多参数
 			for p.peekTokenIs(lexer.COMMA) {
-				p.nextToken() // 跳过逗号
-				p.nextToken() // 移动到下一个参数
+				p.nextToken()
+				p.nextToken()
 				param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lambda.Parameters = append(lambda.Parameters, param)
 			}
 		}
 
-		// 期望冒号
 		if !p.expectPeek(lexer.COLON) {
 			return nil
 		}
-	} else {
-		// 没有参数，直接到冒号
 	}
 
-	// 跳过冒号
 	p.nextToken()
 
-	// 现在直接使用常规 parseExpression，没问题，我们在 parseExpression 里已经有 !p.peekTokenIs(lexer.SEMICOLON) 了！
-	// 问题不在 lambda 的 body 是在 parseAssignStatement 里的 parseExpression！让我们修改 parseAssignStatement 函数！
-	// 哦！对！问题不在 parseAssignStatement 里调用 parseExpression！让我们修改 parseAssignStatement 函数！
 	lambda.Body = p.parseExpression(LOWEST)
 
 	return lambda

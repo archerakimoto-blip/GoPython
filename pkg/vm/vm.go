@@ -130,7 +130,7 @@ func (vm *VM) Run() error {
 
 		switch op {
 		case compiler.OpConstant:
-			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			constIndex := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			vm.currentFrame().ip += 2
 			err := vm.push(vm.constants[constIndex])
 			if err != nil {
@@ -225,7 +225,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpArray:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			numElements := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			vm.currentFrame().ip += 2
 
 			array := vm.buildArray(vm.sp-numElements, vm.sp)
@@ -349,7 +349,7 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpBeginTry:
-		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+		exceptCount := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 		vm.currentFrame().ip += 4
 		tryBlockStartIP := ip + 5
@@ -485,7 +485,7 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 			}
 		case compiler.OpExceptHandler:
-			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 			vm.currentFrame().ip += 4
 
@@ -617,12 +617,17 @@ func (vm *VM) Run() error {
 				}
 			}
 		case compiler.OpCreateClass:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			class := vm.constants[idx].(*objects.Class)
-			return vm.push(class)
+			vm.currentFrame().ip += 2
+			err := vm.push(class)
+			if err != nil {
+				return err
+			}
 		case compiler.OpGetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			attrName := vm.constants[idx].(*objects.String).Value
+			vm.currentFrame().ip += 2
 
 			obj := vm.pop()
 			
@@ -631,31 +636,40 @@ func (vm *VM) Run() error {
 					if method, ok := val.(*compiler.CompiledFunction); ok {
 						vm.push(instance)
 						vm.push(method)
-						vm.currentFrame().ip += 2
 						continue
 					}
-					return vm.push(val)
-				}
-				if classMethod, ok := instance.Class.Methods[attrName]; ok {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+				} else if classMethod, ok := instance.Class.Methods[attrName]; ok {
 					vm.push(instance)
 					vm.push(classMethod)
-					vm.currentFrame().ip += 2
-					continue
+				} else {
+					err := vm.push(objects.None_)
+					if err != nil {
+						return err
+					}
 				}
-				return vm.push(objects.None_)
-			}
-			
-			if module, ok := obj.(*objects.Module); ok {
+			} else if module, ok := obj.(*objects.Module); ok {
 				if val, ok := module.GetAttr(attrName); ok {
-					return vm.push(val)
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+				} else {
+					err := vm.push(objects.None_)
+					if err != nil {
+						return err
+					}
 				}
-				return vm.push(objects.None_)
+			} else {
+				return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 			}
-			
-			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
 			attrName := vm.constants[idx].(*objects.String).Value
+			vm.currentFrame().ip += 2
 			
 			value := vm.pop()
 			obj := vm.pop()
@@ -1312,7 +1326,7 @@ func (vm *VM) findMatchingExceptHandlerFrom(startIP int, errObj objects.Object, 
 		}
 		op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
 		if op == compiler.OpExceptHandler {
-			typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+1])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+2]))
+			typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
 
 			var exceptionType string
 			if typeIdx > 0 && typeIdx < len(vm.constants) {
@@ -1328,7 +1342,7 @@ func (vm *VM) findMatchingExceptHandlerFrom(startIP int, errObj objects.Object, 
 			}
 
 			if ip+7 < len(vm.currentFrame().fn.Instructions) {
-				jumpIP := int(uint16(vm.currentFrame().fn.Instructions[ip+7])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+6]))
+				jumpIP := int(uint16(vm.currentFrame().fn.Instructions[ip+6])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+7]))
 				ip = jumpIP
 			} else {
 				break
