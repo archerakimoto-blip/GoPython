@@ -104,9 +104,9 @@ func (c *Compiler) make(op Opcode, operands ...int) []byte {
 }
 
 func (c *Compiler) makeOperand(op int) []byte {
-	hi := byte(op >> 8)
 	lo := byte(op & 0xFF)
-	return []byte{lo, hi}
+	hi := byte(op >> 8)
+	return []byte{hi, lo}
 }
 
 func (c *Compiler) makeOperand1(op int) []byte {
@@ -843,7 +843,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if symbol.Scope == GlobalScope {
 			c.emit(OpSetGlobal, symbol.Index)
 		} else {
-			c.emit(OpSetLocal, symbol.Index)
+			c.emit1(OpSetLocal, symbol.Index)
 		}
 
 	case *ast.AssignStatement:
@@ -876,7 +876,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else if symbol.Scope == GlobalScope {
 			c.emit(OpGetGlobal, symbol.Index)
 		} else {
-			c.emit(OpGetLocal, symbol.Index)
+			c.emit1(OpGetLocal, symbol.Index)
 		}
 
 	case *ast.ListLiteral:
@@ -994,7 +994,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:  fnInstructions,
+			Instructions:  append([]byte{}, fnInstructions...),
 			NumLocals:    numLocals,
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
@@ -1096,7 +1096,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if symbol.Scope == GlobalScope {
 				c.emit(OpSetGlobal, symbol.Index)
 			} else {
-				c.emit(OpSetLocal, symbol.Index)
+				c.emit1(OpSetLocal, symbol.Index)
 			}
 		} else {
 			c.emit(OpPop)
@@ -1200,7 +1200,7 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 				if varSymbol.Scope == GlobalScope {
 					c.emit(OpSetGlobal, varSymbol.Index)
 				} else {
-					c.emit(OpSetLocal, varSymbol.Index)
+					c.emit1(OpSetLocal, varSymbol.Index)
 				}
 			}
 

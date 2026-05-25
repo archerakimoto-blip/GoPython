@@ -130,7 +130,7 @@ func (vm *VM) Run() error {
 
 		switch op {
 		case compiler.OpConstant:
-			constIndex := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 			err := vm.push(vm.constants[constIndex])
 			if err != nil {
@@ -193,11 +193,11 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpJump:
-			pos := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip = pos - 1
 
 		case compiler.OpJumpNotTruthy:
-			pos := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			condition := vm.pop()
@@ -212,12 +212,12 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpSetGlobal:
-			globalIndex := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 			vm.globals[globalIndex] = vm.pop()
 
 		case compiler.OpGetGlobal:
-			globalIndex := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 			err := vm.push(vm.globals[globalIndex])
 			if err != nil {
@@ -225,7 +225,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpArray:
-			numElements := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			array := vm.buildArray(vm.sp-numElements, vm.sp)
@@ -237,7 +237,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpHash:
-			numElements := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
@@ -252,7 +252,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpSet:
-			numElements := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			set := vm.buildSet(vm.sp-numElements, vm.sp)
@@ -349,7 +349,7 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpBeginTry:
-		exceptCount := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 		vm.currentFrame().ip += 4
 		tryBlockStartIP := ip + 5
@@ -485,7 +485,7 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 			}
 		case compiler.OpExceptHandler:
-			typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 			vm.currentFrame().ip += 4
 
@@ -525,7 +525,7 @@ func (vm *VM) Run() error {
 				}
 			}
 		case compiler.OpFinally:
-			finallyEndIP := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			finallyEndIP := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
 
 			if len(vm.exceptionStack) > 0 {
@@ -617,7 +617,7 @@ func (vm *VM) Run() error {
 				}
 			}
 		case compiler.OpCreateClass:
-			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
 			vm.currentFrame().ip += 2
 			err := vm.push(class)
@@ -625,7 +625,7 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpGetAttribute:
-			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
@@ -656,7 +656,7 @@ func (vm *VM) Run() error {
 			
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
-			idx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			attrName := vm.constants[idx].(*objects.String).Value
 			vm.currentFrame().ip += 2
 			
@@ -1255,7 +1255,7 @@ func (vm *VM) raiseException(errObj objects.Object) bool {
 		for ip < len(ins) {
 			op := compiler.Opcode(ins[ip])
 			if op == compiler.OpExceptHandler {
-				typeIdx := int(uint16(ins[ip+2])<<8 | uint16(ins[ip+1]))
+				typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 				var exceptionType string
 				if typeIdx > 0 && typeIdx < len(vm.constants) {
 					if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
