@@ -119,6 +119,36 @@ func (vm *VM) currentFrame() *Frame {
 	return vm.frames[vm.framesIndex-1]
 }
 
+func (vm *VM) CurrentFrame() *Frame {
+	return vm.currentFrame()
+}
+
+func (vm *VM) GetFramesIndex() int {
+	return vm.framesIndex
+}
+
+func (vm *VM) GetFrame(index int) *Frame {
+	if index >= 0 && index < vm.framesIndex {
+		return vm.frames[index]
+	}
+	return nil
+}
+
+func (vm *VM) GetSP() int {
+	return vm.sp
+}
+
+func (vm *VM) GetStack(index int) objects.Object {
+	if index >= 0 && index < vm.sp {
+		return vm.stack[index]
+	}
+	return nil
+}
+
+func (vm *VM) GetGlobals() []objects.Object {
+	return vm.globals
+}
+
 func (vm *VM) pushFrame(f *Frame) {
 	vm.frames[vm.framesIndex] = f
 	vm.framesIndex++

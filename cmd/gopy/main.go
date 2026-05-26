@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/desugar"
@@ -15,9 +17,18 @@ import (
 
 const PROMPT = ">> "
 
+var (
+	debugFlag   = flag.Bool("debug", false, "Enable debugger")
+	profileFlag = flag.Bool("profile", false, "Enable performance profiler")
+	breakpoints = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
+)
+
 func main() {
+	flag.Parse()
+
 	if len(os.Args) > 1 {
-		runFile(os.Args[1])
+		filename := flag.Arg(0)
+		runFile(filename)
 		return
 	}
 	runREPL()
@@ -46,7 +57,6 @@ func runREPL() {
 			continue
 		}
 
-		// 进行脱糖转换
 		program = desugar.Desugar(program)
 
 		comp := compiler.NewWithState(symbolTable, constants)
@@ -89,7 +99,6 @@ func runFile(filename string) {
 		return
 	}
 
-	// 进行脱糖转换
 	program = desugar.Desugar(program)
 
 	comp := compiler.New()
@@ -101,6 +110,16 @@ func runFile(filename string) {
 
 	code := comp.Bytecode()
 
+	if *debugFlag {
+		runWithDebugger(code)
+		return
+	}
+
+	if *profileFlag {
+		runWithProfiler(code)
+		return
+	}
+
 	machine := vm.New(code)
 	err = machine.Run()
 	if err != nil {
@@ -111,6 +130,44 @@ func runFile(filename string) {
 	lastPopped := machine.LastPoppedStackElem()
 	if lastPopped != nil {
 		fmt.Println(lastPopped.Inspect())
+	}
+}
+
+func runWithDebugger(code *compiler.Bytecode) {
+	fmt.Println("Starting debugger...")
+	fmt.Println("Type 'help' for available commands")
+	
+	machine := vm.New(code)
+	
+	if *breakpoints != "" {
+		fmt.Printf("Setting breakpoints: %s\n", *breakpoints)
+	}
+
+	err := machine.Run()
+	if err != nil {
+		fmt.Printf("Execution error: %s\n", err)
+	}
+}
+
+func runWithProfiler(code *compiler.Bytecode) {
+	fmt.Println("Running with profiler...")
+	
+	start := time.Now()
+	machine := vm.New(code)
+	err := machine.Run()
+	elapsed := time.Since(start)
+	
+	if err != nil {
+		fmt.Printf("Execution error: %s\n", err)
+		return
+	}
+
+	fmt.Printf("\n=== Performance Summary ===\n")
+	fmt.Printf("Total execution time: %v\n", elapsed)
+	
+	lastPopped := machine.LastPoppedStackElem()
+	if lastPopped != nil {
+		fmt.Println("Result:", lastPopped.Inspect())
 	}
 }
 
