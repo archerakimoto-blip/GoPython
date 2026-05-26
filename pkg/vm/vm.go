@@ -861,10 +861,10 @@ func (vm *VM) executeCall(numArgs int) error {
 	}
 
 	if gen, ok := calleeObj.(*objects.Generator); ok {
-		if gen.Done {
-			vm.sp = vm.sp - numArgs - 1
-			return vm.push(objects.NewError("StopIteration"))
-		}
+			if gen.Done {
+				vm.sp = vm.sp - numArgs - 1
+				return vm.push(objects.NewError("StopIteration: generator is exhausted"))
+			}
 		// 保存生成器对象引用，用于后续在栈上找到它
 		// 先移除生成器对象，后面在恢复栈后再放回去
 		genObj := vm.stack[calleeIndex]
@@ -1120,7 +1120,7 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		result = leftValue * rightValue
 	case compiler.OpDiv:
 		if rightValue == 0 {
-			return vm.push(objects.NewError("division by zero"))
+			return vm.push(objects.NewZeroDivisionError("division by zero"))
 		}
 		result = leftValue / rightValue
 	default:
@@ -1379,14 +1379,15 @@ func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
 func matchesException(errObj objects.Object, exceptionType string) bool {
 	if errObj.Type() == objects.ERROR_OBJ {
 		err := errObj.(*objects.Error)
+		if exceptionType == "" {
+			return true
+		}
 		if exceptionType == "Exception" || exceptionType == "Error" {
 			return true
 		}
-		if strings.Contains(err.Message, exceptionType) {
-			return true
-		}
+		return err.ErrorType == exceptionType
 	}
-	return exceptionType == "" || exceptionType == "Exception" || exceptionType == "Error"
+	return false
 }
 
 func (vm *VM) raiseException(errObj objects.Object) bool {

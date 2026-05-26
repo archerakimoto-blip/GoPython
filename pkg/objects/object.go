@@ -118,11 +118,12 @@ func (d *Dict) Inspect() string {
 }
 
 type Error struct {
-	Message string
+	ErrorType string
+	Message   string
 }
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
-func (e *Error) Inspect() string  { return "ERROR: " + e.Message }
+func (e *Error) Inspect() string { return e.ErrorType + ": " + e.Message }
 
 type BuiltinFunction func(args ...Object) Object
 
@@ -232,8 +233,62 @@ var (
 	None_ = &None{}
 )
 
+func newErrorWithType(errorType, format string, a ...interface{}) *Error {
+	return &Error{
+		ErrorType: errorType,
+		Message:   fmt.Sprintf(format, a...),
+	}
+}
+
 func NewError(format string, a ...interface{}) *Error {
-	return &Error{Message: fmt.Sprintf(format, a...)}
+	return &Error{
+		ErrorType: "Error",
+		Message:   fmt.Sprintf(format, a...),
+	}
+}
+
+func NewException(format string, a ...interface{}) *Error {
+	return newErrorWithType("Exception", format, a...)
+}
+
+func NewValueError(format string, a ...interface{}) *Error {
+	return newErrorWithType("ValueError", format, a...)
+}
+
+func NewTypeError(format string, a ...interface{}) *Error {
+	return newErrorWithType("TypeError", format, a...)
+}
+
+func NewZeroDivisionError(format string, a ...interface{}) *Error {
+	return newErrorWithType("ZeroDivisionError", format, a...)
+}
+
+func NewIndexError(format string, a ...interface{}) *Error {
+	return newErrorWithType("IndexError", format, a...)
+}
+
+func NewKeyError(format string, a ...interface{}) *Error {
+	return newErrorWithType("KeyError", format, a...)
+}
+
+func NewAttributeError(format string, a ...interface{}) *Error {
+	return newErrorWithType("AttributeError", format, a...)
+}
+
+func NewNameError(format string, a ...interface{}) *Error {
+	return newErrorWithType("NameError", format, a...)
+}
+
+func NewAssertionError(format string, a ...interface{}) *Error {
+	return newErrorWithType("AssertionError", format, a...)
+}
+
+func NewRuntimeError(format string, a ...interface{}) *Error {
+	return newErrorWithType("RuntimeError", format, a...)
+}
+
+func NewNotImplementedError(format string, a ...interface{}) *Error {
+	return newErrorWithType("NotImplementedError", format, a...)
 }
 
 func Equal(a, b Object) bool {
@@ -335,7 +390,7 @@ func CreateMathModule() *Module {
 		Name: "math.sin",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("sin() takes exactly 1 argument")
+				return NewTypeError("sin() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -344,7 +399,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Sin(float64(v.Value))}
 			default:
-				return NewError("sin() argument must be a number")
+				return NewTypeError("sin() argument must be a number")
 			}
 		},
 	}
@@ -353,7 +408,7 @@ func CreateMathModule() *Module {
 		Name: "math.cos",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("cos() takes exactly 1 argument")
+				return NewTypeError("cos() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -362,7 +417,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Cos(float64(v.Value))}
 			default:
-				return NewError("cos() argument must be a number")
+				return NewTypeError("cos() argument must be a number")
 			}
 		},
 	}
@@ -371,7 +426,7 @@ func CreateMathModule() *Module {
 		Name: "math.tan",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("tan() takes exactly 1 argument")
+				return NewTypeError("tan() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -380,7 +435,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Tan(float64(v.Value))}
 			default:
-				return NewError("tan() argument must be a number")
+				return NewTypeError("tan() argument must be a number")
 			}
 		},
 	}
@@ -389,7 +444,7 @@ func CreateMathModule() *Module {
 		Name: "math.asin",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("asin() takes exactly 1 argument")
+				return NewTypeError("asin() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -398,7 +453,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Asin(float64(v.Value))}
 			default:
-				return NewError("asin() argument must be a number")
+				return NewTypeError("asin() argument must be a number")
 			}
 		},
 	}
@@ -407,7 +462,7 @@ func CreateMathModule() *Module {
 		Name: "math.acos",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("acos() takes exactly 1 argument")
+				return NewTypeError("acos() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -416,7 +471,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Acos(float64(v.Value))}
 			default:
-				return NewError("acos() argument must be a number")
+				return NewTypeError("acos() argument must be a number")
 			}
 		},
 	}
@@ -425,7 +480,7 @@ func CreateMathModule() *Module {
 		Name: "math.atan",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("atan() takes exactly 1 argument")
+				return NewTypeError("atan() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -434,7 +489,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Atan(float64(v.Value))}
 			default:
-				return NewError("atan() argument must be a number")
+				return NewTypeError("atan() argument must be a number")
 			}
 		},
 	}
@@ -443,7 +498,7 @@ func CreateMathModule() *Module {
 		Name: "math.sqrt",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("sqrt() takes exactly 1 argument")
+				return NewTypeError("sqrt() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -452,7 +507,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Sqrt(float64(v.Value))}
 			default:
-				return NewError("sqrt() argument must be a number")
+				return NewTypeError("sqrt() argument must be a number")
 			}
 		},
 	}
@@ -461,7 +516,7 @@ func CreateMathModule() *Module {
 		Name: "math.floor",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("floor() takes exactly 1 argument")
+				return NewTypeError("floor() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -470,7 +525,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return v
 			default:
-				return NewError("floor() argument must be a number")
+				return NewTypeError("floor() argument must be a number")
 			}
 		},
 	}
@@ -479,7 +534,7 @@ func CreateMathModule() *Module {
 		Name: "math.ceil",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("ceil() takes exactly 1 argument")
+				return NewTypeError("ceil() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -488,7 +543,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return v
 			default:
-				return NewError("ceil() argument must be a number")
+				return NewTypeError("ceil() argument must be a number")
 			}
 		},
 	}
@@ -497,7 +552,7 @@ func CreateMathModule() *Module {
 		Name: "math.trunc",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("trunc() takes exactly 1 argument")
+				return NewTypeError("trunc() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -506,7 +561,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return v
 			default:
-				return NewError("trunc() argument must be a number")
+				return NewTypeError("trunc() argument must be a number")
 			}
 		},
 	}
@@ -515,7 +570,7 @@ func CreateMathModule() *Module {
 		Name: "math.abs",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("abs() takes exactly 1 argument")
+				return NewTypeError("abs() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -527,7 +582,7 @@ func CreateMathModule() *Module {
 				}
 				return v
 			default:
-				return NewError("abs() argument must be a number")
+				return NewTypeError("abs() argument must be a number")
 			}
 		},
 	}
@@ -536,12 +591,12 @@ func CreateMathModule() *Module {
 		Name: "math.pow",
 		Fn: func(args ...Object) Object {
 			if len(args) != 2 {
-				return NewError("pow() takes exactly 2 arguments")
+				return NewTypeError("pow() takes exactly 2 arguments")
 			}
 			base, ok1 := args[0].(*Float)
 			exp, ok2 := args[1].(*Float)
 			if !ok1 || !ok2 {
-				return NewError("pow() arguments must be numbers")
+				return NewTypeError("pow() arguments must be numbers")
 			}
 			return &Float{Value: math.Pow(base.Value, exp.Value)}
 		},
@@ -551,12 +606,12 @@ func CreateMathModule() *Module {
 		Name: "math.hypot",
 		Fn: func(args ...Object) Object {
 			if len(args) != 2 {
-				return NewError("hypot() takes exactly 2 arguments")
+				return NewTypeError("hypot() takes exactly 2 arguments")
 			}
 			x, ok1 := args[0].(*Float)
 			y, ok2 := args[1].(*Float)
 			if !ok1 || !ok2 {
-				return NewError("hypot() arguments must be numbers")
+				return NewTypeError("hypot() arguments must be numbers")
 			}
 			return &Float{Value: math.Hypot(x.Value, y.Value)}
 		},
@@ -566,7 +621,7 @@ func CreateMathModule() *Module {
 		Name: "math.log",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("log() takes exactly 1 argument")
+				return NewTypeError("log() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -575,7 +630,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Log(float64(v.Value))}
 			default:
-				return NewError("log() argument must be a number")
+				return NewTypeError("log() argument must be a number")
 			}
 		},
 	}
@@ -584,7 +639,7 @@ func CreateMathModule() *Module {
 		Name: "math.log10",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("log10() takes exactly 1 argument")
+				return NewTypeError("log10() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -593,7 +648,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Log10(float64(v.Value))}
 			default:
-				return NewError("log10() argument must be a number")
+				return NewTypeError("log10() argument must be a number")
 			}
 		},
 	}
@@ -602,7 +657,7 @@ func CreateMathModule() *Module {
 		Name: "math.log2",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("log2() takes exactly 1 argument")
+				return NewTypeError("log2() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -611,7 +666,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Log2(float64(v.Value))}
 			default:
-				return NewError("log2() argument must be a number")
+				return NewTypeError("log2() argument must be a number")
 			}
 		},
 	}
@@ -620,7 +675,7 @@ func CreateMathModule() *Module {
 		Name: "math.exp",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("exp() takes exactly 1 argument")
+				return NewTypeError("exp() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -629,7 +684,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: math.Exp(float64(v.Value))}
 			default:
-				return NewError("exp() argument must be a number")
+				return NewTypeError("exp() argument must be a number")
 			}
 		},
 	}
@@ -638,7 +693,7 @@ func CreateMathModule() *Module {
 		Name: "math.degrees",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("degrees() takes exactly 1 argument")
+				return NewTypeError("degrees() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -647,7 +702,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: float64(v.Value) * 180 / math.Pi}
 			default:
-				return NewError("degrees() argument must be a number")
+				return NewTypeError("degrees() argument must be a number")
 			}
 		},
 	}
@@ -656,7 +711,7 @@ func CreateMathModule() *Module {
 		Name: "math.radians",
 		Fn: func(args ...Object) Object {
 			if len(args) != 1 {
-				return NewError("radians() takes exactly 1 argument")
+				return NewTypeError("radians() takes exactly 1 argument")
 			}
 			arg := args[0]
 			switch v := arg.(type) {
@@ -665,7 +720,7 @@ func CreateMathModule() *Module {
 			case *Integer:
 				return &Float{Value: float64(v.Value) * math.Pi / 180}
 			default:
-				return NewError("radians() argument must be a number")
+				return NewTypeError("radians() argument must be a number")
 			}
 		},
 	}

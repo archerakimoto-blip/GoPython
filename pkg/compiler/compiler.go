@@ -399,7 +399,7 @@ func (c *Compiler) registerBuiltins() {
 	intBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) != 1 {
-				return objects.NewError("int() takes exactly 1 argument")
+				return objects.NewTypeError("int() takes exactly 1 argument")
 			}
 			switch arg := args[0].(type) {
 			case *objects.Integer:
@@ -410,7 +410,7 @@ func (c *Compiler) registerBuiltins() {
 				var val int64
 				_, err := fmt.Sscanf(arg.Value, "%d", &val)
 				if err != nil {
-					return objects.NewError("cannot convert string '%s' to int", arg.Value)
+					return objects.NewValueError("cannot convert string '%s' to int", arg.Value)
 				}
 				return &objects.Integer{Value: val}
 			case *objects.Boolean:
@@ -419,7 +419,7 @@ func (c *Compiler) registerBuiltins() {
 				}
 				return &objects.Integer{Value: 0}
 			default:
-				return objects.NewError("cannot convert %s to int", arg.Type())
+				return objects.NewTypeError("cannot convert %s to int", arg.Type())
 			}
 		},
 	}
@@ -430,7 +430,7 @@ func (c *Compiler) registerBuiltins() {
 	floatBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) != 1 {
-				return objects.NewError("float() takes exactly 1 argument")
+				return objects.NewTypeError("float() takes exactly 1 argument")
 			}
 			switch arg := args[0].(type) {
 			case *objects.Float:
@@ -441,7 +441,7 @@ func (c *Compiler) registerBuiltins() {
 				var val float64
 				_, err := fmt.Sscanf(arg.Value, "%f", &val)
 				if err != nil {
-					return objects.NewError("cannot convert string '%s' to float", arg.Value)
+					return objects.NewValueError("cannot convert string '%s' to float", arg.Value)
 				}
 				return &objects.Float{Value: val}
 			case *objects.Boolean:
@@ -450,7 +450,7 @@ func (c *Compiler) registerBuiltins() {
 				}
 				return &objects.Float{Value: 0.0}
 			default:
-				return objects.NewError("cannot convert %s to float", arg.Type())
+				return objects.NewTypeError("cannot convert %s to float", arg.Type())
 			}
 		},
 	}
@@ -530,44 +530,44 @@ func (c *Compiler) registerBuiltins() {
 	rangeBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) < 1 || len(args) > 3 {
-				return objects.NewError("range() takes 1 to 3 arguments")
+				return objects.NewTypeError("range() takes 1 to 3 arguments")
 			}
 			var start, stop, step int64 = 0, 0, 1
 			if len(args) == 1 {
 				stopArg, ok := args[0].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() argument must be an integer")
+					return objects.NewTypeError("range() argument must be an integer")
 				}
 				stop = stopArg.Value
 			} else if len(args) == 2 {
 				startArg, ok := args[0].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() start argument must be an integer")
+					return objects.NewTypeError("range() start argument must be an integer")
 				}
 				stopArg, ok := args[1].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() stop argument must be an integer")
+					return objects.NewTypeError("range() stop argument must be an integer")
 				}
 				start = startArg.Value
 				stop = stopArg.Value
 			} else {
 				startArg, ok := args[0].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() start argument must be an integer")
+					return objects.NewTypeError("range() start argument must be an integer")
 				}
 				stopArg, ok := args[1].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() stop argument must be an integer")
+					return objects.NewTypeError("range() stop argument must be an integer")
 				}
 				stepArg, ok := args[2].(*objects.Integer)
 				if !ok {
-					return objects.NewError("range() step argument must be an integer")
+					return objects.NewTypeError("range() step argument must be an integer")
 				}
 				start = startArg.Value
 				stop = stopArg.Value
 				step = stepArg.Value
 				if step == 0 {
-					return objects.NewError("range() step cannot be zero")
+					return objects.NewValueError("range() step cannot be zero")
 				}
 			}
 			elements := []objects.Object{}
