@@ -1,16 +1,16 @@
 # Go Python 解释器 (GoPy)
 
-一个用 Go 语言编写的高效 Python 解释器，包含 JIT 编译基础架构。
+一个用 Go 语言编写的高效 Python 解释器，包含完整的 JIT 编译架构。
 
 ## 项目架构
 
-这个解释器采用经典的三层架构：
+这个解释器采用经典的多层架构：
 
 1. **词法分析器 (Lexer)**: 将源代码转换为标记序列
 2. **语法分析器 (Parser)**: 将标记序列构建为抽象语法树 (AST)
 3. **编译器 (Compiler)**: 将 AST 编译为字节码
 4. **虚拟机 (VM)**: 执行字节码
-5. **JIT 编译器 (正在开发中)**: 即时编译热点代码到本地机器码
+5. **JIT 编译器**: 即时编译热点代码，支持自动优化
 
 ## 目录结构
 
@@ -26,7 +26,7 @@
 │   ├── compiler/       # 字节码编译器
 │   ├── vm/             # 虚拟机（包含单元测试）
 │   ├── objects/        # 核心对象系统
-│   └── jit/            # JIT 编译器基础架构
+│   └── jit/            # JIT 编译器完整实现
 ├── tests/
 │   └── python/         # Python 测试脚本
 ├── debug/              # 调试工具
@@ -71,6 +71,7 @@ go build -o gopy ./cmd/gopy
 - [x] 字典推导式
 - [x] 切片操作
 - [x] 索引和切片赋值
+- [x] `pass` 语句支持
 
 ### 高级特性
 
@@ -80,9 +81,11 @@ go build -o gopy ./cmd/gopy
 - [x] **Lambda 表达式**
 - [x] **闭包和自由变量**
 - [x] **类和对象系统**
+- [x] **类继承和多态**
 - [x] **成员访问和方法调用**
 - [x] **丰富的内置函数库**
-- [x] **math 数学模块**
+- [x] **math 数学模块（增强版）**
+- [x] **JIT 即时编译器**
 
 ### 内置函数
 
@@ -98,15 +101,54 @@ GoPy 提供了丰富的内置函数：
 | `float(obj)` | 转换为浮点数 | `float(42)` 返回 42.0 |
 | `bool(obj)` | 转换为布尔值 | `bool(0)` 返回 False |
 | `abs(x)` | 绝对值 | `abs(-5)` 返回 5 |
+| `round(x, ndigits)` | 四舍五入 | `round(3.1415, 2)` 返回 3.14 |
 | `range(start, stop, step)` | 数字序列 | `range(5)` 返回 [0,1,2,3,4] |
-| `min(...)` | 最小值 | `min(1, 2, 3)` 返回 1 |
-| `max(...)` | 最大值 | `max(1, 2, 3)` 返回 3 |
-| `sum(iterable)` | 求和 | `sum([1,2,3])` 返回 6 |
+| `min(...)` | 最小值（支持整数和浮点数） | `min(1, 2.5, 3)` 返回 1 |
+| `max(...)` | 最大值（支持整数和浮点数） | `max(1, 2.5, 3)` 返回 3 |
+| `sum(iterable)` | 求和（支持整数和浮点数） | `sum([1, 2.5, 3])` 返回 6.5 |
+| `zip(...)` | 将多个列表打包 | `zip([1,2], ["a","b"])` 返回 [[1,"a"], [2,"b"]] |
 | `open(file, mode)` | 打开文件（上下文管理器） | `open("test.txt", "r")` |
 | `next(generator)` | 获取生成器下一个值 | `next(gen)` |
 | `append(list, item)` | 添加元素到列表 | `append(lst, 4)` |
 | `setitem(dict, key, value)` | 设置字典项 | `setitem(d, "key", value)` |
 | `setadd(set, item)` | 添加元素到集合 | `setadd(s, item)` |
+
+### math 模块函数
+
+GoPy 的 math 模块提供了丰富的数学函数：
+
+| 函数 | 描述 | 示例 |
+|------|------|------|
+| `math.pi` | 圆周率 π | `math.pi` 返回 3.14159... |
+| `math.e` | 自然常数 e | `math.e` 返回 2.71828... |
+| `math.sin(x)` | 正弦函数 | `math.sin(math.pi/2)` 返回 1.0 |
+| `math.cos(x)` | 余弦函数 | `math.cos(0)` 返回 1.0 |
+| `math.tan(x)` | 正切函数 | `math.tan(math.pi/4)` 返回 1.0 |
+| `math.asin(x)` | 反正弦函数 | `math.asin(1)` 返回 π/2 |
+| `math.acos(x)` | 反余弦函数 | `math.acos(0)` 返回 π/2 |
+| `math.atan(x)` | 反正切函数 | `math.atan(1)` 返回 π/4 |
+| `math.sqrt(x)` | 平方根 | `math.sqrt(16)` 返回 4.0 |
+| `math.pow(x, y)` | 幂运算 | `math.pow(2, 3)` 返回 8.0 |
+| `math.hypot(x, y)` | 计算斜边 | `math.hypot(3, 4)` 返回 5.0 |
+| `math.exp(x)` | 指数函数 | `math.exp(1)` 返回 e |
+| `math.log(x)` | 自然对数 | `math.log(math.e)` 返回 1.0 |
+| `math.log10(x)` | 常用对数 | `math.log10(100)` 返回 2.0 |
+| `math.log2(x)` | 以2为底的对数 | `math.log2(8)` 返回 3.0 |
+| `math.floor(x)` | 向下取整 | `math.floor(3.9)` 返回 3 |
+| `math.ceil(x)` | 向上取整 | `math.ceil(3.1)` 返回 4 |
+| `math.trunc(x)` | 截断取整 | `math.trunc(3.9)` 返回 3 |
+| `math.degrees(x)` | 弧度转角度 | `math.degrees(math.pi)` 返回 180 |
+| `math.radians(x)` | 角度转弧度 | `math.radians(180)` 返回 π |
+
+### JIT 编译器特性
+
+GoPy 的 JIT 编译器提供以下功能：
+
+- **热点检测**: 自动识别频繁调用的函数
+- **代码分析**: 分析指令数量、循环检测、复杂度计算
+- **自动优化**: 对热点函数进行优化编译
+- **缓存管理**: 智能缓存和驱逐策略
+- **线程安全**: 支持并发访问
 
 ## 示例
 
@@ -185,14 +227,19 @@ print(int("42"))           # 42
 print(float("3.14"))       # 3.14
 print(str(123))            # "123"
 
-# 数值操作
-print(abs(-10))            # 10
-print(min(1, 2, 3))       # 1
-print(max(1, 2, 3))        # 3
-print(sum([1, 2, 3, 4]))  # 10
+# 数值操作（支持浮点数）
+print(abs(-10.5))          # 10.5
+print(min(1, 2.5, 3))     # 1
+print(max(1, 2.5, 3))      # 3
+print(sum([1, 2.5, 3.5])) # 7.0
 
 # 生成序列
 nums = range(1, 10, 2)     # [1, 3, 5, 7, 9]
+
+# zip 函数
+a = [1, 2, 3]
+b = ["one", "two", "three"]
+print(zip(a, b))  # [[1,"one"], [2,"two"], [3,"three"]]
 ```
 
 ### Lambda 表达式和闭包
@@ -208,20 +255,25 @@ add5 = make_adder(5)
 print(add5(10))   # 15
 ```
 
-### 类和对象
+### 类和对象（支持继承）
 
 ```python
-class Person {
+class Animal {
     def __init__(self, name):
         self.name = name
     
-    def greet(self):
-        print("Hello, my name is " + self.name)
+    def speak(self):
+        print("Animal speaks")
 }
 
-p = Person("Alice")
-p.greet()  # Hello, my name is Alice
-print(p.name)  # Alice
+class Dog(Animal) {
+    def speak(self):
+        print(self.name + " says Woof!")
+}
+
+d = Dog("Buddy")
+d.speak()  # Buddy says Woof!
+print(d.name)  # Buddy
 ```
 
 ### 数学模块
@@ -234,6 +286,9 @@ print(math.e)       # 2.71828...
 print(math.sqrt(16)) # 4.0
 print(math.sin(0))   # 0.0
 print(math.cos(math.pi)) # -1.0
+print(math.tan(math.pi/4)) # 1.0
+print(math.log10(100)) # 2.0
+print(math.hypot(3, 4)) # 5.0
 ```
 
 ## 测试用例
@@ -256,6 +311,10 @@ print(math.cos(math.pi)) # -1.0
 - `tests/python/test_lambda_simple.py` - Lambda 表达式基本测试
 - `tests/python/test_lambda_call.py` - Lambda 调用测试
 
+### 类和继承测试
+- `test_class_inheritance.py` - 类继承测试
+- `test_class_method2.py` - 类方法测试
+
 ### 内置函数测试
 - `tests/python/test_builtins_new.py` - 新增内置函数测试
 - `tests/python/test_all_comprehensive.py` - 综合功能测试
@@ -263,9 +322,8 @@ print(math.cos(math.pi)) # -1.0
 ### Go 单元测试
 - `pkg/vm/vm_test.go` - 虚拟机单元测试（包含算术、lambda、布尔运算测试）
 
-### 调试工具
-- `debug/debug_try_except.go` - 字节码调试工具
-- `debug/debug_finally.go` - finally 块字节码分析
+### JIT 测试
+- `test_jit_demo.go` - JIT 功能演示
 
 运行测试：
 
@@ -273,25 +331,28 @@ print(math.cos(math.pi)) # -1.0
 # 运行 Python 测试脚本
 ./gopy tests/python/test_try_multiline.py
 ./gopy tests/python/test_all_comprehensive.py
+./gopy test_class_inheritance.py
 
 # 运行 Go 单元测试
 go test ./pkg/vm -v
 go test ./...
+
+# 运行 JIT 演示
+go build -o test_jit_demo test_jit_demo.go
+./test_jit_demo
 ```
 
 ## 未来计划
 
-- [ ] 实现类继承和多态
 - [ ] 支持更多异常类型（ValueError, TypeError 等）
-- [ ] 开发完整的 JIT 编译器
 - [ ] 实现与现有 Python 库的兼容性
-- [ ] 添加性能优化和缓存机制
 - [ ] 实现垃圾回收
 - [ ] 开发调试工具（调试器、性能分析器）
 - [ ] 添加字符串格式化（f-string 支持）
 - [ ] 实现更多内置模块（os, sys, json 等）
 - [ ] 支持模块导入系统
 - [ ] 添加更多 Python 标准库功能
+- [ ] 增强 JIT 编译优化（真正编译到机器码）
 
 ## 贡献
 
