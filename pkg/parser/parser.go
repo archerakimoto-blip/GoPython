@@ -684,6 +684,10 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				p.nextToken()
 			}
 		}
+		
+		if p.curTokenIs(lexer.RBRACE) {
+			p.nextToken()
+		}
 	} else if p.curTokenIs(lexer.INDENT) {
 		// 缩进语法（标准 Python）
 		p.nextToken()
@@ -716,9 +720,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				break
 			}
 
-			if stmt != nil {
-				p.nextToken()
-			}
+			p.nextToken()
 		}
 
 		if p.curTokenIs(lexer.DEDENT) {
@@ -1438,7 +1440,13 @@ func (p *Parser) parseClassStatement() ast.Statement {
 
 	methods := []*ast.FunctionLiteral{}
 	for _, stmt := range body.Statements {
+		if stmt == nil {
+			continue
+		}
 		if es, ok := stmt.(*ast.ExpressionStatement); ok {
+			if es.Expression == nil {
+				continue
+			}
 			if fl, ok := es.Expression.(*ast.FunctionLiteral); ok {
 				methods = append(methods, fl)
 			}
