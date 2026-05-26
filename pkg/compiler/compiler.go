@@ -592,17 +592,40 @@ func (c *Compiler) registerBuiltins() {
 			if len(args) < 1 {
 				return objects.NewError("min() takes at least 1 argument")
 			}
-			var minVal *objects.Integer
+			var minInt *objects.Integer
+			var minFloat *objects.Float
+			hasFloat := false
+
 			for _, arg := range args {
-				intVal, ok := arg.(*objects.Integer)
-				if !ok {
-					return objects.NewError("min() arguments must be integers")
-				}
-				if minVal == nil || intVal.Value < minVal.Value {
-					minVal = intVal
+				switch val := arg.(type) {
+				case *objects.Integer:
+					if minInt == nil {
+						minInt = val
+					} else if val.Value < minInt.Value {
+						minInt = val
+					}
+				case *objects.Float:
+					hasFloat = true
+					if minFloat == nil {
+						minFloat = val
+					} else if val.Value < minFloat.Value {
+						minFloat = val
+					}
+				default:
+					return objects.NewError("min() arguments must be numbers")
 				}
 			}
-			return minVal
+
+			if hasFloat {
+				if minInt != nil {
+					intAsFloat := float64(minInt.Value)
+					if minFloat == nil || intAsFloat < minFloat.Value {
+						return &objects.Float{Value: intAsFloat}
+					}
+				}
+				return minFloat
+			}
+			return minInt
 		},
 	}
 	minIndex := len(c.constants)
@@ -614,17 +637,40 @@ func (c *Compiler) registerBuiltins() {
 			if len(args) < 1 {
 				return objects.NewError("max() takes at least 1 argument")
 			}
-			var maxVal *objects.Integer
+			var maxInt *objects.Integer
+			var maxFloat *objects.Float
+			hasFloat := false
+
 			for _, arg := range args {
-				intVal, ok := arg.(*objects.Integer)
-				if !ok {
-					return objects.NewError("max() arguments must be integers")
-				}
-				if maxVal == nil || intVal.Value > maxVal.Value {
-					maxVal = intVal
+				switch val := arg.(type) {
+				case *objects.Integer:
+					if maxInt == nil {
+						maxInt = val
+					} else if val.Value > maxInt.Value {
+						maxInt = val
+					}
+				case *objects.Float:
+					hasFloat = true
+					if maxFloat == nil {
+						maxFloat = val
+					} else if val.Value > maxFloat.Value {
+						maxFloat = val
+					}
+				default:
+					return objects.NewError("max() arguments must be numbers")
 				}
 			}
-			return maxVal
+
+			if hasFloat {
+				if maxInt != nil {
+					intAsFloat := float64(maxInt.Value)
+					if maxFloat == nil || intAsFloat > maxFloat.Value {
+						return &objects.Float{Value: intAsFloat}
+					}
+				}
+				return maxFloat
+			}
+			return maxInt
 		},
 	}
 	maxIndex := len(c.constants)
@@ -640,15 +686,33 @@ func (c *Compiler) registerBuiltins() {
 			if !ok {
 				return objects.NewError("sum() argument must be a list")
 			}
-			var total int64 = 0
+			var totalInt int64 = 0
+			var totalFloat float64 = 0.0
+			hasFloat := false
+
 			for _, elem := range list.Elements {
-				intVal, ok := elem.(*objects.Integer)
-				if !ok {
-					return objects.NewError("sum() list elements must be integers")
+				switch val := elem.(type) {
+				case *objects.Integer:
+					if hasFloat {
+						totalFloat += float64(val.Value)
+					} else {
+						totalInt += val.Value
+					}
+				case *objects.Float:
+					if !hasFloat {
+						hasFloat = true
+						totalFloat = float64(totalInt)
+					}
+					totalFloat += val.Value
+				default:
+					return objects.NewError("sum() list elements must be numbers")
 				}
-				total += intVal.Value
 			}
-			return &objects.Integer{Value: total}
+
+			if hasFloat {
+				return &objects.Float{Value: totalFloat}
+			}
+			return &objects.Integer{Value: totalInt}
 		},
 	}
 	sumIndex := len(c.constants)
@@ -717,6 +781,43 @@ func (c *Compiler) registerBuiltins() {
 	roundIndex := len(c.constants)
 	c.constants = append(c.constants, roundBuiltin)
 	c.symbolTable.DefineBuiltin("round", roundIndex)
+
+	zipBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				return &objects.List{Elements: []objects.Object{}}
+			}
+
+			// 检查所有参数是否都是列表
+			lists := make([]*objects.List, len(args))
+			minLen := -1
+			for i, arg := range args {
+				list, ok := arg.(*objects.List)
+				if !ok {
+					return objects.NewError("zip() arguments must be lists")
+				}
+				lists[i] = list
+				if minLen == -1 || len(list.Elements) < minLen {
+					minLen = len(list.Elements)
+				}
+			}
+
+			// 构建结果
+			result := &objects.List{Elements: []objects.Object{}}
+			for i := 0; i < minLen; i++ {
+				tuple := &objects.List{Elements: []objects.Object{}}
+				for _, list := range lists {
+					tuple.Elements = append(tuple.Elements, list.Elements[i])
+				}
+				result.Elements = append(result.Elements, tuple)
+			}
+
+			return result
+		},
+	}
+	zipIndex := len(c.constants)
+	c.constants = append(c.constants, zipBuiltin)
+	c.symbolTable.DefineBuiltin("zip", zipIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {

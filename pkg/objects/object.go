@@ -324,7 +324,7 @@ func FormatString(template string, args ...Object) string {
 
 func CreateMathModule() *Module {
 	mathModule := &Module{
-		Name:   "math",
+		Name:    "math",
 		Fields: make(map[string]Object),
 	}
 	
@@ -363,6 +363,78 @@ func CreateMathModule() *Module {
 				return &Float{Value: math.Cos(float64(v.Value))}
 			default:
 				return NewError("cos() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["tan"] = &Builtin{
+		Name: "math.tan",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("tan() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Tan(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Tan(float64(v.Value))}
+			default:
+				return NewError("tan() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["asin"] = &Builtin{
+		Name: "math.asin",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("asin() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Asin(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Asin(float64(v.Value))}
+			default:
+				return NewError("asin() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["acos"] = &Builtin{
+		Name: "math.acos",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("acos() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Acos(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Acos(float64(v.Value))}
+			default:
+				return NewError("acos() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["atan"] = &Builtin{
+		Name: "math.atan",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("atan() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Atan(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Atan(float64(v.Value))}
+			default:
+				return NewError("atan() argument must be a number")
 			}
 		},
 	}
@@ -420,6 +492,24 @@ func CreateMathModule() *Module {
 			}
 		},
 	}
+
+	mathModule.Fields["trunc"] = &Builtin{
+		Name: "math.trunc",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("trunc() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Integer{Value: int64(math.Trunc(v.Value))}
+			case *Integer:
+				return v
+			default:
+				return NewError("trunc() argument must be a number")
+			}
+		},
+	}
 	
 	mathModule.Fields["abs"] = &Builtin{
 		Name: "math.abs",
@@ -456,6 +546,21 @@ func CreateMathModule() *Module {
 			return &Float{Value: math.Pow(base.Value, exp.Value)}
 		},
 	}
+
+	mathModule.Fields["hypot"] = &Builtin{
+		Name: "math.hypot",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewError("hypot() takes exactly 2 arguments")
+			}
+			x, ok1 := args[0].(*Float)
+			y, ok2 := args[1].(*Float)
+			if !ok1 || !ok2 {
+				return NewError("hypot() arguments must be numbers")
+			}
+			return &Float{Value: math.Hypot(x.Value, y.Value)}
+		},
+	}
 	
 	mathModule.Fields["log"] = &Builtin{
 		Name: "math.log",
@@ -474,6 +579,42 @@ func CreateMathModule() *Module {
 			}
 		},
 	}
+
+	mathModule.Fields["log10"] = &Builtin{
+		Name: "math.log10",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("log10() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Log10(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Log10(float64(v.Value))}
+			default:
+				return NewError("log10() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["log2"] = &Builtin{
+		Name: "math.log2",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("log2() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: math.Log2(v.Value)}
+			case *Integer:
+				return &Float{Value: math.Log2(float64(v.Value))}
+			default:
+				return NewError("log2() argument must be a number")
+			}
+		},
+	}
 	
 	mathModule.Fields["exp"] = &Builtin{
 		Name: "math.exp",
@@ -489,6 +630,42 @@ func CreateMathModule() *Module {
 				return &Float{Value: math.Exp(float64(v.Value))}
 			default:
 				return NewError("exp() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["degrees"] = &Builtin{
+		Name: "math.degrees",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("degrees() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: v.Value * 180 / math.Pi}
+			case *Integer:
+				return &Float{Value: float64(v.Value) * 180 / math.Pi}
+			default:
+				return NewError("degrees() argument must be a number")
+			}
+		},
+	}
+
+	mathModule.Fields["radians"] = &Builtin{
+		Name: "math.radians",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewError("radians() takes exactly 1 argument")
+			}
+			arg := args[0]
+			switch v := arg.(type) {
+			case *Float:
+				return &Float{Value: v.Value * math.Pi / 180}
+			case *Integer:
+				return &Float{Value: float64(v.Value) * math.Pi / 180}
+			default:
+				return NewError("radians() argument must be a number")
 			}
 		},
 	}

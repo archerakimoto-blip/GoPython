@@ -1372,10 +1372,12 @@ func (p *Parser) parseClassStatement() ast.Statement {
 
 	var superClass *ast.Identifier
 	if p.peekTokenIs(lexer.LPAREN) {
-		p.nextToken()
-		if p.curTokenIs(lexer.IDENT) {
-			superClass = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken() // consume '('
+		// Now we expect a single identifier for the super class
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
 		}
+		superClass = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 		if !p.expectPeek(lexer.RPAREN) {
 			return nil
 		}
