@@ -211,9 +211,13 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.CLASS:
 		return p.parseClassStatement()
 	case lexer.FUNCTION:
+		fn := p.parseFunctionLiteral()
+		if fn == nil {
+			return nil
+		}
 		return &ast.ExpressionStatement{
 			Token:      p.curToken.Literal,
-			Expression: p.parseFunctionLiteral(),
+			Expression: fn,
 		}
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
@@ -400,7 +404,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -695,7 +699,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		for {
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
 				break
 			}
 
@@ -705,7 +709,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
 				break
 			}
 
@@ -716,14 +720,10 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DEDENT) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
 				break
 			}
 
-			p.nextToken()
-		}
-
-		if p.curTokenIs(lexer.DEDENT) {
 			p.nextToken()
 		}
 	}
@@ -739,11 +739,12 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		lit.Name = p.curToken.Literal
 	}
 
-	if !p.expectPeek(lexer.LPAREN) {
-		return nil
+	if p.peekTokenIs(lexer.LPAREN) {
+		if !p.expectPeek(lexer.LPAREN) {
+			return nil
+		}
+		lit.Parameters = p.parseFunctionParameters()
 	}
-
-	lit.Parameters = p.parseFunctionParameters()
 
 	if !p.expectPeek(lexer.COLON) {
 		return nil

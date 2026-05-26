@@ -83,6 +83,7 @@ go build -o gopy ./cmd/gopy
 - [x] **类和对象系统**
 - [x] **类继承和多态**
 - [x] **成员访问和方法调用**
+- [x] **标准 Python 缩进语法**（与向后兼容的大括号语法共存）
 - [x] **丰富的内置函数库**
 - [x] **math 数学模块（增强版）**
 - [x] **JIT 即时编译器**
@@ -257,18 +258,44 @@ print(add5(10))   # 15
 
 ### 类和对象（支持继承）
 
+GoPy 支持两种语法风格：标准 Python 缩进语法和向后兼容的大括号语法。
+
+#### 标准 Python 缩进语法（推荐）
+
 ```python
-class Animal {
+class Animal:
     def __init__(self, name):
         self.name = name
     
     def speak(self):
         print("Animal speaks")
+
+class Dog(Animal):
+    def speak(self):
+        print(self.name + " says Woof!")
+
+d = Dog("Buddy")
+d.speak()  # Buddy says Woof!
+print(d.name)  # Buddy
+```
+
+#### 向后兼容的大括号语法（可选）
+
+```python
+class Animal {
+    def __init__(self, name) {
+        self.name = name
+    }
+    
+    def speak(self) {
+        print("Animal speaks")
+    }
 }
 
 class Dog(Animal) {
-    def speak(self):
+    def speak(self) {
         print(self.name + " says Woof!")
+    }
 }
 
 d = Dog("Buddy")
