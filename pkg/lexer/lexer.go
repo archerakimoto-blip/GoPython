@@ -133,16 +133,11 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	}
 
+	l.skipWhitespace()
+
 	var tok Token
 
 	if l.justSkippedNewline && l.prevNonWhiteCh == ':' {
-		l.expectIndent = true
-	}
-
-	l.skipWhitespace()
-
-	if l.expectIndent {
-		l.expectIndent = false
 		newIndent := l.currentIndent
 		if newIndent > l.indentStack[len(l.indentStack)-1] {
 			l.indentStack = append(l.indentStack, newIndent)
@@ -150,12 +145,10 @@ func (l *Lexer) NextToken() Token {
 		}
 	}
 
-	if l.justSkippedNewline {
-		if l.prevNonWhiteCh != ':' {
-			if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || (l.prevNonWhiteCh >= '0' && l.prevNonWhiteCh <= '9') {
-				l.justSkippedNewline = false
-				return Token{Type: SEMICOLON, Literal: ";"}
-			}
+	if l.justSkippedNewline && l.prevNonWhiteCh != ':' {
+		if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || (l.prevNonWhiteCh >= '0' && l.prevNonWhiteCh <= '9') {
+			l.justSkippedNewline = false
+			return Token{Type: SEMICOLON, Literal: ";"}
 		}
 	}
 

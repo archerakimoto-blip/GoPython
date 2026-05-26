@@ -81,13 +81,15 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
-	// Register an empty prefix function for colon, semicolon, ], RBRACE, DOT and RETURN to avoid errors
+	// Register an empty prefix function for colon, semicolon, ], RBRACE, DOT, RETURN, INDENT, and DEDENT to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.SEMICOLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RBRACKET, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RBRACE, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.DOT, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RETURN, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.INDENT, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.DEDENT, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -184,6 +186,10 @@ func (p *Parser) parseStatement() ast.Statement {
 	}
 	
 	switch p.curToken.Type {
+	case lexer.INDENT:
+		return nil
+	case lexer.DEDENT:
+		return nil
 	case lexer.LET:
 		return p.parseLetStatement()
 	case lexer.RETURN:
