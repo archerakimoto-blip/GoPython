@@ -308,7 +308,9 @@ func (c *Compiler) registerBuiltins() {
 				if i > 0 {
 					fmt.Print(" ")
 				}
-				fmt.Print(arg.Inspect())
+				if arg != nil {
+					fmt.Print(arg.Inspect())
+				}
 			}
 			fmt.Println()
 			os.Stdout.Sync()
