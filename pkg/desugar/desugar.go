@@ -27,9 +27,16 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	}
 	switch s := stmt.(type) {
 	case *ast.ExpressionStatement:
+		if s.Expression == nil {
+			return nil
+		}
+		desugaredExpr := desugarExpression(s.Expression)
+		if desugaredExpr == nil {
+			return nil
+		}
 		return &ast.ExpressionStatement{
 			Token:      s.Token,
-			Expression: desugarExpression(s.Expression),
+			Expression: desugaredExpr,
 		}
 	case *ast.LetStatement:
 		return &ast.LetStatement{
@@ -118,6 +125,15 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
 		}
+	case *ast.ClassStatement:
+		desugaredClass := &ast.ClassStatement{
+			Token:       s.Token,
+			Name:        s.Name,
+			SuperClass:  s.SuperClass,
+			Body:        desugarBlockStatement(s.Body),
+			Methods:     s.Methods,
+		}
+		return desugaredClass
 	default:
 		return stmt
 	}

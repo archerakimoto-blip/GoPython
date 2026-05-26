@@ -641,38 +641,81 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
-	// Skip the opening brace
-	p.nextToken()
+	// 检查是大括号语法还是缩进语法
+	if p.curTokenIs(lexer.LBRACE) {
+		// 大括号语法（向后兼容）
+		p.nextToken()
 
-	for {
-		if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
-			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-			p.curTokenIs(lexer.ELSE) {
-			break
+		for {
+			if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			for p.curTokenIs(lexer.SEMICOLON) {
+				p.nextToken()
+			}
+
+			if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			stmt := p.parseStatement()
+			if stmt != nil {
+				block.Statements = append(block.Statements, stmt)
+			}
+
+			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			if stmt != nil {
+				p.nextToken()
+			}
+		}
+	} else if p.curTokenIs(lexer.INDENT) {
+		// 缩进语法（标准 Python）
+		p.nextToken()
+
+		for {
+			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			for p.curTokenIs(lexer.SEMICOLON) {
+				p.nextToken()
+			}
+
+			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			stmt := p.parseStatement()
+			if stmt != nil {
+				block.Statements = append(block.Statements, stmt)
+			}
+
+			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DEDENT) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) {
+				break
+			}
+
+			if stmt != nil {
+				p.nextToken()
+			}
 		}
 
-		for p.curTokenIs(lexer.SEMICOLON) {
-			p.nextToken()
-		}
-
-		if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
-			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-			p.curTokenIs(lexer.ELSE) {
-			break
-		}
-
-		stmt := p.parseStatement()
-		if stmt != nil {
-			block.Statements = append(block.Statements, stmt)
-		}
-
-		if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
-			p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-			p.curTokenIs(lexer.ELSE) {
-			break
-		}
-
-		if stmt != nil {
+		if p.curTokenIs(lexer.DEDENT) {
 			p.nextToken()
 		}
 	}
@@ -698,10 +741,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
-		return nil
-	}
-
+	p.nextToken()
 	lit.Body = p.parseBlockStatement()
 
 	return lit
@@ -1387,19 +1427,8 @@ func (p *Parser) parseClassStatement() ast.Statement {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.LBRACE) {
-		return nil
-	}
-
+	p.nextToken()
 	body := p.parseBlockStatement()
-
-	if !p.curTokenIs(lexer.RBRACE) {
-		if !p.expectPeek(lexer.RBRACE) {
-			return nil
-		}
-	} else {
-		p.nextToken()
-	}
 
 	methods := []*ast.FunctionLiteral{}
 	for _, stmt := range body.Statements {

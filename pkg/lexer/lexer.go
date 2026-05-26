@@ -64,6 +64,9 @@ const (
 	WITH     = "WITH"
 	YIELD    = "YIELD"
 	PASS     = "PASS"
+
+	INDENT = "INDENT"
+	DEDENT = "DEDENT"
 )
 
 type Token struct {
@@ -99,33 +102,74 @@ var keywords = map[string]TokenType{
 }
 
 type Lexer struct {
-	input        string
-	position     int
-	readPosition int
-	ch           byte
-	prevNonWhiteCh byte // previous non-whitespace character
-	justSkippedNewline bool // whether we just skipped a newline character
+	input             string
+	position          int
+	readPosition      int
+	ch                byte
+	prevNonWhiteCh    byte
+	justSkippedNewline bool
+	indentStack       []int
+	currentIndent     int
+	pendingTokens     []Token
+	expectIndent      bool
 }
 
 func New(input string) *Lexer {
-	l := &Lexer{input: input}
+	l := &Lexer{
+		input:         input,
+		indentStack:   []int{0},
+		currentIndent: 0,
+		pendingTokens: []Token{},
+		expectIndent:  false,
+	}
 	l.readChar()
 	return l
 }
 
 func (l *Lexer) NextToken() Token {
+	if len(l.pendingTokens) > 0 {
+		tok := l.pendingTokens[0]
+		l.pendingTokens = l.pendingTokens[1:]
+		return tok
+	}
+
 	var tok Token
+
+	if l.justSkippedNewline && l.prevNonWhiteCh == ':' {
+		l.expectIndent = true
+	}
 
 	l.skipWhitespace()
 
-	// 如果刚刚跳过了换行符，并且前一个 token 适合结束语句，就返回分号
-	if l.justSkippedNewline {
-		// 检查前一个非空白字符，判断是否应该插入分号
-		// 注意：不在冒号后插入分号，因为冒号后面通常是缩进块
-		if l.prevNonWhiteCh != ':' && (isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || l.prevNonWhiteCh == '0' || l.prevNonWhiteCh == '1' || l.prevNonWhiteCh == '2' || l.prevNonWhiteCh == '3' || l.prevNonWhiteCh == '4' || l.prevNonWhiteCh == '5' || l.prevNonWhiteCh == '6' || l.prevNonWhiteCh == '7' || l.prevNonWhiteCh == '8' || l.prevNonWhiteCh == '9') {
-			l.justSkippedNewline = false // we will use this
-			return Token{Type: SEMICOLON, Literal: ";"}
+	if l.expectIndent {
+		l.expectIndent = false
+		newIndent := l.currentIndent
+		if newIndent > l.indentStack[len(l.indentStack)-1] {
+			l.indentStack = append(l.indentStack, newIndent)
+			return Token{Type: INDENT, Literal: "INDENT"}
 		}
+	}
+
+	if l.justSkippedNewline {
+		if l.prevNonWhiteCh != ':' {
+			if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || (l.prevNonWhiteCh >= '0' && l.prevNonWhiteCh <= '9') {
+				l.justSkippedNewline = false
+				return Token{Type: SEMICOLON, Literal: ";"}
+			}
+		}
+	}
+
+	if l.ch == 0 {
+		for len(l.indentStack) > 1 {
+			l.indentStack = l.indentStack[:len(l.indentStack)-1]
+			l.pendingTokens = append(l.pendingTokens, Token{Type: DEDENT, Literal: "DEDENT"})
+		}
+		if len(l.pendingTokens) > 0 {
+			tok := l.pendingTokens[0]
+			l.pendingTokens = l.pendingTokens[1:]
+			return tok
+		}
+		return Token{Type: EOF, Literal: ""}
 	}
 
 	switch l.ch {
@@ -206,20 +250,15 @@ func (l *Lexer) NextToken() Token {
 		tok.Literal = l.readString()
 	case 'f':
 		if l.peekChar() == '"' {
-			// f"..."
-			l.readChar() // skip 'f'
+			l.readChar()
 			tok.Type = FSTRING
 			tok.Literal = l.readString()
-			l.readChar() // skip closing "
+			l.readChar()
 			return tok
 		}
-		// normal identifier starting with f
 		tok.Literal = l.readIdentifier()
 		tok.Type = lookupIdent(tok.Literal)
 		return tok
-	case 0:
-		tok.Literal = ""
-		tok.Type = EOF
 	default:
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()
@@ -238,7 +277,6 @@ func (l *Lexer) NextToken() Token {
 }
 
 func (l *Lexer) readChar() {
-	// Save the current character before moving to the next one
 	if l.ch != ' ' && l.ch != '\t' && l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
 		l.prevNonWhiteCh = l.ch
 	}
@@ -298,11 +336,37 @@ func (l *Lexer) readString() string {
 
 func (l *Lexer) skipWhitespace() {
 	l.justSkippedNewline = false
-	for l.ch == ' ' || l.ch == '\t' || l.ch == '\n' || l.ch == '\r' {
-		if l.ch == '\n' || l.ch == '\r' {
+	l.currentIndent = 0
+
+	if l.ch != '\n' && l.ch != '\r' {
+		for l.ch == ' ' || l.ch == '\t' {
+			l.readChar()
+		}
+		return
+	}
+
+	for l.ch == '\n' || l.ch == '\r' {
+		if l.ch == '\n' {
 			l.justSkippedNewline = true
 		}
 		l.readChar()
+	}
+
+	l.currentIndent = 0
+	for l.ch == ' ' || l.ch == '\t' {
+		if l.ch == '\t' {
+			l.currentIndent += 4
+		} else {
+			l.currentIndent += 1
+		}
+		l.readChar()
+	}
+
+	if l.justSkippedNewline && l.currentIndent < l.indentStack[len(l.indentStack)-1] {
+		for len(l.indentStack) > 1 && l.indentStack[len(l.indentStack)-1] > l.currentIndent {
+			l.pendingTokens = append(l.pendingTokens, Token{Type: DEDENT, Literal: "DEDENT"})
+			l.indentStack = l.indentStack[:len(l.indentStack)-1]
+		}
 	}
 }
 
@@ -328,4 +392,3 @@ func lookupIdent(ident string) TokenType {
 func newToken(tokenType TokenType, ch byte) Token {
 	return Token{Type: tokenType, Literal: string(ch)}
 }
-
