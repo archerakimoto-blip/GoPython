@@ -11,8 +11,9 @@
 3. **编译器 (Compiler)**: 将 AST 编译为字节码
 4. **虚拟机 (VM)**: 执行字节码
 5. **JIT 编译器**: 即时编译热点代码，支持自动优化，支持 x86-64 和 ARM64 双平台
-6. **调试器 (Debugger)**: 交互式调试工具，支持断点、单步执行等
-7. **性能分析器 (Profiler)**: 性能分析工具，统计函数调用和执行时间
+6. **垃圾回收器 (GC)**: 自动内存管理，标记-清除算法
+7. **调试器 (Debugger)**: 交互式调试工具，支持断点、单步执行等
+8. **性能分析器 (Profiler)**: 性能分析工具，统计函数调用和执行时间
 
 ## 目录结构
 
@@ -29,6 +30,7 @@
 │   ├── vm/             # 虚拟机（包含单元测试）
 │   ├── objects/        # 核心对象系统
 │   ├── jit/            # JIT 编译器完整实现（支持 x86-64 和 ARM64）
+│   ├── gc/             # 垃圾回收器（标记-清除算法）
 │   ├── debugger/       # 调试器
 │   └── profiler/       # 性能分析器
 ├── tests/
@@ -130,11 +132,13 @@ go build -o gopy ./cmd/gopy
 - [x] **sys 系统模块**
 - [x] **os 操作系统模块**
 - [x] **json 数据处理模块**
+- [x] **gc 垃圾回收模块**
 - [x] **JIT 即时编译器（支持 x86-64 和 ARM64）**
 - [x] **调试器工具**
 - [x] **性能分析器**
 - [x] **模块导入系统**（import 和 from...import）
 - [x] **激进优化功能**（循环展开、内联优化、分支预测等）
+- [x] **垃圾回收器**（标记-清除算法）
 
 ### 异常类型系统
 
@@ -244,6 +248,61 @@ GoPy 提供了 json 模块，用于 JSON 数据处理：
 |------|------|------|
 | `json.dumps(obj)` | 将对象序列化为 JSON 字符串 | `json.dumps({'name': 'Bob'})` |
 | `json.loads(str)` | 将 JSON 字符串反序列化为对象 | `json.loads('{"name": "Bob"}')` |
+
+### gc 垃圾回收模块
+
+GoPy 提供了 gc 模块，用于垃圾回收控制：
+
+| 函数/属性 | 描述 | 示例 |
+|----------|------|------|
+| `gc.enable()` | 启用垃圾回收 | `gc.enable()` |
+| `gc.disable()` | 禁用垃圾回收 | `gc.disable()` |
+| `gc.collect()` | 手动触发垃圾回收 | `gc.collect()` |
+| `gc.get_stats()` | 获取垃圾回收统计信息 | `gc.get_stats()` |
+| `gc.print_stats()` | 打印详细的垃圾回收统计 | `gc.print_stats()` |
+| `gc.set_threshold(n)` | 设置垃圾回收阈值（字节） | `gc.set_threshold(2097152)` |
+| `gc.set_verbose(flag)` | 设置垃圾回收详细输出模式 | `gc.set_verbose(True)` |
+
+#### 垃圾回收器特性
+
+GoPy 的垃圾回收器采用标记-清除算法，具有以下特性：
+
+- **自动回收**: 当对象分配达到阈值时自动触发回收（默认 1MB）
+- **手动控制**: 支持 `gc.collect()` 手动触发回收
+- **统计信息**: 提供详细的内存分配、释放和对象存活情况统计
+- **可配置**: 支持设置回收阈值和详细输出模式
+- **根对象扫描**: 自动从栈、全局变量、帧等位置开始扫描根对象
+
+### 使用 gc 模块
+
+```python
+import gc
+
+# 启用/禁用垃圾回收
+gc.enable()
+gc.disable()
+gc.enable()
+
+# 获取统计信息
+stats = gc.get_stats()
+print("集合总数:", stats['collection_count'])
+print("已分配字节数:", stats['allocated_bytes'])
+print("已释放字节数:", stats['freed_bytes'])
+print("存活对象数:", stats['live_objects'])
+
+# 打印详细统计
+gc.print_stats()
+
+# 手动触发垃圾回收
+gc.collect()
+
+# 设置阈值（2MB）
+gc.set_threshold(2097152)
+
+# 设置详细模式
+gc.set_verbose(True)
+gc.set_verbose(False)
+```
 
 ### 模块导入系统
 
@@ -589,6 +648,9 @@ print(math.hypot(3, 4)) # 5.0
 - `tests/python/test_builtins_new.py` - 新增内置函数测试
 - `tests/python/test_all_comprehensive.py` - 综合功能测试
 
+### 垃圾回收测试
+- `tests/python/test_gc.py` - gc 模块功能测试
+
 ### Go 单元测试
 - `pkg/vm/vm_test.go` - 虚拟机单元测试（包含算术、lambda、布尔运算测试）
 
@@ -624,8 +686,8 @@ go test ./...
 - [x] 实现更多内置模块（os, sys, json 等）
 - [x] 增强 JIT 编译优化（真正编译到机器码，支持 x86-64 和 ARM64）
 - [x] 添加激进优化功能（循环展开、内联优化等）
+- [x] 实现垃圾回收（标记-清除算法）
 - [ ] 实现与现有 Python 库的兼容性
-- [ ] 实现垃圾回收
 - [ ] 添加更多 Python 标准库功能
 
 ## 贡献
