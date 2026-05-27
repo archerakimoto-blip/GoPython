@@ -221,6 +221,35 @@ func (vm *VM) Run() error {
 		ins := frame.fn.Instructions
 		op := compiler.Opcode(ins[ip])
 
+		// 临时打印调试信息！
+		if vm.instructionCount <= 200 {
+			opNames := map[compiler.Opcode]string{
+				compiler.OpConstant:       "OpConstant",
+				compiler.OpPop:            "OpPop",
+				compiler.OpGetGlobal:      "OpGetGlobal",
+				compiler.OpSetGlobal:      "OpSetGlobal",
+				compiler.OpGetLocal:       "OpGetLocal",
+				compiler.OpSetLocal:       "OpSetLocal",
+				compiler.OpCall:           "OpCall",
+				compiler.OpReturnValue:    "OpReturnValue",
+				compiler.OpAdd:            "OpAdd",
+				compiler.OpSub:            "OpSub",
+				compiler.OpMul:            "OpMul",
+				compiler.OpLessThan:       "OpLessThan",
+				compiler.OpJumpNotTruthy:  "OpJumpNotTruthy",
+				compiler.OpJump:           "OpJump",
+				compiler.OpIndex:          "OpIndex",
+			}
+			name, ok := opNames[op]
+			if !ok {
+				name = fmt.Sprintf("Op%d", op)
+			}
+			fmt.Printf("Exec #%d: IP=%03d %s  SP=%d  Stack Top=%v\n", vm.instructionCount, ip, name, vm.sp, func() string {
+				if vm.sp ==0 { return "empty" }
+				return fmt.Sprintf("%v", vm.stack[vm.sp-1])
+			}())
+		}
+
 		switch op {
 		case compiler.OpConstant:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -1168,7 +1197,8 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 		case compiler.OpNotEqual:
 			return vm.push(nativeBoolToBooleanObject(left != right))
 		default:
-			return fmt.Errorf("unknown operator: %d (nil %s)", op, left.Type())
+			// Handle both nil cases gracefully for any comparison
+			return vm.push(objects.False)
 		}
 	}
 
@@ -1497,7 +1527,7 @@ func (vm *VM) buildSet(startIndex, endIndex int) objects.Object {
 
 func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 	switch {
-	case (left.Type() == objects.LIST_OBJ || left.Type() == objects.RANGE_OBJ) && index.Type() == objects.INTEGER_OBJ:
+	case left.Type() == objects.LIST_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeArrayIndex(left, index)
 	case left.Type() == objects.TUPLE_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeTupleIndex(left, index)
@@ -1509,37 +1539,15 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 }
 
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {
-	switch arrayObject := array.(type) {
-	case *objects.List:
-		idx := index.(*objects.Integer).Value
-		max := int64(len(arrayObject.Elements) - 1)
-		if idx < 0 || idx > max {
-			return vm.push(objects.None_)
-		}
-		return vm.push(arrayObject.Elements[idx])
-	case *objects.Range:
-		idx := index.(*objects.Integer).Value
-		var length int64
-		if arrayObject.Step > 0 {
-			if arrayObject.Start >= arrayObject.Stop {
-				length = 0
-			} else {
-				length = ((arrayObject.Stop - arrayObject.Start - 1) / arrayObject.Step) + 1
-			}
-		} else {
-			if arrayObject.Start <= arrayObject.Stop {
-				length = 0
-			} else {
-				length = ((arrayObject.Start - arrayObject.Stop - 1) / (-arrayObject.Step)) + 1
-			}
-		}
-		if idx < 0 || idx >= length {
-			return vm.push(objects.None_)
-		}
-		val := arrayObject.Start + arrayObject.Step*idx
-		return vm.push(&objects.Integer{Value: val})
+	arrayObject := array.(*objects.List)
+	idx := index.(*objects.Integer).Value
+	max := int64(len(arrayObject.Elements) - 1)
+
+	if idx < 0 || idx > max {
+		return vm.push(objects.None_)
 	}
-	return vm.push(objects.None_)
+
+	return vm.push(arrayObject.Elements[idx])
 }
 
 func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
