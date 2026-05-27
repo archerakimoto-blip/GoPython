@@ -16,11 +16,11 @@ type BenchmarkResult struct {
 }
 
 func runBenchmark(filePath string) BenchmarkResult {
-	fmt.Printf("Running benchmark: %s\n", filePath)
+	fmt.Printf("Running benchmark (JIT enabled): %s\n", filePath)
 	
 	start := time.Now()
 	
-	cmd := exec.Command("./gopy", filePath)
+	cmd := exec.Command("./gopy", "--jit", filePath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	
