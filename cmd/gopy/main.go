@@ -27,7 +27,6 @@ var (
 	breakpoints          = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
 	jitFlag              = flag.Bool("jit", false, "Enable JIT compilation")
 	fastFlag             = flag.Bool("fast", false, "Enable optimized fast VM")
-	fastv2Flag           = flag.Bool("fastv2", false, "Enable further optimized fast VM v2")
 	jitPlatform          = flag.String("jit-platform", "", "Target platform for JIT (x86_64, arm64)")
 	jitAggressive        = flag.Bool("jit-aggressive", false, "Enable aggressive optimizations")
 	jitProfiling         = flag.Bool("jit-profiling", false, "Enable JIT profiling")
@@ -48,8 +47,6 @@ func main() {
 		filename := flag.Arg(0)
 		if *jitFlag {
 			runFileWithJIT(filename)
-		} else if *fastv2Flag {
-			runFileWithFastVMv2(filename)
 		} else if *fastFlag {
 			runFileWithFastVM(filename)
 		} else {
@@ -305,7 +302,7 @@ func runFileWithFastVM(filename string) {
 	code := comp.Bytecode()
 
 	start := time.Now()
-	machine := vm.NewFast(code)
+	machine := vm.NewFastVM(code)
 	err = machine.Run()
 	elapsed := time.Since(start)
 
@@ -315,46 +312,6 @@ func runFileWithFastVM(filename string) {
 	}
 
 	fmt.Printf("[Fast VM executed in %v]\n", elapsed)
-}
-
-func runFileWithFastVMv2(filename string) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		fmt.Printf("Error reading file: %s\n", err)
-		return
-	}
-
-	l := lexer.New(string(data))
-	p := parser.New(l)
-	program := p.ParseProgram()
-
-	if len(p.Errors()) != 0 {
-		printParserErrors(p.Errors())
-		return
-	}
-
-	program = desugar.Desugar(program)
-
-	comp := compiler.New()
-	err = comp.Compile(program)
-	if err != nil {
-		fmt.Printf("Compilation error: %s\n", err)
-		return
-	}
-
-	code := comp.Bytecode()
-
-	start := time.Now()
-	machine := vm.NewFastv2(code)
-	err = machine.Run()
-	elapsed := time.Since(start)
-
-	if err != nil {
-		fmt.Printf("Execution error: %s\n", err)
-		return
-	}
-
-	fmt.Printf("[Fast VM v2 executed in %v]\n", elapsed)
 }
 
 func runBenchmarkSuite() {
@@ -431,7 +388,7 @@ func runSingleBenchmark(file string, useFast bool) time.Duration {
 
 	start := time.Now()
 	if useFast {
-		machine := vm.NewFast(code)
+		machine := vm.NewFastVM(code)
 		machine.Run()
 	} else {
 		machine := vm.New(code)
