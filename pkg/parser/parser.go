@@ -33,6 +33,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.NOT_EQ:   EQUALS,
 	lexer.LT:       LESSGREATER,
 	lexer.GT:       LESSGREATER,
+	lexer.LT_EQ:    LESSGREATER,
+	lexer.GT_EQ:    LESSGREATER,
 	lexer.PLUS:     SUM,
 	lexer.MINUS:    SUM,
 	lexer.SLASH:    PRODUCT,
@@ -100,6 +102,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.LT, p.parseInfixExpression)
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
+	p.registerInfix(lexer.LT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.GT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
@@ -788,6 +792,20 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 			stmt := p.parseStatement()
 			if stmt != nil {
 				block.Statements = append(block.Statements, stmt)
+			}
+
+			// Check: is current token DEDENT but peek token is not an end marker?
+			// That means this DEDENT is from an inner block! Skip it and continue!
+			if p.curTokenIs(lexer.DEDENT) {
+				// Check if next token is something that's not ending our block
+				if !(p.peekTokenIs(lexer.EOF) || p.peekTokenIs(lexer.EXCEPT) ||
+					p.peekTokenIs(lexer.FINALLY) || p.peekTokenIs(lexer.ELSE) ||
+					p.peekTokenIs(lexer.COLON)) {
+					// Skip this inner DEDENT and keep going!
+					p.nextToken()
+					// Don't break, continue loop!
+					continue
+				}
 			}
 
 			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DEDENT) ||

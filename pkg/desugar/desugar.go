@@ -141,6 +141,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 
 // desugarBlockStatement 脱糖块语句
 func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
+	if block == nil {
+		return nil
+	}
 	desugared := &ast.BlockStatement{
 		Token:      block.Token,
 		Statements: make([]ast.Statement, 0, len(block.Statements)),
@@ -293,12 +296,15 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Right:    desugarExpression(e.Right),
 		}
 	case *ast.IfExpression:
-		return &ast.IfExpression{
+		desugared := &ast.IfExpression{
 			Token:       e.Token,
 			Condition:   desugarExpression(e.Condition),
 			Consequence: desugarBlockStatement(e.Consequence),
-			Alternative: desugarBlockStatement(e.Alternative),
 		}
+		if e.Alternative != nil {
+			desugared.Alternative = desugarBlockStatement(e.Alternative)
+		}
+		return desugared
 	case *ast.TernaryExpression:
 		// 将三元表达式转换为 IfExpression
 		// a if b else c -> if b { a } else { c }

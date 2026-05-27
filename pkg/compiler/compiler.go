@@ -26,6 +26,8 @@ const (
 	OpNotEqual
 	OpGreaterThan
 	OpLessThan
+	OpGreaterThanEqual
+	OpLessThanEqual
 	OpMinus
 	OpBang
 	OpJump
@@ -934,6 +936,32 @@ func (c *Compiler) Compile(node ast.Node) error {
 				return err
 			}
 			c.emit(OpGreaterThan)
+			return nil
+		}
+
+		if node.Operator == ">=" {
+			err := c.Compile(node.Right)
+			if err != nil {
+				return err
+			}
+			err = c.Compile(node.Left)
+			if err != nil {
+				return err
+			}
+			c.emit(OpLessThanEqual)
+			return nil
+		}
+
+		if node.Operator == "<=" {
+			err := c.Compile(node.Right)
+			if err != nil {
+				return err
+			}
+			err = c.Compile(node.Left)
+			if err != nil {
+				return err
+			}
+			c.emit(OpGreaterThanEqual)
 			return nil
 		}
 

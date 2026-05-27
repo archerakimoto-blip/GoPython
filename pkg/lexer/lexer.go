@@ -20,6 +20,8 @@ const (
 	SLASH    = "/"
 	LT       = "<"
 	GT       = ">"
+	LT_EQ    = "<="
+	GT_EQ    = ">="
 	PLUS_EQ  = "+="
 	MINUS_EQ = "-="
 	MUL_EQ   = "*="
@@ -139,6 +141,14 @@ func (l *Lexer) NextToken() Token {
 
 	l.skipWhitespace()
 
+	// Skip comments (# to end of line)
+	for l.ch == '#' {
+		for l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
+			l.readChar()
+		}
+		l.skipWhitespace()
+	}
+
 	var tok Token
 
 	if l.justSkippedNewline && l.prevNonWhiteCh == ':' {
@@ -219,9 +229,21 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(BANG, l.ch)
 		}
 	case '<':
-		tok = newToken(LT, l.ch)
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: LT_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(LT, l.ch)
+		}
 	case '>':
-		tok = newToken(GT, l.ch)
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: GT_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(GT, l.ch)
+		}
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
 	case ':':

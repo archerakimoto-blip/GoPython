@@ -1,5 +1,5 @@
-def fib(n):
-    return n
+def hello(name):
+    return "hello " + name
 
-result = fib(5)
+result = hello("world")
 print(result)
