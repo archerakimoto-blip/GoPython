@@ -1,0 +1,38 @@
+# Binaries and executables
+/gopy
+/benchmark
+
+# Benchmark result files
+benchmark_results_*.txt
+
+# Debug and test scripts created during development
+debug_*.go
+test_*.go
+analyze_perf.go
+test_breakdown.go
+test_compile.go
+
+# Debug and test Python files created during development
+test_*.py
+debug_*.py
+!tests/**/*.py
+
+# Go build artifacts
+*.o
+*.a
+*.so
+*.out
+go-build
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS files
+.DS_Store
+
+# Windows files
+Thumbs.db
