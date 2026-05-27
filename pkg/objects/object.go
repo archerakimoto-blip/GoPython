@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"runtime"
+	"strings"
+	"time"
 )
 
 type ObjectType string
@@ -1319,4 +1322,300 @@ func convertToObject(value interface{}) Object {
 		// 对于未知类型，返回字符串表示
 		return &String{Value: fmt.Sprintf("%v", v)}
 	}
+}
+
+// CreateRandomModule 创建 random 模块
+func CreateRandomModule() *Module {
+	randomModule := &Module{
+		Name:    "random",
+		Fields: make(map[string]Object),
+	}
+	
+	// random.seed
+	randomModule.Fields["seed"] = &Builtin{
+		Name: "random.seed",
+		Fn: func(args ...Object) Object {
+			if len(args) == 0 {
+				rand.Seed(time.Now().UnixNano())
+				return None_
+			}
+			switch v := args[0].(type) {
+			case *Integer:
+				rand.Seed(v.Value)
+			case *Float:
+				rand.Seed(int64(v.Value))
+			default:
+				return NewTypeError("seed() argument must be a number")
+			}
+			return None_
+		},
+	}
+	
+	// random.random
+	randomModule.Fields["random"] = &Builtin{
+		Name: "random.random",
+		Fn: func(args ...Object) Object {
+			return &Float{Value: rand.Float64()}
+		},
+	}
+	
+	// random.uniform
+	randomModule.Fields["uniform"] = &Builtin{
+		Name: "random.uniform",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("uniform() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Float)
+			b, ok2 := args[1].(*Float)
+			if !ok1 || !ok2 {
+				if i1, ok := args[0].(*Integer); ok {
+					a = &Float{Value: float64(i1.Value)}
+					ok1 = true
+				}
+				if i2, ok := args[1].(*Integer); ok {
+					b = &Float{Value: float64(i2.Value)}
+					ok2 = true
+				}
+				if !ok1 || !ok2 {
+					return NewTypeError("uniform() arguments must be numbers")
+				}
+			}
+			result := a.Value + rand.Float64()*(b.Value - a.Value)
+			return &Float{Value: result}
+		},
+	}
+	
+	// random.randint
+	randomModule.Fields["randint"] = &Builtin{
+		Name: "random.randint",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("randint() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("randint() arguments must be integers")
+			}
+			result := a.Value + rand.Int63n(b.Value - a.Value + 1)
+			return &Integer{Value: result}
+		},
+	}
+	
+	// random.choice
+	randomModule.Fields["choice"] = &Builtin{
+		Name: "random.choice",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("choice() takes exactly 1 argument")
+			}
+			list, ok := args[0].(*List)
+			if !ok {
+				return NewTypeError("choice() argument must be a list")
+			}
+			if len(list.Elements) == 0 {
+				return NewIndexError("cannot choose from empty list")
+			}
+			idx := rand.Intn(len(list.Elements))
+			return list.Elements[idx]
+		},
+	}
+	
+	// random.shuffle
+	randomModule.Fields["shuffle"] = &Builtin{
+		Name: "random.shuffle",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("shuffle() takes exactly 1 argument")
+			}
+			list, ok := args[0].(*List)
+			if !ok {
+				return NewTypeError("shuffle() argument must be a list")
+			}
+			rand.Shuffle(len(list.Elements), func(i, j int) {
+				list.Elements[i], list.Elements[j] = list.Elements[j], list.Elements[i]
+			})
+			return None_
+		},
+	}
+	
+	return randomModule
+}
+
+// CreateStringModule 创建 string 模块
+func CreateStringModule() *Module {
+	stringModule := &Module{
+		Name:    "string",
+		Fields: make(map[string]Object),
+	}
+	
+	// string.ascii_letters
+	stringModule.Fields["ascii_letters"] = &String{Value: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+	
+	// string.ascii_lowercase
+	stringModule.Fields["ascii_lowercase"] = &String{Value: "abcdefghijklmnopqrstuvwxyz"}
+	
+	// string.ascii_uppercase
+	stringModule.Fields["ascii_uppercase"] = &String{Value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ"}
+	
+	// string.digits
+	stringModule.Fields["digits"] = &String{Value: "0123456789"}
+	
+	// string.hexdigits
+	stringModule.Fields["hexdigits"] = &String{Value: "0123456789abcdefABCDEF"}
+	
+	// string.octdigits
+	stringModule.Fields["octdigits"] = &String{Value: "01234567"}
+	
+	// string.punctuation
+	stringModule.Fields["punctuation"] = &String{Value: "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"}
+	
+	// string.printable
+	stringModule.Fields["printable"] = &String{Value: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\n\r\x0b\x0c"}
+	
+	// string.whitespace
+	stringModule.Fields["whitespace"] = &String{Value: " \t\n\r\x0b\x0c"}
+	
+	// string.capitalize (作为演示，添加一些字符串处理函数)
+	stringModule.Fields["capitalize"] = &Builtin{
+		Name: "string.capitalize",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("capitalize() takes exactly 1 argument")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("capitalize() argument must be a string")
+			}
+			if len(s.Value) == 0 {
+				return s
+			}
+			capitalized := strings.ToUpper(string(s.Value[0])) + strings.ToLower(s.Value[1:])
+			return &String{Value: capitalized}
+		},
+	}
+	
+	return stringModule
+}
+
+// CreateTimeModule 创建 time 模块
+func CreateTimeModule() *Module {
+	timeModule := &Module{
+		Name:    "time",
+		Fields: make(map[string]Object),
+	}
+	
+	// time.time
+	timeModule.Fields["time"] = &Builtin{
+		Name: "time.time",
+		Fn: func(args ...Object) Object {
+			return &Float{Value: float64(time.Now().UnixNano()) / 1e9}
+		},
+	}
+	
+	// time.sleep
+	timeModule.Fields["sleep"] = &Builtin{
+		Name: "time.sleep",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("sleep() takes exactly 1 argument")
+			}
+			var secs float64
+			switch v := args[0].(type) {
+			case *Float:
+				secs = v.Value
+			case *Integer:
+				secs = float64(v.Value)
+			default:
+				return NewTypeError("sleep() argument must be a number")
+			}
+			time.Sleep(time.Duration(secs * float64(time.Second)))
+			return None_
+		},
+	}
+	
+	// time.ctime
+	timeModule.Fields["ctime"] = &Builtin{
+		Name: "time.ctime",
+		Fn: func(args ...Object) Object {
+			var t time.Time
+			if len(args) == 0 {
+				t = time.Now()
+			} else if len(args) == 1 {
+				switch v := args[0].(type) {
+				case *Float:
+					t = time.Unix(0, int64(v.Value*1e9))
+				case *Integer:
+					t = time.Unix(v.Value, 0)
+				default:
+					return NewTypeError("ctime() argument must be a number")
+				}
+			} else {
+				return NewTypeError("ctime() takes at most 1 argument")
+			}
+			return &String{Value: t.Format(time.UnixDate)}
+		},
+	}
+	
+	// time.localtime (返回简单表示)
+	timeModule.Fields["localtime"] = &Builtin{
+		Name: "time.localtime",
+		Fn: func(args ...Object) Object {
+			t := time.Now()
+			// 返回一个简单的 tuple：(year, month, day, hour, minute, second, weekday, yearday)
+			return &Tuple{
+				Elements: []Object{
+					&Integer{Value: int64(t.Year())},
+					&Integer{Value: int64(t.Month())},
+					&Integer{Value: int64(t.Day())},
+					&Integer{Value: int64(t.Hour())},
+					&Integer{Value: int64(t.Minute())},
+					&Integer{Value: int64(t.Second())},
+					&Integer{Value: int64(t.Weekday())},
+					&Integer{Value: int64(t.YearDay())},
+				},
+			}
+		},
+	}
+	
+	return timeModule
+}
+
+// CreateDatetimeModule 创建 datetime 模块
+func CreateDatetimeModule() *Module {
+	datetimeModule := &Module{
+		Name:    "datetime",
+		Fields: make(map[string]Object),
+	}
+	
+	// datetime.datetime.now
+	datetimeModule.Fields["datetime"] = &Module{
+		Name: "datetime",
+		Fields: map[string]Object{
+			"now": &Builtin{
+				Name: "datetime.datetime.now",
+				Fn: func(args ...Object) Object {
+					t := time.Now()
+					return &String{Value: t.Format("2006-01-02 15:04:05")}
+				},
+			},
+		},
+	}
+	
+	// datetime.date.today
+	datetimeModule.Fields["date"] = &Module{
+		Name: "date",
+		Fields: map[string]Object{
+			"today": &Builtin{
+				Name: "datetime.date.today",
+				Fn: func(args ...Object) Object {
+					t := time.Now()
+					return &String{Value: t.Format("2006-01-02")}
+				},
+			},
+		},
+	}
+	
+	return datetimeModule
 }

@@ -133,6 +133,10 @@ go build -o gopy ./cmd/gopy
 - [x] **os 操作系统模块**
 - [x] **json 数据处理模块**
 - [x] **gc 垃圾回收模块**
+- [x] **random 随机数生成模块**
+- [x] **string 字符串处理模块**
+- [x] **time 时间处理模块**
+- [x] **datetime 日期时间模块**
 - [x] **JIT 即时编译器（支持 x86-64 和 ARM64）**
 - [x] **调试器工具**
 - [x] **性能分析器**
@@ -302,6 +306,135 @@ gc.set_threshold(2097152)
 # 设置详细模式
 gc.set_verbose(True)
 gc.set_verbose(False)
+```
+
+### random 随机数模块
+
+GoPy 提供了 random 模块，用于生成随机数：
+
+| 函数/属性 | 描述 | 示例 |
+|-----------|------|------|
+| `random.seed(seed)` | 设置随机种子 | `random.seed(42)` |
+| `random.random()` | 返回 0.0 到 1.0 之间的随机浮点数 | `random.random()` |
+| `random.uniform(a, b)` | 返回 a 到 b 之间的随机浮点数 | `random.uniform(1, 10)` |
+| `random.randint(a, b)` | 返回 a 到 b 之间的随机整数（包含边界） | `random.randint(1, 100)` |
+| `random.choice(seq)` | 从序列中随机选择一个元素 | `random.choice([1, 2, 3])` |
+| `random.shuffle(seq)` | 随机打乱序列 | `random.shuffle(my_list)` |
+
+### 使用 random 模块
+
+```python
+import random
+
+# 设置种子（可选）
+random.seed(42)
+
+# 生成 0-1 之间的随机浮点数
+print(random.random())
+
+# 生成 1-10 之间的随机浮点数
+print(random.uniform(1, 10))
+
+# 生成 1-100 之间的随机整数
+print(random.randint(1, 100))
+
+# 从列表中随机选择
+my_list = [1, 2, 3, 4, 5]
+print(random.choice(my_list))
+
+# 打乱列表
+random.shuffle(my_list)
+print(my_list)
+```
+
+### string 字符串模块
+
+GoPy 提供了 string 模块，包含常用的字符串常量和处理函数：
+
+| 常量 | 描述 |
+|-----|------|
+| `string.ascii_letters` | 所有大小写字母 |
+| `string.ascii_lowercase` | 所有小写字母 |
+| `string.ascii_uppercase` | 所有大写字母 |
+| `string.digits` | 所有数字 0-9 |
+| `string.hexdigits` | 所有十六进制数字 |
+| `string.octdigits` | 所有八进制数字 |
+| `string.punctuation` | 所有标点符号 |
+| `string.printable` | 所有可打印字符 |
+| `string.whitespace` | 所有空白字符 |
+
+| 函数 | 描述 | 示例 |
+|-----|------|------|
+| `string.capitalize(s)` | 首字母大写，其余小写 | `string.capitalize("hello")` |
+
+### 使用 string 模块
+
+```python
+import string
+
+# 使用预定义常量
+print("小写字母:", string.ascii_lowercase)
+print("大写字母:", string.ascii_uppercase)
+print("数字:", string.digits)
+
+# 使用字符串处理函数
+print(string.capitalize("hello world"))
+```
+
+### time 时间模块
+
+GoPy 提供了 time 模块，用于处理时间相关功能：
+
+| 函数 | 描述 | 示例 |
+|-----|------|------|
+| `time.time()` | 返回当前时间戳（秒） | `time.time()` |
+| `time.sleep(seconds)` | 暂停执行指定秒数 | `time.sleep(1)` |
+| `time.ctime([seconds])` | 返回可读的时间字符串 | `time.ctime()` |
+| `time.localtime()` | 返回本地时间元组 | `time.localtime()` |
+
+### 使用 time 模块
+
+```python
+import time
+
+# 获取当前时间戳
+timestamp = time.time()
+print("当前时间戳:", timestamp)
+
+# 休眠
+print("开始休眠...")
+time.sleep(0.1)
+print("休眠结束")
+
+# 获取可读的时间
+print("当前时间:", time.ctime())
+
+# 获取本地时间
+local_time = time.localtime()
+print("本地时间:", local_time)
+```
+
+### datetime 日期时间模块
+
+GoPy 提供了 datetime 模块，用于处理日期和时间：
+
+| 类/函数 | 描述 | 示例 |
+|--------|------|------|
+| `datetime.datetime.now()` | 返回当前日期和时间 | `datetime.datetime.now()` |
+| `datetime.date.today()` | 返回当前日期 | `datetime.date.today()` |
+
+### 使用 datetime 模块
+
+```python
+import datetime
+
+# 获取当前日期和时间
+now = datetime.datetime.now()
+print("当前日期时间:", now)
+
+# 获取当前日期
+today = datetime.date.today()
+print("当前日期:", today)
 ```
 
 ### 模块导入系统
@@ -687,7 +820,7 @@ go test ./...
 - [x] 增强 JIT 编译优化（真正编译到机器码，支持 x86-64 和 ARM64）
 - [x] 添加激进优化功能（循环展开、内联优化等）
 - [x] 实现垃圾回收（标记-清除算法）
-- [ ] 实现与现有 Python 库的兼容性
+- [x] 实现与现有 Python 库的兼容性（添加 random, string, time, datetime 等标准库）
 - [ ] 添加更多 Python 标准库功能
 
 ## 贡献

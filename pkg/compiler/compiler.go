@@ -257,6 +257,34 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, gcModule)
 	c.symbolTable.DefineBuiltin("gc", gcIndex)
 
+	// 注册 random 模块
+	randomModule := objects.CreateRandomModule()
+	objects.RegisterModule("random", randomModule)
+	randomIndex := len(c.constants)
+	c.constants = append(c.constants, randomModule)
+	c.symbolTable.DefineBuiltin("random", randomIndex)
+
+	// 注册 string 模块
+	stringModule := objects.CreateStringModule()
+	objects.RegisterModule("string", stringModule)
+	stringIndex := len(c.constants)
+	c.constants = append(c.constants, stringModule)
+	c.symbolTable.DefineBuiltin("string", stringIndex)
+
+	// 注册 time 模块
+	timeModule := objects.CreateTimeModule()
+	objects.RegisterModule("time", timeModule)
+	timeIndex := len(c.constants)
+	c.constants = append(c.constants, timeModule)
+	c.symbolTable.DefineBuiltin("time", timeIndex)
+
+	// 注册 datetime 模块
+	datetimeModule := objects.CreateDatetimeModule()
+	objects.RegisterModule("datetime", datetimeModule)
+	datetimeIndex := len(c.constants)
+	c.constants = append(c.constants, datetimeModule)
+	c.symbolTable.DefineBuiltin("datetime", datetimeIndex)
+
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) != 1 {
