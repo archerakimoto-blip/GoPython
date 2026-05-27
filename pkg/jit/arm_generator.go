@@ -173,6 +173,10 @@ func (g *ARMMachineCodeGenerator) emitBytecode(instructions []byte) error {
 		case compiler.OpReturn:
 			ip++
 
+		case compiler.OpReturnValue:
+			g.emitReturnValue()
+			ip++
+
 		case compiler.OpJump:
 			if ip+2 < len(instructions) {
 				target := int(instructions[ip+1])<<8 | int(instructions[ip+2])
@@ -186,6 +190,139 @@ func (g *ARMMachineCodeGenerator) emitBytecode(instructions []byte) error {
 				g.emitJumpNotTruthy(target - ip - 3)
 				ip += 3
 			}
+
+		case compiler.OpGetGlobal:
+			if ip+2 < len(instructions) {
+				globalIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitGetGlobal(globalIndex)
+				ip += 3
+			}
+
+		case compiler.OpSetGlobal:
+			if ip+2 < len(instructions) {
+				globalIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitSetGlobal(globalIndex)
+				ip += 3
+			}
+
+		case compiler.OpGetLocal:
+			if ip+1 < len(instructions) {
+				localIndex := int(instructions[ip+1])
+				g.emitGetLocal(localIndex)
+				ip += 2
+			}
+
+		case compiler.OpSetLocal:
+			if ip+1 < len(instructions) {
+				localIndex := int(instructions[ip+1])
+				g.emitSetLocal(localIndex)
+				ip += 2
+			}
+
+		case compiler.OpCall:
+			if ip+1 < len(instructions) {
+				numArgs := int(instructions[ip+1])
+				g.emitCall(numArgs)
+				ip += 2
+			}
+
+		case compiler.OpTrue:
+			g.emitLoadTrue()
+			ip++
+
+		case compiler.OpFalse:
+			g.emitLoadFalse()
+			ip++
+
+		case compiler.OpNull:
+			g.emitLoadNull()
+			ip++
+
+		case compiler.OpMinus:
+			g.emitNeg()
+			ip++
+
+		case compiler.OpBang:
+			g.emitNot()
+			ip++
+
+		case compiler.OpArray:
+			if ip+1 < len(instructions) {
+				numElements := int(instructions[ip+1])
+				g.emitCreateArray(numElements)
+				ip += 2
+			}
+
+		case compiler.OpHash:
+			if ip+1 < len(instructions) {
+				numPairs := int(instructions[ip+1])
+				g.emitCreateDict(numPairs)
+				ip += 2
+			}
+
+		case compiler.OpSet:
+			if ip+1 < len(instructions) {
+				numElements := int(instructions[ip+1])
+				g.emitCreateSet(numElements)
+				ip += 2
+			}
+
+		case compiler.OpIndex:
+			g.emitIndex()
+			ip++
+
+		case compiler.OpSlice:
+			if ip+2 < len(instructions) {
+				start := int(instructions[ip+1])
+				end := int(instructions[ip+2])
+				g.emitSlice(start, end)
+				ip += 3
+			}
+
+		case compiler.OpGetAttribute:
+			if ip+2 < len(instructions) {
+				attrIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitGetAttribute(attrIndex)
+				ip += 3
+			}
+
+		case compiler.OpSetAttribute:
+			if ip+2 < len(instructions) {
+				attrIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitSetAttribute(attrIndex)
+				ip += 3
+			}
+
+		case compiler.OpFormatString:
+			g.emitFormatString()
+			ip++
+
+		case compiler.OpCreateClass:
+			g.emitCreateClass()
+			ip++
+
+		case compiler.OpCreateClassWithSuper:
+			g.emitCreateClassWithSuper()
+			ip++
+
+		case compiler.OpYield:
+			g.emitYield()
+			ip++
+
+		case compiler.OpBeginTry:
+			if ip+2 < len(instructions) {
+				handlerIP := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitBeginTry(handlerIP)
+				ip += 3
+			}
+
+		case compiler.OpEndTry:
+			g.emitEndTry()
+			ip++
+
+		case compiler.OpRaise:
+			g.emitRaise()
+			ip++
 
 		default:
 			ip++
@@ -520,6 +657,145 @@ func (g *ARMMachineCodeGenerator) emitUint32(val uint32) {
 		byte(val>>16),
 		byte(val>>24),
 	)
+}
+
+func (g *ARMMachineCodeGenerator) emitReturnValue() {
+	g.emitPop(X0)
+	g.emitAddImm(SP, SP, 32)
+	g.emitLdrX(X29, SP, -16)
+	g.emitLdrX(X30, SP, -8)
+	g.emitRet()
+}
+
+func (g *ARMMachineCodeGenerator) emitGetGlobal(index int) {
+	g.emitMovImm64(X0, int64(index))
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitSetGlobal(index int) {
+	g.emitPop(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitGetLocal(index int) {
+	g.emitMovImm64(X0, int64(index))
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitSetLocal(index int) {
+	g.emitPop(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitCall(numArgs int) {
+	g.emitPop(X0)
+	g.emitPop(X1)
+	g.emitAddImm(SP, SP, numArgs*8)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitLoadTrue() {
+	g.emitMovImm64(X0, 1)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitLoadFalse() {
+	g.emitMovImm64(X0, 0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitLoadNull() {
+	g.emitMovImm64(X0, 0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitNeg() {
+	g.emitPop(X0)
+	g.emitNegReg(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitNot() {
+	g.emitPop(X0)
+	g.emitCmpImm(X0, 0)
+	g.emitCsetEq(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitNegReg(rd int) {
+	opcode := uint32(0xCB000080)
+	opcode |= uint32(rd&0x1F) << 0
+	opcode |= uint32(rd&0x1F) << 5
+	g.emitUint32(opcode)
+}
+
+func (g *ARMMachineCodeGenerator) emitCreateArray(numElements int) {
+	g.emitMovImm64(X0, int64(numElements))
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitCreateDict(numPairs int) {
+	g.emitMovImm64(X0, int64(numPairs))
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitCreateSet(numElements int) {
+	g.emitMovImm64(X0, int64(numElements))
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitIndex() {
+	g.emitPop(X1)
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitSlice(start, end int) {
+	g.emitPop(X2)
+	g.emitPop(X1)
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitGetAttribute(attrIndex int) {
+	g.emitPop(X1)
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitSetAttribute(attrIndex int) {
+	g.emitPop(X2)
+	g.emitPop(X1)
+	g.emitPop(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitFormatString() {
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitCreateClass() {
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitCreateClassWithSuper() {
+	g.emitPop(X1)
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitYield() {
+	g.emitPop(X0)
+	g.emitPush(X0)
+}
+
+func (g *ARMMachineCodeGenerator) emitBeginTry(handlerIP int) {
+}
+
+func (g *ARMMachineCodeGenerator) emitEndTry() {
+}
+
+func (g *ARMMachineCodeGenerator) emitRaise() {
+	g.emitPop(X0)
 }
 
 func (g *ARMMachineCodeGenerator) GetGeneratedCode() []byte {

@@ -272,32 +272,81 @@ func (j *EnhancedJIT) applyOptimizations(fn *compiler.CompiledFunction) {
 
 func (j *EnhancedJIT) deadCodeElimination(fn *compiler.CompiledFunction) {
 	instructions := fn.Instructions
-	reachable := make([]bool, len(instructions))
+	if len(instructions) == 0 {
+		return
+	}
 	
-	for i := 0; i < len(instructions); i++ {
-		if i == 0 || reachable[i] {
-			reachable[i] = true
-			
-			op := compiler.Opcode(instructions[i])
-			switch op {
-			case compiler.OpJump:
-				if i+2 < len(instructions) {
-					target := int(instructions[i+1])<<8 | int(instructions[i+2])
-					if target < len(reachable) {
-						reachable[target] = true
-					}
+	reachable := make([]bool, len(instructions))
+	changed := true
+	
+	for changed {
+		changed = false
+		for i := 0; i < len(instructions); {
+			if i == 0 || reachable[i] {
+				if !reachable[i] {
+					reachable[i] = true
+					changed = true
 				}
-				return
-			case compiler.OpJumpNotTruthy:
-				if i+2 < len(instructions) {
-					target := int(instructions[i+1])<<8 | int(instructions[i+2])
-					if target < len(reachable) {
-						reachable[target] = true
+				
+				op := compiler.Opcode(instructions[i])
+				switch op {
+				case compiler.OpJump:
+					if i+2 < len(instructions) {
+						target := int(instructions[i+1])<<8 | int(instructions[i+2])
+						if target < len(reachable) && !reachable[target] {
+							reachable[target] = true
+							changed = true
+						}
 					}
+					i += 3
+				case compiler.OpJumpNotTruthy:
+					if i+2 < len(instructions) {
+						target := int(instructions[i+1])<<8 | int(instructions[i+2])
+						if target < len(reachable) && !reachable[target] {
+							reachable[target] = true
+							changed = true
+						}
+					}
+					i += 3
+				case compiler.OpConstant:
+					i += 3
+				case compiler.OpCall:
+					i += 2
+				case compiler.OpGetLocal, compiler.OpSetLocal:
+					i += 2
+				case compiler.OpGetGlobal, compiler.OpSetGlobal:
+					i += 3
+				default:
+					i++
 				}
+			} else {
+				i++
 			}
 		}
 	}
+	
+	newInstructions := make([]byte, 0, len(instructions))
+	for i := 0; i < len(instructions); {
+		if reachable[i] {
+			op := compiler.Opcode(instructions[i])
+			var opLen int
+			switch op {
+			case compiler.OpConstant, compiler.OpJump, compiler.OpJumpNotTruthy, 
+				compiler.OpGetGlobal, compiler.OpSetGlobal:
+				opLen = 3
+			case compiler.OpCall, compiler.OpGetLocal, compiler.OpSetLocal:
+				opLen = 2
+			default:
+				opLen = 1
+			}
+			if i+opLen <= len(instructions) {
+				newInstructions = append(newInstructions, instructions[i:i+opLen]...)
+			}
+		}
+		i++
+	}
+	
+	fn.Instructions = newInstructions
 }
 
 func (j *EnhancedJIT) constantFolding(fn *compiler.CompiledFunction) {
@@ -531,21 +580,26 @@ func (j *EnhancedJIT) ApplyAggressiveOptimizations(fn *compiler.CompiledFunction
 
 func (j *EnhancedJIT) loopUnrolling(fn *compiler.CompiledFunction) {
 	instructions := fn.Instructions
+	unrollFactor := 4
 	
-	for i := 0; i < len(instructions)-10; i++ {
+	for i := 0; i < len(instructions)-3; i++ {
 		if compiler.Opcode(instructions[i]) == compiler.OpJumpNotTruthy {
 			target := int(instructions[i+1])<<8 | int(instructions[i+2])
-			if target < i {
+			if target < i && target >= 0 {
 				loopBody := instructions[target:i]
-				if len(loopBody) < 30 {
-					unrolled := make([]byte, 0, len(loopBody)*4)
-					for j := 0; j < 4; j++ {
+				if len(loopBody) > 0 && len(loopBody) < 50 {
+					unrolled := make([]byte, 0, len(loopBody)*unrollFactor)
+					for k := 0; k < unrollFactor; k++ {
 						unrolled = append(unrolled, loopBody...)
 					}
 					
-					copy(instructions[i+3:], unrolled)
-					instructions = append(instructions[:i+3], unrolled...)
-					fn.Instructions = instructions
+					newInstructions := make([]byte, 0, len(instructions)+len(unrolled)-len(loopBody))
+					newInstructions = append(newInstructions, instructions[:target]...)
+					newInstructions = append(newInstructions, unrolled...)
+					newInstructions = append(newInstructions, instructions[i+3:]...)
+					
+					fn.Instructions = newInstructions
+					instructions = fn.Instructions
 				}
 			}
 		}
@@ -555,20 +609,51 @@ func (j *EnhancedJIT) loopUnrolling(fn *compiler.CompiledFunction) {
 func (j *EnhancedJIT) inlineOptimization(fn *compiler.CompiledFunction) {
 	instructions := fn.Instructions
 	
-	for i := 0; i < len(instructions)-2; i++ {
+	for i := 0; i < len(instructions)-1; {
 		if compiler.Opcode(instructions[i]) == compiler.OpCall {
 			numArgs := int(instructions[i+1])
-			if numArgs == 0 && len(instructions) < 50 {
+			if numArgs <= 4 && len(instructions) < 100 {
 				targetFn := j.findTargetFunction(i, fn)
-				if targetFn != nil && len(targetFn.Instructions) < 20 {
-					inlined := make([]byte, len(targetFn.Instructions)-1)
-					copy(inlined, targetFn.Instructions[:len(targetFn.Instructions)-1])
+				if targetFn != nil && len(targetFn.Instructions) < 30 {
+					inlined := make([]byte, 0, len(targetFn.Instructions))
 					
-					copy(instructions[i+2:], inlined)
-					instructions = append(instructions[:i], inlined...)
-					fn.Instructions = instructions
+					bodyIP := 0
+					for bodyIP < len(targetFn.Instructions) {
+						op := compiler.Opcode(targetFn.Instructions[bodyIP])
+						if op == compiler.OpReturnValue {
+							break
+						}
+						
+						var opLen int
+						switch op {
+						case compiler.OpConstant, compiler.OpJump, compiler.OpJumpNotTruthy,
+							compiler.OpGetGlobal, compiler.OpSetGlobal:
+							opLen = 3
+						case compiler.OpCall, compiler.OpGetLocal, compiler.OpSetLocal:
+							opLen = 2
+						default:
+							opLen = 1
+						}
+						
+						if bodyIP+opLen <= len(targetFn.Instructions) {
+							inlined = append(inlined, targetFn.Instructions[bodyIP:bodyIP+opLen]...)
+						}
+						bodyIP += opLen
+					}
+					
+					newInstructions := make([]byte, 0, len(instructions)-2+len(inlined))
+					newInstructions = append(newInstructions, instructions[:i]...)
+					newInstructions = append(newInstructions, inlined...)
+					newInstructions = append(newInstructions, instructions[i+2:]...)
+					
+					fn.Instructions = newInstructions
+					instructions = fn.Instructions
+					continue
 				}
 			}
+			i += 2
+		} else {
+			i++
 		}
 	}
 }
@@ -580,26 +665,31 @@ func (j *EnhancedJIT) findTargetFunction(callIP int, fn *compiler.CompiledFuncti
 func (j *EnhancedJIT) branchPrediction(fn *compiler.CompiledFunction) {
 	instructions := fn.Instructions
 	
-	for i := 0; i < len(instructions)-3; i++ {
+	for i := 0; i < len(instructions)-3; {
 		if compiler.Opcode(instructions[i]) == compiler.OpJumpNotTruthy {
 			target := int(instructions[i+1])<<8 | int(instructions[i+2])
-			if target > i+3 {
+			if target > i+3 && target < len(instructions) {
 				newTarget := i + 3
 				instructions[i+1] = byte(newTarget >> 8)
 				instructions[i+2] = byte(newTarget)
 				
-				jumpBack := make([]byte, 5)
+				jumpBack := make([]byte, 3)
 				jumpBack[0] = byte(compiler.OpJump)
 				jumpBack[1] = byte(target >> 8)
 				jumpBack[2] = byte(target)
-				jumpBack[3] = 0x00
-				jumpBack[4] = 0x00
 				
-				instructions = append(instructions[:target], jumpBack...)
-				instructions = append(instructions, instructions[target:]...)
-				fn.Instructions = instructions
+				newInstructions := make([]byte, 0, len(instructions)+3)
+				newInstructions = append(newInstructions, instructions[:target]...)
+				newInstructions = append(newInstructions, jumpBack...)
+				newInstructions = append(newInstructions, instructions[target:]...)
+				
+				fn.Instructions = newInstructions
+				instructions = fn.Instructions
+				i += 3
+				continue
 			}
 		}
+		i++
 	}
 }
 
@@ -658,16 +748,84 @@ func (j *EnhancedJIT) aggressiveDeadCodeElimination(fn *compiler.CompiledFunctio
 
 func (j *EnhancedJIT) peepholeOptimization(fn *compiler.CompiledFunction) {
 	instructions := fn.Instructions
+	changed := true
 	
-	for i := 0; i < len(instructions)-4; i++ {
-		if compiler.Opcode(instructions[i]) == compiler.OpPop &&
-		   compiler.Opcode(instructions[i+1]) == compiler.OpPop &&
-		   compiler.Opcode(instructions[i+2]) == compiler.OpAdd &&
-		   compiler.Opcode(instructions[i+3]) == compiler.OpPop {
-			copy(instructions[i:], instructions[i+4:])
-			instructions = instructions[:len(instructions)-4]
-			fn.Instructions = instructions
-			i -= 4
+	for changed {
+		changed = false
+		for i := 0; i < len(instructions)-1; {
+			op := compiler.Opcode(instructions[i])
+			
+			if op == compiler.OpDupTop && i+1 < len(instructions) {
+					nextOp := compiler.Opcode(instructions[i+1])
+					if nextOp == compiler.OpAdd {
+						newInstructions := make([]byte, 0, len(instructions)-1)
+						newInstructions = append(newInstructions, instructions[:i]...)
+						newInstructions = append(newInstructions, byte(compiler.OpMul))
+						newInstructions = append(newInstructions, byte(compiler.OpConstant))
+						newInstructions = append(newInstructions, 0x00)
+						newInstructions = append(newInstructions, 0x02)
+						newInstructions = append(newInstructions, instructions[i+2:]...)
+						
+						fn.Instructions = newInstructions
+						instructions = fn.Instructions
+						changed = true
+						continue
+					}
+				}
+			
+			if op == compiler.OpPop && i+1 < len(instructions) {
+				nextOp := compiler.Opcode(instructions[i+1])
+				if nextOp == compiler.OpPop && i+2 < len(instructions) {
+					thirdOp := compiler.Opcode(instructions[i+2])
+					if thirdOp == compiler.OpAdd && i+3 < len(instructions) {
+						fourthOp := compiler.Opcode(instructions[i+3])
+						if fourthOp == compiler.OpPop {
+							newInstructions := make([]byte, 0, len(instructions)-4)
+							newInstructions = append(newInstructions, instructions[:i]...)
+							newInstructions = append(newInstructions, instructions[i+4:]...)
+							
+							fn.Instructions = newInstructions
+							instructions = fn.Instructions
+							changed = true
+							continue
+						}
+					}
+				}
+			}
+			
+			if op == compiler.OpConstant && i+2 < len(instructions) {
+				constIndex := int(instructions[i+1])<<8 | int(instructions[i+2])
+				if constIndex < len(fn.Constants) {
+					if _, ok := fn.Constants[constIndex].(*objects.Integer); ok {
+						if i+3 < len(instructions) {
+							nextOp := compiler.Opcode(instructions[i+3])
+							if nextOp == compiler.OpConstant && i+5 < len(instructions) {
+								nextConstIndex := int(instructions[i+4])<<8 | int(instructions[i+5])
+								if nextConstIndex < len(fn.Constants) {
+									if _, ok := fn.Constants[nextConstIndex].(*objects.Integer); ok {
+										if i+6 < len(instructions) {
+											arithOp := compiler.Opcode(instructions[i+6])
+											if arithOp == compiler.OpAdd || arithOp == compiler.OpSub || 
+											   arithOp == compiler.OpMul {
+												newInstructions := make([]byte, 0, len(instructions)-6)
+												newInstructions = append(newInstructions, instructions[:i]...)
+												newInstructions = append(newInstructions, instructions[i+6:]...)
+												
+												fn.Instructions = newInstructions
+												instructions = fn.Instructions
+												changed = true
+												continue
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			
+			i++
 		}
 	}
 }

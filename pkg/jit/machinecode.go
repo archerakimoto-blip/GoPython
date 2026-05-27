@@ -294,16 +294,43 @@ func (g *MachineCodeGenerator) emitBytecode(instructions []byte) error {
 		case compiler.OpReturn:
 			ip++
 			
+		case compiler.OpReturnValue:
+			g.emitReturnValue()
+			ip++
+			
 		case compiler.OpSetGlobal:
 			if ip+2 < len(instructions) {
-				g.emitSetGlobal()
+				globalIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitSetGlobal(globalIndex)
 				ip += 3
 			}
 			
 		case compiler.OpGetGlobal:
 			if ip+2 < len(instructions) {
-				g.emitGetGlobal()
+				globalIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitGetGlobal(globalIndex)
 				ip += 3
+			}
+			
+		case compiler.OpGetLocal:
+			if ip+1 < len(instructions) {
+				localIndex := int(instructions[ip+1])
+				g.emitGetLocal(localIndex)
+				ip += 2
+			}
+			
+		case compiler.OpSetLocal:
+			if ip+1 < len(instructions) {
+				localIndex := int(instructions[ip+1])
+				g.emitSetLocal(localIndex)
+				ip += 2
+			}
+			
+		case compiler.OpCall:
+			if ip+1 < len(instructions) {
+				numArgs := int(instructions[ip+1])
+				g.emitCall(numArgs)
+				ip += 2
 			}
 			
 		case compiler.OpJump:
@@ -319,6 +346,104 @@ func (g *MachineCodeGenerator) emitBytecode(instructions []byte) error {
 				g.emitJumpNotTruthy(target - ip - 3)
 				ip += 3
 			}
+			
+		case compiler.OpTrue:
+			g.emitLoadTrue()
+			ip++
+			
+		case compiler.OpFalse:
+			g.emitLoadFalse()
+			ip++
+			
+		case compiler.OpNull:
+			g.emitLoadNull()
+			ip++
+			
+		case compiler.OpMinus:
+			g.emitNeg()
+			ip++
+			
+		case compiler.OpBang:
+			g.emitNot()
+			ip++
+			
+		case compiler.OpArray:
+			if ip+1 < len(instructions) {
+				numElements := int(instructions[ip+1])
+				g.emitCreateArray(numElements)
+				ip += 2
+			}
+			
+		case compiler.OpHash:
+			if ip+1 < len(instructions) {
+				numPairs := int(instructions[ip+1])
+				g.emitCreateDict(numPairs)
+				ip += 2
+			}
+			
+		case compiler.OpSet:
+			if ip+1 < len(instructions) {
+				numElements := int(instructions[ip+1])
+				g.emitCreateSet(numElements)
+				ip += 2
+			}
+			
+		case compiler.OpIndex:
+			g.emitIndex()
+			ip++
+			
+		case compiler.OpSlice:
+			if ip+2 < len(instructions) {
+				start := int(instructions[ip+1])
+				end := int(instructions[ip+2])
+				g.emitSlice(start, end)
+				ip += 3
+			}
+			
+		case compiler.OpGetAttribute:
+			if ip+2 < len(instructions) {
+				attrIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitGetAttribute(attrIndex)
+				ip += 3
+			}
+			
+		case compiler.OpSetAttribute:
+			if ip+2 < len(instructions) {
+				attrIndex := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitSetAttribute(attrIndex)
+				ip += 3
+			}
+			
+		case compiler.OpFormatString:
+			g.emitFormatString()
+			ip++
+			
+		case compiler.OpCreateClass:
+			g.emitCreateClass()
+			ip++
+			
+		case compiler.OpCreateClassWithSuper:
+			g.emitCreateClassWithSuper()
+			ip++
+			
+		case compiler.OpYield:
+			g.emitYield()
+			ip++
+			
+		case compiler.OpBeginTry:
+			if ip+2 < len(instructions) {
+				handlerIP := int(instructions[ip+1])<<8 | int(instructions[ip+2])
+				g.emitBeginTry(handlerIP)
+				ip += 3
+			}
+			
+		case compiler.OpEndTry:
+			g.emitEndTry()
+			ip++
+			
+		case compiler.OpRaise:
+			g.emitRaise()
+			ip++
 			
 		default:
 			g.emitComment("unsupported opcode: %d", op)
@@ -432,15 +557,7 @@ func (g *MachineCodeGenerator) emitDup() {
 	g.emitPushR64(Rax)
 }
 
-func (g *MachineCodeGenerator) emitSetGlobal() {
-	g.emitPopR64(Rax)
-	g.emitPopR64(Rcx)
-}
 
-func (g *MachineCodeGenerator) emitGetGlobal() {
-	g.emitPopR64(Rax)
-	g.emitPushR64(Rax)
-}
 
 func (g *MachineCodeGenerator) emitJmp(target int) {
 	offset := int32(target - len(g.buffer) - 5)
@@ -495,6 +612,132 @@ func flushInstructionCache(addr uintptr, size int) {
 type executableMem struct {
 	addr uintptr
 	size int
+}
+
+func (g *MachineCodeGenerator) emitReturnValue() {
+	g.emitPopR64(Rax)
+	g.emitAddRsp(16)
+	g.emitBytes(0x5D)
+	g.emitBytes(0xC3)
+}
+
+func (g *MachineCodeGenerator) emitGetGlobal(index int) {
+	g.emitMovR64Imm64(Rax, int64(index))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitSetGlobal(index int) {
+	g.emitPopR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitGetLocal(index int) {
+	g.emitMovR64Imm64(Rax, int64(index))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitSetLocal(index int) {
+	g.emitPopR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCall(numArgs int) {
+	g.emitPopR64(Rax)
+	g.emitPopR64(Rcx)
+	g.emitAddRsp(byte(numArgs * 8))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitLoadTrue() {
+	g.emitMovR64Imm64(Rax, 1)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitLoadFalse() {
+	g.emitMovR64Imm64(Rax, 0)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitLoadNull() {
+	g.emitMovR64Imm64(Rax, 0)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitNot() {
+	g.emitPopR64(Rax)
+	g.emitCmpR64Imm8(Rax, 0)
+	g.emitSetCond(0x4, Rax)
+	g.emitMovzxR64R8(Rax, Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCreateArray(numElements int) {
+	g.emitMovR64Imm64(Rax, int64(numElements))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCreateDict(numPairs int) {
+	g.emitMovR64Imm64(Rax, int64(numPairs))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCreateSet(numElements int) {
+	g.emitMovR64Imm64(Rax, int64(numElements))
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitIndex() {
+	g.emitPopR64(Rcx)
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitSlice(start, end int) {
+	g.emitPopR64(Rdx)
+	g.emitPopR64(Rcx)
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitGetAttribute(attrIndex int) {
+	g.emitPopR64(Rcx)
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitSetAttribute(attrIndex int) {
+	g.emitPopR64(Rdx)
+	g.emitPopR64(Rcx)
+	g.emitPopR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitFormatString() {
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCreateClass() {
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitCreateClassWithSuper() {
+	g.emitPopR64(Rcx)
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitYield() {
+	g.emitPopR64(Rax)
+	g.emitPushR64(Rax)
+}
+
+func (g *MachineCodeGenerator) emitBeginTry(handlerIP int) {
+}
+
+func (g *MachineCodeGenerator) emitEndTry() {
+}
+
+func (g *MachineCodeGenerator) emitRaise() {
+	g.emitPopR64(Rax)
 }
 
 func (g *MachineCodeGenerator) GetGeneratedCode() []byte {
