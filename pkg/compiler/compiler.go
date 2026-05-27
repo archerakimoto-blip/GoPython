@@ -63,6 +63,8 @@ const (
 	OpSetAttribute
 	OpFormatString
 	OpIndexAssign
+	OpListAppend
+	OpDictSet
 )
 
 type EmittedInstruction struct {
@@ -1751,6 +1753,17 @@ func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
 }
 
 func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
+	if node.Method.Value == "append" && len(node.Arguments) == 1 {
+		if err := c.Compile(node.Object); err != nil {
+			return err
+		}
+		if err := c.Compile(node.Arguments[0]); err != nil {
+			return err
+		}
+		c.emit(OpListAppend)
+		return nil
+	}
+	
 	if err := c.Compile(node.Object); err != nil {
 		return err
 	}

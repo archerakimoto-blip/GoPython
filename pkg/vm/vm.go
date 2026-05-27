@@ -194,14 +194,17 @@ func (vm *VM) popFrame() *Frame {
 }
 
 func (vm *VM) Run() error {
-	var ip int
-	var ins compiler.Instructions
-	var op compiler.Opcode
-
 	vm.startTime = time.Now()
 	vm.instructionCount = 0
 
-	for vm.currentFrame().ip < len(vm.currentFrame().fn.Instructions)-1 {
+	// 缓存热点数据，减少方法调用
+	for {
+		frame := vm.frames[vm.framesIndex-1]
+		
+		if frame.ip >= len(frame.fn.Instructions)-1 {
+			break
+		}
+		
 		vm.instructionCount++
 		
 		if vm.instructionCount%100000 == 0 {
@@ -213,24 +216,21 @@ func (vm *VM) Run() error {
 			}
 		}
 
-		vm.currentFrame().ip++
-		ip = vm.currentFrame().ip
-		ins = vm.currentFrame().fn.Instructions
-		op = compiler.Opcode(ins[ip])
+		frame.ip++
+		ip := frame.ip
+		ins := frame.fn.Instructions
+		op := compiler.Opcode(ins[ip])
 
 		switch op {
 		case compiler.OpConstant:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
-			err := vm.push(vm.constants[constIndex])
-			if err != nil {
-				return err
-			}
+			frame.ip += 2
+			vm.push(vm.constants[constIndex])
 
 		case compiler.OpClosure:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			numFree := int(ins[ip+3])
-			vm.currentFrame().ip += 3
+			frame.ip += 3
 
 			fn, ok := vm.constants[constIndex].(*compiler.CompiledFunction)
 			if !ok {
@@ -251,10 +251,7 @@ func (vm *VM) Run() error {
 				Free:          free,
 			}
 
-			err := vm.push(closure)
-			if err != nil {
-				return err
-			}
+			vm.push(closure)
 
 		case compiler.OpPop:
 			vm.pop()
@@ -262,102 +259,79 @@ func (vm *VM) Run() error {
 		case compiler.OpDupTop:
 			if vm.sp > 0 {
 				top := vm.stack[vm.sp-1]
-				err := vm.push(top)
-				if err != nil {
-					return err
-				}
+				vm.push(top)
 			}
 
 		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv:
-			err := vm.executeBinaryOperation(op)
-			if err != nil {
+			if err := vm.executeBinaryOperation(op); err != nil {
 				return err
 			}
 			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
 				errObj := vm.stack[vm.sp-1]
-				caught := vm.raiseException(errObj)
-				if !caught {
+				if !vm.raiseException(errObj) {
 					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 				}
 			}
 
 		case compiler.OpTrue:
-			err := vm.push(objects.True)
-			if err != nil {
-				return err
-			}
+			vm.push(objects.True)
 
 		case compiler.OpFalse:
-			err := vm.push(objects.False)
-			if err != nil {
-				return err
-			}
+			vm.push(objects.False)
 
 		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
-			err := vm.executeComparison(op)
-			if err != nil {
+			if err := vm.executeComparison(op); err != nil {
 				return err
 			}
 
 		case compiler.OpMinus:
-			err := vm.executeMinusOperator()
-			if err != nil {
+			if err := vm.executeMinusOperator(); err != nil {
 				return err
 			}
 
 		case compiler.OpBang:
-			err := vm.executeBangOperator()
-			if err != nil {
+			if err := vm.executeBangOperator(); err != nil {
 				return err
 			}
 
 		case compiler.OpJump:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip = pos - 1
+			frame.ip = pos - 1
 
 		case compiler.OpJumpNotTruthy:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 
 			condition := vm.pop()
 			if !isTruthy(condition) {
-				vm.currentFrame().ip = pos - 1
+				frame.ip = pos - 1
 			}
 
 		case compiler.OpNull:
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
-			}
+			vm.push(objects.None_)
 
 		case compiler.OpSetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			vm.globals[globalIndex] = vm.pop()
 
 		case compiler.OpGetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
-			err := vm.push(vm.globals[globalIndex])
-			if err != nil {
-				return err
-			}
+			frame.ip += 2
+			vm.push(vm.globals[globalIndex])
 
 		case compiler.OpArray:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 
 			array := vm.buildArray(vm.sp-numElements, vm.sp)
 			vm.sp = vm.sp - numElements
 
-			err := vm.push(array)
-			if err != nil {
-				return err
-			}
+			vm.push(array)
 
 		case compiler.OpHash:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 
 			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
 			if err != nil {
@@ -365,29 +339,22 @@ func (vm *VM) Run() error {
 			}
 			vm.sp = vm.sp - numElements
 
-			err = vm.push(hash)
-			if err != nil {
-				return err
-			}
+			vm.push(hash)
 
 		case compiler.OpSet:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 
 			set := vm.buildSet(vm.sp-numElements, vm.sp)
 			vm.sp = vm.sp - numElements
 
-			err := vm.push(set)
-			if err != nil {
-				return err
-			}
+			vm.push(set)
 
 		case compiler.OpIndex:
 			index := vm.pop()
 			left := vm.pop()
 
-			err := vm.executeIndexExpression(left, index)
-			if err != nil {
+			if err := vm.executeIndexExpression(left, index); err != nil {
 				return err
 			}
 		case compiler.OpSlice:
@@ -395,17 +362,15 @@ func (vm *VM) Run() error {
 			start := vm.pop()
 			left := vm.pop()
 
-			err := vm.executeSliceExpression(left, start, end)
-			if err != nil {
+			if err := vm.executeSliceExpression(left, start, end); err != nil {
 				return err
 			}
 
 		case compiler.OpCall:
 			numArgs := int(ins[ip+1])
-			vm.currentFrame().ip += 1
+			frame.ip += 1
 
-			err := vm.executeCall(numArgs)
-			if err != nil {
+			if err := vm.executeCall(numArgs); err != nil {
 				return err
 			}
 
@@ -936,14 +901,12 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpIndexAssign:
-			// 从栈上弹出值、索引和容器
 			value := vm.pop()
 			indexObj := vm.pop()
 			container := vm.pop()
 
 			switch c := container.(type) {
 			case *objects.List:
-				// 列表索引赋值
 				indexInt, ok := indexObj.(*objects.Integer)
 				if !ok {
 					return fmt.Errorf("list index must be an integer, got %T", indexObj)
@@ -954,17 +917,34 @@ func (vm *VM) Run() error {
 				}
 				c.Elements[idx] = value
 			case *objects.Dict:
-				// 字典索引赋值
 				c.Set(indexObj, value)
 			default:
 				return fmt.Errorf("cannot assign to index of type %T", container)
 			}
 
-			// 赋值表达式需要把值压回栈上，让它能继续参与表达式运算
-			err := vm.push(value)
-			if err != nil {
-				return err
+			vm.push(value)
+		
+		case compiler.OpListAppend:
+			value := vm.pop()
+			list := vm.pop()
+			if lst, ok := list.(*objects.List); ok {
+				lst.Append(value)
+				vm.push(lst)
+			} else {
+				return fmt.Errorf("append requires a list, got %T", list)
 			}
+		
+		case compiler.OpDictSet:
+			value := vm.pop()
+			key := vm.pop()
+			dict := vm.pop()
+			if d, ok := dict.(*objects.Dict); ok {
+				d.Set(key, value)
+				vm.push(d)
+			} else {
+				return fmt.Errorf("dict set requires a dict, got %T", dict)
+			}
+		
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
 			// 获取要产出的值
