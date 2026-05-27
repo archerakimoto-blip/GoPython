@@ -14,6 +14,22 @@ const StackSize = 65536
 const GlobalSize = 65536
 const MaxFrames = 1024
 
+// InlineCache 用于存储类型反馈的内联缓存
+type InlineCache struct {
+	instructionIndex int
+	lastType         objects.ObjectType
+	monomorphic      bool
+	polymorphic      []objects.ObjectType
+}
+
+// NewInlineCache 创建一个新的内联缓存
+func NewInlineCache() *InlineCache {
+	return &InlineCache{
+		monomorphic: true,
+		polymorphic: make([]objects.ObjectType, 0, 4),
+	}
+}
+
 type ExceptionHandler struct {
 	handlerIP       int
 	stackPtr        int
@@ -45,7 +61,7 @@ type VM struct {
 	sp      int
 	globals []objects.Object
 
-	frames      []*Frame
+	frames     []*Frame
 	framesIndex int
 
 	exceptionStack []ExceptionHandler // 异常处理器栈
@@ -56,10 +72,15 @@ type VM struct {
 	gcThreshold    int64             // 垃圾回收阈值（字节）
 	allocatedBytes int64             // 当前已分配字节数
 
-	timeout       time.Duration // 执行超时时间
-	startTime     time.Time     // 执行开始时间
+	timeout        time.Duration // 执行超时时间
+	startTime      time.Time     // 执行开始时间
 	instructionCount int64      // 已执行的指令数
-	maxInstructions int64       // 最大指令数限制
+	maxInstructions  int64       // 最大指令数限制
+
+	// 优化选项
+	useFastPath     bool          // 是否使用快速路径
+	inlineCaches    []*InlineCache // 内联缓存
+	jitEnabled      bool          // 是否启用 JIT
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -220,35 +241,6 @@ func (vm *VM) Run() error {
 		ip := frame.ip
 		ins := frame.fn.Instructions
 		op := compiler.Opcode(ins[ip])
-
-		// 临时打印调试信息！
-		if vm.instructionCount <= 200 {
-			opNames := map[compiler.Opcode]string{
-				compiler.OpConstant:       "OpConstant",
-				compiler.OpPop:            "OpPop",
-				compiler.OpGetGlobal:      "OpGetGlobal",
-				compiler.OpSetGlobal:      "OpSetGlobal",
-				compiler.OpGetLocal:       "OpGetLocal",
-				compiler.OpSetLocal:       "OpSetLocal",
-				compiler.OpCall:           "OpCall",
-				compiler.OpReturnValue:    "OpReturnValue",
-				compiler.OpAdd:            "OpAdd",
-				compiler.OpSub:            "OpSub",
-				compiler.OpMul:            "OpMul",
-				compiler.OpLessThan:       "OpLessThan",
-				compiler.OpJumpNotTruthy:  "OpJumpNotTruthy",
-				compiler.OpJump:           "OpJump",
-				compiler.OpIndex:          "OpIndex",
-			}
-			name, ok := opNames[op]
-			if !ok {
-				name = fmt.Sprintf("Op%d", op)
-			}
-			fmt.Printf("Exec #%d: IP=%03d %s  SP=%d  Stack Top=%v\n", vm.instructionCount, ip, name, vm.sp, func() string {
-				if vm.sp ==0 { return "empty" }
-				return fmt.Sprintf("%v", vm.stack[vm.sp-1])
-			}())
-		}
 
 		switch op {
 		case compiler.OpConstant:
