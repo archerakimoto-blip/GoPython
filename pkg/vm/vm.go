@@ -243,77 +243,26 @@ func (vm *VM) Run() error {
 		op := compiler.Opcode(ins[ip])
 
 		switch op {
+		// 高频指令优先
+		case compiler.OpGetLocal:
+			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			vm.push(vm.stack[frame.basePointer+localIndex])
+
+		case compiler.OpSetLocal:
+			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			vm.stack[frame.basePointer+localIndex] = vm.pop()
+
 		case compiler.OpConstant:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			vm.push(vm.constants[constIndex])
 
-		case compiler.OpClosure:
-			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			numFree := int(ins[ip+3])
-			frame.ip += 3
-
-			fn, ok := vm.constants[constIndex].(*compiler.CompiledFunction)
-			if !ok {
-				return fmt.Errorf("not a function: %T", vm.constants[constIndex])
-			}
-
-			// Pop free variables from stack
-			free := make([]objects.Object, numFree)
-			for i := numFree - 1; i >= 0; i-- {
-				free[i] = vm.pop()
-			}
-
-			closure := &objects.Closure{
-				Instructions:  fn.Instructions,
-				NumLocals:     fn.NumLocals,
-				NumParameters: fn.NumParameters,
-				IsGenerator:   fn.IsGenerator,
-				Free:          free,
-			}
-
-			vm.push(closure)
-
 		case compiler.OpPop:
 			vm.pop()
-
-		case compiler.OpDupTop:
-			if vm.sp > 0 {
-				top := vm.stack[vm.sp-1]
-				vm.push(top)
-			}
-
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv:
-			if err := vm.executeBinaryOperation(op); err != nil {
-				return err
-			}
-			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
-				errObj := vm.stack[vm.sp-1]
-				if !vm.raiseException(errObj) {
-					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
-				}
-			}
-
-		case compiler.OpTrue:
-			vm.push(objects.True)
-
-		case compiler.OpFalse:
-			vm.push(objects.False)
-
-		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
-			if err := vm.executeComparison(op); err != nil {
-				return err
-			}
-
-		case compiler.OpMinus:
-			if err := vm.executeMinusOperator(); err != nil {
-				return err
-			}
-
-		case compiler.OpBang:
-			if err := vm.executeBangOperator(); err != nil {
-				return err
-			}
 
 		case compiler.OpJump:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -328,65 +277,6 @@ func (vm *VM) Run() error {
 				frame.ip = pos - 1
 			}
 
-		case compiler.OpNull:
-			vm.push(objects.None_)
-
-		case compiler.OpSetGlobal:
-			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.globals[globalIndex] = vm.pop()
-
-		case compiler.OpGetGlobal:
-			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.push(vm.globals[globalIndex])
-
-		case compiler.OpArray:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			array := vm.buildArray(vm.sp-numElements, vm.sp)
-			vm.sp = vm.sp - numElements
-
-			vm.push(array)
-
-		case compiler.OpHash:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
-			if err != nil {
-				return err
-			}
-			vm.sp = vm.sp - numElements
-
-			vm.push(hash)
-
-		case compiler.OpSet:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			set := vm.buildSet(vm.sp-numElements, vm.sp)
-			vm.sp = vm.sp - numElements
-
-			vm.push(set)
-
-		case compiler.OpIndex:
-			index := vm.pop()
-			left := vm.pop()
-
-			if err := vm.executeIndexExpression(left, index); err != nil {
-				return err
-			}
-		case compiler.OpSlice:
-			end := vm.pop()
-			start := vm.pop()
-			left := vm.pop()
-
-			if err := vm.executeSliceExpression(left, start, end); err != nil {
-				return err
-			}
-
 		case compiler.OpCall:
 			numArgs := int(ins[ip+1])
 			frame.ip += 1
@@ -394,6 +284,244 @@ func (vm *VM) Run() error {
 			if err := vm.executeCall(numArgs); err != nil {
 				return err
 			}
+
+		case compiler.OpGetGlobal:
+			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.push(vm.globals[globalIndex])
+
+		case compiler.OpSetGlobal:
+			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.globals[globalIndex] = vm.pop()
+
+		// 算术运算
+		case compiler.OpAdd:
+			right := vm.pop()
+			left := vm.pop()
+
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value + rightInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if leftFloat, ok := left.(*objects.Float); ok {
+				if rightFloat, ok := right.(*objects.Float); ok {
+					vm.stack[vm.sp] = &objects.Float{Value: leftFloat.Value + rightFloat.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if leftStr, ok := left.(*objects.String); ok {
+				if rightStr, ok := right.(*objects.String); ok {
+					vm.stack[vm.sp] = &objects.String{Value: leftStr.Value + rightStr.Value}
+					vm.sp++
+					continue
+				}
+			}
+			// 回退到通用处理
+			vm.stack[vm.sp] = left
+			vm.sp++
+			vm.stack[vm.sp] = right
+			vm.sp++
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				if !vm.raiseException(errObj) {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpSub:
+			right := vm.pop()
+			left := vm.pop()
+
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value - rightInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if leftFloat, ok := left.(*objects.Float); ok {
+				if rightFloat, ok := right.(*objects.Float); ok {
+					vm.stack[vm.sp] = &objects.Float{Value: leftFloat.Value - rightFloat.Value}
+					vm.sp++
+					continue
+				}
+			}
+			// 回退到通用处理
+			vm.stack[vm.sp] = left
+			vm.sp++
+			vm.stack[vm.sp] = right
+			vm.sp++
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				if !vm.raiseException(errObj) {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpMul:
+			right := vm.pop()
+			left := vm.pop()
+
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value * rightInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if leftFloat, ok := left.(*objects.Float); ok {
+				if rightFloat, ok := right.(*objects.Float); ok {
+					vm.stack[vm.sp] = &objects.Float{Value: leftFloat.Value * rightFloat.Value}
+					vm.sp++
+					continue
+				}
+			}
+			// 回退到通用处理
+			vm.stack[vm.sp] = left
+			vm.sp++
+			vm.stack[vm.sp] = right
+			vm.sp++
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				if !vm.raiseException(errObj) {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpDiv:
+			right := vm.pop()
+			left := vm.pop()
+
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					if rightInt.Value == 0 {
+						vm.stack[vm.sp] = objects.NewZeroDivisionError("division by zero")
+						vm.sp++
+						if !vm.raiseException(vm.stack[vm.sp-1]) {
+							return fmt.Errorf("unhandled exception: %s", vm.stack[vm.sp-1].Inspect())
+						}
+						continue
+					}
+					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value / rightInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if leftFloat, ok := left.(*objects.Float); ok {
+				if rightFloat, ok := right.(*objects.Float); ok {
+					vm.stack[vm.sp] = &objects.Float{Value: leftFloat.Value / rightFloat.Value}
+					vm.sp++
+					continue
+				}
+			}
+			// 回退到通用处理
+			vm.stack[vm.sp] = left
+			vm.sp++
+			vm.stack[vm.sp] = right
+			vm.sp++
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				if !vm.raiseException(errObj) {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		// 比较运算
+		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
+			right := vm.pop()
+			left := vm.pop()
+
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					lv := leftInt.Value
+					rv := rightInt.Value
+					var res bool
+					switch op {
+					case compiler.OpEqual:
+						res = lv == rv
+					case compiler.OpNotEqual:
+						res = lv != rv
+					case compiler.OpGreaterThan:
+						res = lv > rv
+					case compiler.OpLessThan:
+						res = lv < rv
+					case compiler.OpGreaterThanEqual:
+						res = lv >= rv
+					case compiler.OpLessThanEqual:
+						res = lv <= rv
+					}
+					if res {
+						vm.stack[vm.sp] = objects.True
+					} else {
+						vm.stack[vm.sp] = objects.False
+					}
+					vm.sp++
+					continue
+				}
+			}
+			if leftFloat, ok := left.(*objects.Float); ok {
+				if rightFloat, ok := right.(*objects.Float); ok {
+					lv := leftFloat.Value
+					rv := rightFloat.Value
+					var res bool
+					switch op {
+					case compiler.OpEqual:
+						res = lv == rv
+					case compiler.OpNotEqual:
+						res = lv != rv
+					case compiler.OpGreaterThan:
+						res = lv > rv
+					case compiler.OpLessThan:
+						res = lv < rv
+					case compiler.OpGreaterThanEqual:
+						res = lv >= rv
+					case compiler.OpLessThanEqual:
+						res = lv <= rv
+					}
+					if res {
+						vm.stack[vm.sp] = objects.True
+					} else {
+						vm.stack[vm.sp] = objects.False
+					}
+					vm.sp++
+					continue
+				}
+			}
+			// 回退到通用处理
+			vm.stack[vm.sp] = left
+			vm.sp++
+			vm.stack[vm.sp] = right
+			vm.sp++
+			if err := vm.executeComparison(op); err != nil {
+				return err
+			}
+
+		// 其他常见指令
+		case compiler.OpTrue:
+			vm.push(objects.True)
+
+		case compiler.OpFalse:
+			vm.push(objects.False)
+
+		case compiler.OpNull:
+			vm.push(objects.None_)
 
 		case compiler.OpReturnValue:
 			returnValue := vm.pop()
@@ -445,18 +573,6 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		case compiler.OpGetLocal:
-			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			vm.push(vm.stack[frame.basePointer+localIndex])
-
-		case compiler.OpSetLocal:
-			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			vm.stack[frame.basePointer+localIndex] = vm.pop()
-
 		case compiler.OpGetFree:
 			freeIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
@@ -467,6 +583,94 @@ func (vm *VM) Run() error {
 			} else {
 				// Fallback: try to get from stack (for non-closure functions)
 				vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
+			}
+
+		case compiler.OpClosure:
+			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			numFree := int(ins[ip+3])
+			frame.ip += 3
+
+			fn, ok := vm.constants[constIndex].(*compiler.CompiledFunction)
+			if !ok {
+				return fmt.Errorf("not a function: %T", vm.constants[constIndex])
+			}
+
+			// Pop free variables from stack
+			free := make([]objects.Object, numFree)
+			for i := numFree - 1; i >= 0; i-- {
+				free[i] = vm.pop()
+			}
+
+			closure := &objects.Closure{
+				Instructions:  fn.Instructions,
+				NumLocals:     fn.NumLocals,
+				NumParameters: fn.NumParameters,
+				IsGenerator:   fn.IsGenerator,
+				Free:          free,
+			}
+
+			vm.push(closure)
+
+		case compiler.OpDupTop:
+			if vm.sp > 0 {
+				top := vm.stack[vm.sp-1]
+				vm.push(top)
+			}
+
+		case compiler.OpMinus:
+			if err := vm.executeMinusOperator(); err != nil {
+				return err
+			}
+
+		case compiler.OpBang:
+			if err := vm.executeBangOperator(); err != nil {
+				return err
+			}
+
+		case compiler.OpArray:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			array := vm.buildArray(vm.sp-numElements, vm.sp)
+			vm.sp = vm.sp - numElements
+
+			vm.push(array)
+
+		case compiler.OpHash:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
+			if err != nil {
+				return err
+			}
+			vm.sp = vm.sp - numElements
+
+			vm.push(hash)
+
+		case compiler.OpSet:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			set := vm.buildSet(vm.sp-numElements, vm.sp)
+			vm.sp = vm.sp - numElements
+
+			vm.push(set)
+
+		case compiler.OpIndex:
+			index := vm.pop()
+			left := vm.pop()
+
+			if err := vm.executeIndexExpression(left, index); err != nil {
+				return err
+			}
+		case compiler.OpSlice:
+			end := vm.pop()
+			start := vm.pop()
+			left := vm.pop()
+
+			if err := vm.executeSliceExpression(left, start, end); err != nil {
+				return err
 			}
 
 		case compiler.OpBeginTry:
