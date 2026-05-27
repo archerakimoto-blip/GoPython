@@ -1263,30 +1263,30 @@ func (vm *VM) buildArray(startIndex, endIndex int) objects.Object {
 		elements[i-startIndex] = vm.stack[i]
 	}
 
-	return &objects.List{Elements: elements}
+	return objects.NewList(elements)
 }
 
 func (vm *VM) buildHash(startIndex, endIndex int) (objects.Object, error) {
-	hashedPairs := make(map[objects.Object]objects.Object)
+	dict := objects.NewDict()
 
 	for i := startIndex; i < endIndex; i += 2 {
 		key := vm.stack[i]
 		value := vm.stack[i+1]
-
-		hashedPairs[key] = value
+		dict.Set(key, value)
 	}
 
-	return &objects.Dict{Pairs: hashedPairs}, nil
+	return dict, nil
 }
 
 func (vm *VM) buildSet(startIndex, endIndex int) objects.Object {
-	elements := make([]objects.Object, endIndex-startIndex)
+	set := objects.NewSet()
 
 	for i := startIndex; i < endIndex; i++ {
-		elements[i-startIndex] = vm.stack[i]
+		element := vm.stack[i]
+		set.Add(element)
 	}
 
-	return &objects.Set{Elements: elements}
+	return set
 }
 
 func (vm *VM) executeIndexExpression(left, index objects.Object) error {
@@ -1315,12 +1315,12 @@ func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 func (vm *VM) executeHashIndex(hash, index objects.Object) error {
 	hashObject := hash.(*objects.Dict)
 
-	pair, ok := hashObject.Pairs[index]
+	value, ok := hashObject.Get(index)
 	if !ok {
 		return vm.push(objects.None_)
 	}
 
-	return vm.push(pair)
+	return vm.push(value)
 }
 
 func (vm *VM) executeSliceExpression(left, start, end objects.Object) error {

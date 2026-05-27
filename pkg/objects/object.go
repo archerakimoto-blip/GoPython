@@ -68,6 +68,10 @@ type List struct {
 	Elements []Object
 }
 
+func NewList(elements []Object) *List {
+	return &List{Elements: elements}
+}
+
 func (l *List) Type() ObjectType { return LIST_OBJ }
 func (l *List) Inspect() string {
 	result := "["
@@ -81,40 +85,239 @@ func (l *List) Inspect() string {
 	return result
 }
 
+func (l *List) Append(obj Object) {
+	l.Elements = append(l.Elements, obj)
+}
+
+func (l *List) Extend(other *List) {
+	l.Elements = append(l.Elements, other.Elements...)
+}
+
+func (l *List) Pop(index ...int) (Object, error) {
+	idx := len(l.Elements) - 1
+	if len(index) > 0 {
+		idx = index[0]
+		if idx < 0 {
+			idx = len(l.Elements) + idx
+		}
+	}
+	
+	if idx < 0 || idx >= len(l.Elements) {
+		return nil, fmt.Errorf("pop index out of range")
+	}
+	
+	obj := l.Elements[idx]
+	l.Elements = append(l.Elements[:idx], l.Elements[idx+1:]...)
+	return obj, nil
+}
+
+func (l *List) Index(obj Object) int {
+	for i, el := range l.Elements {
+		if Equal(el, obj) {
+			return i
+		}
+	}
+	return -1
+}
+
+func (l *List) Contains(obj Object) bool {
+	return l.Index(obj) != -1
+}
+
+func (l *List) Insert(index int, obj Object) {
+	if index < 0 {
+		index = len(l.Elements) + index
+	}
+	if index < 0 {
+		index = 0
+	}
+	if index > len(l.Elements) {
+		index = len(l.Elements)
+	}
+	
+	l.Elements = append(l.Elements[:index], append([]Object{obj}, l.Elements[index:]...)...)
+}
+
+func (l *List) Remove(obj Object) error {
+	idx := l.Index(obj)
+	if idx == -1 {
+		return fmt.Errorf("value not in list")
+	}
+	_, _ = l.Pop(idx)
+	return nil
+}
+
+func (l *List) Reverse() {
+	for i, j := 0, len(l.Elements)-1; i < j; i, j = i+1, j-1 {
+		l.Elements[i], l.Elements[j] = l.Elements[j], l.Elements[i]
+	}
+}
+
+func (l *List) Size() int {
+	return len(l.Elements)
+}
+
+func (l *List) Clear() {
+	l.Elements = []Object{}
+}
+
 type Set struct {
-	Elements []Object
+	Elements map[string]Object
+	Keys     map[string]Object
+}
+
+func NewSet() *Set {
+	return &Set{
+		Elements: make(map[string]Object),
+		Keys:     make(map[string]Object),
+	}
 }
 
 func (s *Set) Type() ObjectType { return SET_OBJ }
 func (s *Set) Inspect() string {
 	result := "{"
-	for i, el := range s.Elements {
-		if i > 0 {
+	first := true
+	for _, el := range s.Elements {
+		if !first {
 			result += ", "
 		}
+		first = false
 		result += el.Inspect()
 	}
 	result += "}"
 	return result
 }
 
+func (s *Set) HashKey(obj Object) string {
+	switch o := obj.(type) {
+	case *Integer:
+		return fmt.Sprintf("int:%d", o.Value)
+	case *Float:
+		return fmt.Sprintf("float:%g", o.Value)
+	case *Boolean:
+		return fmt.Sprintf("bool:%t", o.Value)
+	case *String:
+		return fmt.Sprintf("str:%s", o.Value)
+	default:
+		return fmt.Sprintf("obj:%p", obj)
+	}
+}
+
+func (s *Set) Add(obj Object) {
+	key := s.HashKey(obj)
+	s.Elements[key] = obj
+	s.Keys[key] = obj
+}
+
+func (s *Set) Contains(obj Object) bool {
+	key := s.HashKey(obj)
+	_, ok := s.Elements[key]
+	return ok
+}
+
+func (s *Set) Remove(obj Object) {
+	key := s.HashKey(obj)
+	delete(s.Elements, key)
+	delete(s.Keys, key)
+}
+
+func (s *Set) Size() int {
+	return len(s.Elements)
+}
+
+func (s *Set) ToSlice() []Object {
+	slice := make([]Object, 0, len(s.Elements))
+	for _, v := range s.Elements {
+		slice = append(slice, v)
+	}
+	return slice
+}
+
 type Dict struct {
-	Pairs map[Object]Object
+	Pairs map[string]Object
+	Keys  map[string]Object
+}
+
+func NewDict() *Dict {
+	return &Dict{
+		Pairs: make(map[string]Object),
+		Keys:  make(map[string]Object),
+	}
 }
 
 func (d *Dict) Type() ObjectType { return DICT_OBJ }
 func (d *Dict) Inspect() string {
 	result := "{"
 	first := true
-	for k, v := range d.Pairs {
+	for keyStr, key := range d.Keys {
 		if !first {
 			result += ", "
 		}
 		first = false
-		result += fmt.Sprintf("%s: %s", k.Inspect(), v.Inspect())
+		value := d.Pairs[keyStr]
+		result += fmt.Sprintf("%s: %s", key.Inspect(), value.Inspect())
 	}
 	result += "}"
 	return result
+}
+
+func (d *Dict) HashKey(obj Object) string {
+	switch o := obj.(type) {
+	case *Integer:
+		return fmt.Sprintf("int:%d", o.Value)
+	case *Float:
+		return fmt.Sprintf("float:%g", o.Value)
+	case *Boolean:
+		return fmt.Sprintf("bool:%t", o.Value)
+	case *String:
+		return fmt.Sprintf("str:%s", o.Value)
+	default:
+		return fmt.Sprintf("obj:%p", obj)
+	}
+}
+
+func (d *Dict) Get(key Object) (Object, bool) {
+	keyStr := d.HashKey(key)
+	value, ok := d.Pairs[keyStr]
+	return value, ok
+}
+
+func (d *Dict) Set(key, value Object) {
+	keyStr := d.HashKey(key)
+	d.Pairs[keyStr] = value
+	d.Keys[keyStr] = key
+}
+
+func (d *Dict) Has(key Object) bool {
+	keyStr := d.HashKey(key)
+	_, ok := d.Pairs[keyStr]
+	return ok
+}
+
+func (d *Dict) Delete(key Object) {
+	keyStr := d.HashKey(key)
+	delete(d.Pairs, keyStr)
+	delete(d.Keys, keyStr)
+}
+
+func (d *Dict) Size() int {
+	return len(d.Pairs)
+}
+
+func (d *Dict) KeysSlice() []Object {
+	keys := make([]Object, 0, len(d.Keys))
+	for _, key := range d.Keys {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func (d *Dict) ValuesSlice() []Object {
+	values := make([]Object, 0, len(d.Pairs))
+	for _, value := range d.Pairs {
+		values = append(values, value)
+	}
+	return values
 }
 
 type Error struct {

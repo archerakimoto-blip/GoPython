@@ -274,7 +274,7 @@ func (c *Compiler) registerBuiltins() {
 			if !ok {
 				return objects.NewError("first argument to setitem() must be a dict")
 			}
-			dict.Pairs[args[1]] = args[2]
+			dict.Set(args[1], args[2])
 			return objects.None_
 		},
 	}
@@ -291,12 +291,7 @@ func (c *Compiler) registerBuiltins() {
 			if !ok {
 				return objects.NewError("first argument to setadd() must be a set")
 			}
-			for _, el := range set.Elements {
-				if objects.Equal(el, args[1]) {
-					return objects.None_
-				}
-			}
-			set.Elements = append(set.Elements, args[1])
+			set.Add(args[1])
 			return objects.None_
 		},
 	}
