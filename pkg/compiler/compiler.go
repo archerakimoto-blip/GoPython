@@ -317,6 +317,19 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.Integer{Value: int64(len(arg.Pairs))}
 			case *objects.Set:
 				return &objects.Integer{Value: int64(len(arg.Elements))}
+			case *objects.Range:
+				// Calculate length of range
+				if arg.Step > 0 {
+					if arg.Start >= arg.Stop {
+						return &objects.Integer{Value: 0}
+					}
+					return &objects.Integer{Value: ((arg.Stop - arg.Start - 1) / arg.Step) + 1}
+				} else {
+					if arg.Start <= arg.Stop {
+						return &objects.Integer{Value: 0}
+					}
+					return &objects.Integer{Value: ((arg.Start - arg.Stop - 1) / (-arg.Step)) + 1}
+				}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -648,17 +661,7 @@ func (c *Compiler) registerBuiltins() {
 					return objects.NewValueError("range() step cannot be zero")
 				}
 			}
-			elements := []objects.Object{}
-			if step > 0 {
-				for i := start; i < stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			} else {
-				for i := start; i > stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			}
-			return &objects.List{Elements: elements}
+			return &objects.Range{Start: start, Stop: stop, Step: step}
 		},
 	}
 	rangeIndex := len(c.constants)

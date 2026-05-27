@@ -31,6 +31,7 @@ const (
 	CLASS_OBJ        ObjectType = "CLASS"
 	INSTANCE_OBJ     ObjectType = "INSTANCE"
 	MODULE_OBJ       ObjectType = "MODULE"
+	RANGE_OBJ        ObjectType = "RANGE"
 )
 
 type Object interface {
@@ -443,9 +444,26 @@ func (i *Instance) SetAttr(name string, value Object) {
 	i.Fields[name] = value
 }
 
+type Range struct {
+	Start int64
+	Stop  int64
+	Step  int64
+}
+
+func (r *Range) Type() ObjectType { return RANGE_OBJ }
+func (r *Range) Inspect() string  {
+	if r.Start == 0 && r.Step == 1 {
+		return fmt.Sprintf("range(%d)", r.Stop)
+	}
+	if r.Step == 1 {
+		return fmt.Sprintf("range(%d, %d)", r.Start, r.Stop)
+	}
+	return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step)
+}
+
 type Module struct {
-	Name   string
-	Fields map[string]Object
+	Name    string
+	Fields  map[string]Object
 }
 
 func (m *Module) Type() ObjectType { return MODULE_OBJ }

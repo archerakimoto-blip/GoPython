@@ -1497,7 +1497,7 @@ func (vm *VM) buildSet(startIndex, endIndex int) objects.Object {
 
 func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 	switch {
-	case left.Type() == objects.LIST_OBJ && index.Type() == objects.INTEGER_OBJ:
+	case (left.Type() == objects.LIST_OBJ || left.Type() == objects.RANGE_OBJ) && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeArrayIndex(left, index)
 	case left.Type() == objects.TUPLE_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeTupleIndex(left, index)
@@ -1509,15 +1509,37 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 }
 
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {
-	arrayObject := array.(*objects.List)
-	idx := index.(*objects.Integer).Value
-	max := int64(len(arrayObject.Elements) - 1)
-
-	if idx < 0 || idx > max {
-		return vm.push(objects.None_)
+	switch arrayObject := array.(type) {
+	case *objects.List:
+		idx := index.(*objects.Integer).Value
+		max := int64(len(arrayObject.Elements) - 1)
+		if idx < 0 || idx > max {
+			return vm.push(objects.None_)
+		}
+		return vm.push(arrayObject.Elements[idx])
+	case *objects.Range:
+		idx := index.(*objects.Integer).Value
+		var length int64
+		if arrayObject.Step > 0 {
+			if arrayObject.Start >= arrayObject.Stop {
+				length = 0
+			} else {
+				length = ((arrayObject.Stop - arrayObject.Start - 1) / arrayObject.Step) + 1
+			}
+		} else {
+			if arrayObject.Start <= arrayObject.Stop {
+				length = 0
+			} else {
+				length = ((arrayObject.Start - arrayObject.Stop - 1) / (-arrayObject.Step)) + 1
+			}
+		}
+		if idx < 0 || idx >= length {
+			return vm.push(objects.None_)
+		}
+		val := arrayObject.Start + arrayObject.Step*idx
+		return vm.push(&objects.Integer{Value: val})
 	}
-
-	return vm.push(arrayObject.Elements[idx])
+	return vm.push(objects.None_)
 }
 
 func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
