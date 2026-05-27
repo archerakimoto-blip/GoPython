@@ -1293,6 +1293,8 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 	switch {
 	case left.Type() == objects.LIST_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeArrayIndex(left, index)
+	case left.Type() == objects.TUPLE_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeTupleIndex(left, index)
 	case left.Type() == objects.DICT_OBJ:
 		return vm.executeHashIndex(left, index)
 	default:
@@ -1310,6 +1312,18 @@ func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 	}
 
 	return vm.push(arrayObject.Elements[idx])
+}
+
+func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
+	tupleObject := tuple.(*objects.Tuple)
+	idx := index.(*objects.Integer).Value
+	max := int64(len(tupleObject.Elements) - 1)
+
+	if idx < 0 || idx > max {
+		return vm.push(objects.None_)
+	}
+
+	return vm.push(tupleObject.Elements[idx])
 }
 
 func (vm *VM) executeHashIndex(hash, index objects.Object) error {

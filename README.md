@@ -105,6 +105,9 @@ go build -o gopy ./cmd/gopy
 - [x] **f-string 格式化字符串支持**
 - [x] **丰富的内置函数库**
 - [x] **math 数学模块（增强版）**
+- [x] **sys 系统模块**
+- [x] **os 操作系统模块**
+- [x] **json 数据处理模块**
 - [x] **JIT 即时编译器**
 - [x] **调试器工具**
 - [x] **性能分析器**
@@ -180,6 +183,45 @@ GoPy 的 math 模块提供了丰富的数学函数：
 | `math.degrees(x)` | 弧度转角度 | `math.degrees(math.pi)` 返回 180 |
 | `math.radians(x)` | 角度转弧度 | `math.radians(180)` 返回 π |
 
+### sys 模块
+
+GoPy 提供了 sys 模块，包含以下功能：
+
+| 名称 | 描述 | 示例 |
+|------|------|------|
+| `sys.version` | 版本信息字符串 | `sys.version` |
+| `sys.platform` | 系统平台标识 | `sys.platform` |
+| `sys.version_info` | 版本信息元组 | `sys.version_info` |
+| `sys.argv` | 命令行参数列表 | `sys.argv` |
+| `sys.path` | 模块搜索路径 | `sys.path` |
+| `sys.exit([code])` | 退出程序 | `sys.exit(0)` |
+| `sys.getsizeof(obj)` | 返回对象的大小 | `sys.getsizeof(42)` |
+
+### os 模块
+
+GoPy 提供了 os 模块，用于与操作系统交互：
+
+| 函数/属性 | 描述 | 示例 |
+|-----------|------|------|
+| `os.sep` | 路径分隔符 | `os.sep` |
+| `os.getcwd()` | 获取当前工作目录 | `os.getcwd()` |
+| `os.chdir(path)` | 切换工作目录 | `os.chdir('/tmp')` |
+| `os.listdir(path)` | 列出目录内容 | `os.listdir('.')` |
+| `os.mkdir(path[, mode])` | 创建目录 | `os.mkdir('newdir')` |
+| `os.remove(path)` | 删除文件 | `os.remove('old.txt')` |
+| `os.rename(src, dst)` | 重命名文件 | `os.rename('a.txt', 'b.txt')` |
+| `os.getenv(key[, default])` | 获取环境变量 | `os.getenv('HOME')` |
+| `os.environ` | 环境变量字典 | `os.environ` |
+
+### json 模块
+
+GoPy 提供了 json 模块，用于 JSON 数据处理：
+
+| 函数 | 描述 | 示例 |
+|------|------|------|
+| `json.dumps(obj)` | 将对象序列化为 JSON 字符串 | `json.dumps({'name': 'Bob'})` |
+| `json.loads(str)` | 将 JSON 字符串反序列化为对象 | `json.loads('{"name": "Bob"}')` |
+
 ### 模块导入系统
 
 GoPy 支持完整的模块导入功能：
@@ -190,6 +232,44 @@ import math
 print(math.pi)       # 3.14159...
 print(math.e)        # 2.71828...
 print(math.sqrt(16)) # 4.0
+```
+
+### 使用 sys 模块
+
+```python
+import sys
+
+print("Version:", sys.version)
+print("Platform:", sys.platform)
+print("Version info:", sys.version_info)
+print("Argv:", sys.argv)
+print("Path:", sys.path)
+print("Size of 42:", sys.getsizeof(42))
+```
+
+### 使用 os 模块
+
+```python
+import os
+
+print("Path separator:", os.sep)
+print("Current directory:", os.getcwd())
+print("HOME env:", os.getenv("HOME", "/tmp"))
+```
+
+### 使用 json 模块
+
+```python
+import json
+
+# Serialize to JSON
+data = "Hello, GoPy!"
+json_str = json.dumps(data)
+print(json_str)  # "Hello, GoPy!"
+
+# Parse from JSON
+parsed = json.loads(json_str)
+print(parsed)  # Hello, GoPy!
 ```
 
 ### JIT 编译器特性
@@ -231,6 +311,7 @@ GoPy 提供了性能分析工具：
 GoPy 的对象系统采用了现代化的实现：
 
 - **List**: 支持 append, extend, pop, insert, remove, reverse 等方法
+- **Tuple**: 不可变序列类型
 - **Dict**: 使用哈希映射，支持高效的键值对操作
 - **Set**: 使用哈希集合，支持去重和高效的成员检查
 
@@ -487,9 +568,9 @@ go test ./...
 - [x] 添加字符串格式化（f-string 支持）
 - [x] 支持模块导入系统（import 和 from...import）
 - [x] 完善对象系统（Set, Dict, List 的现代化实现）
+- [x] 实现更多内置模块（os, sys, json 等）
 - [ ] 实现与现有 Python 库的兼容性
 - [ ] 实现垃圾回收
-- [ ] 实现更多内置模块（os, sys, json 等）
 - [ ] 添加更多 Python 标准库功能
 - [ ] 增强 JIT 编译优化（真正编译到机器码）
 

@@ -1,8 +1,11 @@
 package objects
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"runtime"
 )
 
 type ObjectType string
@@ -14,6 +17,7 @@ const (
 	STRING_OBJ       ObjectType = "STRING"
 	NONE_OBJ         ObjectType = "NONE"
 	LIST_OBJ         ObjectType = "LIST"
+	TUPLE_OBJ        ObjectType = "TUPLE"
 	SET_OBJ          ObjectType = "SET"
 	DICT_OBJ         ObjectType = "DICT"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
@@ -70,6 +74,27 @@ type List struct {
 
 func NewList(elements []Object) *List {
 	return &List{Elements: elements}
+}
+
+type Tuple struct {
+	Elements []Object
+}
+
+func NewTuple(elements []Object) *Tuple {
+	return &Tuple{Elements: elements}
+}
+
+func (t *Tuple) Type() ObjectType { return TUPLE_OBJ }
+func (t *Tuple) Inspect() string {
+	result := "("
+	for i, el := range t.Elements {
+		if i > 0 {
+			result += ", "
+		}
+		result += el.Inspect()
+	}
+	result += ")"
+	return result
 }
 
 func (l *List) Type() ObjectType { return LIST_OBJ }
@@ -939,4 +964,359 @@ func CreateMathModule() *Module {
 	}
 	
 	return mathModule
+}
+
+// CreateSysModule 创建 sys 模块
+func CreateSysModule() *Module {
+	sysModule := &Module{
+		Name:    "sys",
+		Fields: make(map[string]Object),
+	}
+
+	// sys.version
+	sysModule.Fields["version"] = &String{
+		Value: "GoPython 0.1.0 (Go implementation)",
+	}
+
+	// sys.platform
+	sysModule.Fields["platform"] = &String{
+		Value: runtime.GOOS,
+	}
+
+	// sys.version_info
+	sysModule.Fields["version_info"] = &Tuple{
+		Elements: []Object{
+			&Integer{Value: 0},
+			&Integer{Value: 1},
+			&Integer{Value: 0},
+			&String{Value: "final"},
+			&Integer{Value: 0},
+		},
+	}
+
+	// sys.argv
+	sysModule.Fields["argv"] = &List{
+		Elements: []Object{&String{Value: "gopy"}},
+	}
+
+	// sys.path
+	sysModule.Fields["path"] = &List{
+		Elements: []Object{&String{Value: "."}},
+	}
+
+	// sys.exit
+	sysModule.Fields["exit"] = &Builtin{
+		Name: "sys.exit",
+		Fn: func(args ...Object) Object {
+			code := 0
+			if len(args) >= 1 {
+				if i, ok := args[0].(*Integer); ok {
+					code = int(i.Value)
+				}
+			}
+			os.Exit(code)
+			return None_
+		},
+	}
+
+	// sys.getsizeof
+	sysModule.Fields["getsizeof"] = &Builtin{
+		Name: "sys.getsizeof",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("getsizeof() takes exactly 1 argument")
+			}
+			// 简单实现，返回固定大小
+			return &Integer{Value: 24}
+		},
+	}
+
+	return sysModule
+}
+
+// CreateOsModule 创建 os 模块
+func CreateOsModule() *Module {
+	osModule := &Module{
+		Name:    "os",
+		Fields: make(map[string]Object),
+	}
+
+	// os.path.sep
+	osModule.Fields["sep"] = &String{
+		Value: string(os.PathSeparator),
+	}
+
+	// os.getcwd
+	osModule.Fields["getcwd"] = &Builtin{
+		Name: "os.getcwd",
+		Fn: func(args ...Object) Object {
+			if len(args) != 0 {
+				return NewTypeError("getcwd() takes no arguments")
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return NewError(err.Error())
+			}
+			return &String{Value: cwd}
+		},
+	}
+
+	// os.chdir
+	osModule.Fields["chdir"] = &Builtin{
+		Name: "os.chdir",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("chdir() takes exactly 1 argument")
+			}
+			path, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("chdir() argument must be a string")
+			}
+			err := os.Chdir(path.Value)
+			if err != nil {
+				return NewError(err.Error())
+			}
+			return None_
+		},
+	}
+
+	// os.listdir
+	osModule.Fields["listdir"] = &Builtin{
+		Name: "os.listdir",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("listdir() takes exactly 1 argument")
+			}
+			path, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("listdir() argument must be a string")
+			}
+			entries, err := os.ReadDir(path.Value)
+			if err != nil {
+				return NewError(err.Error())
+			}
+			files := make([]Object, 0, len(entries))
+			for _, entry := range entries {
+				files = append(files, &String{Value: entry.Name()})
+			}
+			return &List{Elements: files}
+		},
+	}
+
+	// os.mkdir
+	osModule.Fields["mkdir"] = &Builtin{
+		Name: "os.mkdir",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("mkdir() takes at least 1 argument")
+			}
+			path, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("mkdir() first argument must be a string")
+			}
+			mode := 0755
+			if len(args) >= 2 {
+				if i, ok := args[1].(*Integer); ok {
+					mode = int(i.Value)
+				}
+			}
+			err := os.Mkdir(path.Value, os.FileMode(mode))
+			if err != nil {
+				return NewError(err.Error())
+			}
+			return None_
+		},
+	}
+
+	// os.remove
+	osModule.Fields["remove"] = &Builtin{
+		Name: "os.remove",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("remove() takes exactly 1 argument")
+			}
+			path, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("remove() argument must be a string")
+			}
+			err := os.Remove(path.Value)
+			if err != nil {
+				return NewError(err.Error())
+			}
+			return None_
+		},
+	}
+
+	// os.rename
+	osModule.Fields["rename"] = &Builtin{
+		Name: "os.rename",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("rename() takes exactly 2 arguments")
+			}
+			src, ok1 := args[0].(*String)
+			dst, ok2 := args[1].(*String)
+			if !ok1 || !ok2 {
+				return NewTypeError("rename() arguments must be strings")
+			}
+			err := os.Rename(src.Value, dst.Value)
+			if err != nil {
+				return NewError(err.Error())
+			}
+			return None_
+		},
+	}
+
+	// os.getenv
+	osModule.Fields["getenv"] = &Builtin{
+		Name: "os.getenv",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("getenv() takes at least 1 argument")
+			}
+			key, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("getenv() first argument must be a string")
+			}
+			value := os.Getenv(key.Value)
+			if value == "" && len(args) >= 2 {
+				return args[1]
+			}
+			if value == "" {
+				return None_
+			}
+			return &String{Value: value}
+		},
+	}
+
+	// os.environ
+	osModule.Fields["environ"] = &Dict{
+		Pairs: make(map[string]Object),
+		Keys:  make(map[string]Object),
+	}
+
+	return osModule
+}
+
+// CreateJsonModule 创建 json 模块
+func CreateJsonModule() *Module {
+	jsonModule := &Module{
+		Name:    "json",
+		Fields: make(map[string]Object),
+	}
+
+	// json.dumps
+	jsonModule.Fields["dumps"] = &Builtin{
+		Name: "json.dumps",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("dumps() takes at least 1 argument")
+			}
+
+			// 将对象转换为 Go 值
+			goValue := convertToGoValue(args[0])
+
+			// 序列化到 JSON
+			data, err := json.Marshal(goValue)
+			if err != nil {
+				return NewError(err.Error())
+			}
+
+			return &String{Value: string(data)}
+		},
+	}
+
+	// json.loads
+	jsonModule.Fields["loads"] = &Builtin{
+		Name: "json.loads",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("loads() takes exactly 1 argument")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("loads() argument must be a string")
+			}
+
+			var data interface{}
+			err := json.Unmarshal([]byte(s.Value), &data)
+			if err != nil {
+				return NewError(err.Error())
+			}
+
+			return convertToObject(data)
+		},
+	}
+
+	return jsonModule
+}
+
+// 辅助函数：将 GoPython 对象转换为 Go 值
+func convertToGoValue(obj Object) interface{} {
+	switch v := obj.(type) {
+	case *Integer:
+		return v.Value
+	case *Float:
+		return v.Value
+	case *Boolean:
+		return v.Value
+	case *String:
+		return v.Value
+	case *List:
+		result := make([]interface{}, len(v.Elements))
+		for i, elem := range v.Elements {
+			result[i] = convertToGoValue(elem)
+		}
+		return result
+	case *Dict:
+		result := make(map[string]interface{})
+		for keyStr, key := range v.Keys {
+			value := v.Pairs[keyStr]
+			// 简单处理：只支持字符串键
+			if keyObj, ok := key.(*String); ok {
+				result[keyObj.Value] = convertToGoValue(value)
+			}
+		}
+		return result
+	case *None:
+		return nil
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// 辅助函数：将 Go 值转换为 GoPython 对象
+func convertToObject(value interface{}) Object {
+	switch v := value.(type) {
+	case int:
+		return &Integer{Value: int64(v)}
+	case int64:
+		return &Integer{Value: v}
+	case float64:
+		return &Float{Value: v}
+	case bool:
+		if v {
+			return True
+		}
+		return False
+	case string:
+		return &String{Value: v}
+	case []interface{}:
+		elements := make([]Object, len(v))
+		for i, elem := range v {
+			elements[i] = convertToObject(elem)
+		}
+		return &List{Elements: elements}
+	case map[string]interface{}:
+		dict := NewDict()
+		for key, val := range v {
+			dict.Set(&String{Value: key}, convertToObject(val))
+		}
+		return dict
+	case nil:
+		return None_
+	default:
+		// 对于未知类型，返回字符串表示
+		return &String{Value: fmt.Sprintf("%v", v)}
+	}
 }

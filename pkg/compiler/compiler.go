@@ -224,6 +224,27 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, mathModule)
 	c.symbolTable.DefineBuiltin("math", mathIndex)
 
+	// 注册 sys 模块
+	sysModule := objects.CreateSysModule()
+	objects.RegisterModule("sys", sysModule)
+	sysIndex := len(c.constants)
+	c.constants = append(c.constants, sysModule)
+	c.symbolTable.DefineBuiltin("sys", sysIndex)
+
+	// 注册 os 模块
+	osModule := objects.CreateOsModule()
+	objects.RegisterModule("os", osModule)
+	osIndex := len(c.constants)
+	c.constants = append(c.constants, osModule)
+	c.symbolTable.DefineBuiltin("os", osIndex)
+
+	// 注册 json 模块
+	jsonModule := objects.CreateJsonModule()
+	objects.RegisterModule("json", jsonModule)
+	jsonIndex := len(c.constants)
+	c.constants = append(c.constants, jsonModule)
+	c.symbolTable.DefineBuiltin("json", jsonIndex)
+
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) != 1 {
@@ -231,6 +252,8 @@ func (c *Compiler) registerBuiltins() {
 			}
 			switch arg := args[0].(type) {
 			case *objects.List:
+				return &objects.Integer{Value: int64(len(arg.Elements))}
+			case *objects.Tuple:
 				return &objects.Integer{Value: int64(len(arg.Elements))}
 			case *objects.String:
 				return &objects.Integer{Value: int64(len(arg.Value))}
