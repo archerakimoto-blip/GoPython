@@ -922,7 +922,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		if fl, ok := node.Expression.(*ast.FunctionLiteral); ok {
 			if fl.Name != "" {
-				symbol := c.symbolTable.DefineFunctionName(fl.Name)
+				// 函数名已经在编译FunctionLiteral时定义了（用于递归调用）
+				// 这里只需要获取符号并emit OpSetGlobal
+				symbol, ok := c.symbolTable.Resolve(fl.Name)
+				if !ok {
+					return fmt.Errorf("function name not defined: %s", fl.Name)
+				}
 				c.emit(OpSetGlobal, symbol.Index)
 			} else {
 				c.emit(OpPop)
