@@ -20,7 +20,7 @@ func runBenchmark(filePath string) BenchmarkResult {
 	
 	start := time.Now()
 	
-	cmd := exec.Command("./gopy", "--jit", filePath)
+	cmd := exec.Command("go", "run", "cmd/gopy/main.go", "--jit", filePath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	

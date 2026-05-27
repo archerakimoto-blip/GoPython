@@ -1205,13 +1205,13 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 	}
 
 	switch op {
-	case compiler.OpEqual:
-		return vm.push(nativeBoolToBooleanObject(left == right))
-	case compiler.OpNotEqual:
-		return vm.push(nativeBoolToBooleanObject(left != right))
-	default:
-		return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
-	}
+		case compiler.OpEqual:
+			return vm.push(nativeBoolToBooleanObject(objects.Equal(left, right)))
+		case compiler.OpNotEqual:
+			return vm.push(nativeBoolToBooleanObject(!objects.Equal(left, right)))
+		default:
+			return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
+		}
 }
 
 func (vm *VM) executeIntegerComparison(op compiler.Opcode, left, right objects.Object) error {
@@ -1387,6 +1387,10 @@ func (vm *VM) push(o objects.Object) error {
 }
 
 func (vm *VM) pop() objects.Object {
+	if vm.sp <= 0 {
+		// 栈为空，返回 nil 或者 None
+		return objects.None_
+	}
 	o := vm.stack[vm.sp-1]
 	vm.sp--
 	return o
