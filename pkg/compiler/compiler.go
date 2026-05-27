@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/gc"
+	"github.com/go-py/go-python/pkg/interop"
 	"github.com/go-py/go-python/pkg/objects"
 )
 
@@ -284,6 +285,13 @@ func (c *Compiler) registerBuiltins() {
 	datetimeIndex := len(c.constants)
 	c.constants = append(c.constants, datetimeModule)
 	c.symbolTable.DefineBuiltin("datetime", datetimeIndex)
+
+	// 注册 cpython 互操作模块
+	cpythonModule := interop.CreateCPythonModule()
+	objects.RegisterModule("cpython", cpythonModule)
+	cpythonIndex := len(c.constants)
+	c.constants = append(c.constants, cpythonModule)
+	c.symbolTable.DefineBuiltin("cpython", cpythonIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {

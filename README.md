@@ -137,6 +137,7 @@ go build -o gopy ./cmd/gopy
 - [x] **string 字符串处理模块**
 - [x] **time 时间处理模块**
 - [x] **datetime 日期时间模块**
+- [x] **cpython 互操作模块（通过 CGO 调用 CPython 库）**
 - [x] **JIT 即时编译器（支持 x86-64 和 ARM64）**
 - [x] **调试器工具**
 - [x] **性能分析器**
@@ -435,6 +436,60 @@ print("当前日期时间:", now)
 # 获取当前日期
 today = datetime.date.today()
 print("当前日期:", today)
+```
+
+### cpython 互操作模块
+
+GoPy 提供了 cpython 模块，通过 CGO 接口与 CPython 解释器进行互操作，允许调用现有的 Python 库。
+
+**注意**: 使用此模块需要系统上安装 CPython 开发包，并且编译时需要正确配置 CGO。
+
+| 函数 | 描述 | 示例 |
+|-----|------|------|
+| `cpython.initialize()` | 初始化 CPython 运行时 | `cpython.initialize()` |
+| `cpython.finalize()` | 终止 CPython 运行时 | `cpython.finalize()` |
+| `cpython.eval(expr)` | 执行 Python 表达式并返回结果 | `cpython.eval("2 + 3")` |
+| `cpython.exec(code)` | 执行 Python 代码 | `cpython.exec("print('hello')")` |
+| `cpython.import(name)` | 导入 CPython 模块 | `numpy = cpython.import("numpy")` |
+
+### 使用 cpython 模块
+
+```python
+import cpython
+
+# 初始化 CPython 运行时（可选，首次调用时会自动初始化）
+cpython.initialize()
+
+# 执行简单表达式
+result = cpython.eval("2 + 3 * 4")
+print("eval result:", result)  # 14
+
+# 执行代码块
+cpython.exec("""
+def greet(name):
+    return f'Hello, {name}!'
+""")
+
+# 调用 CPython 函数
+result = cpython.eval("greet('World')")
+print("greet result:", result)  # Hello, World!
+
+# 导入 CPython 标准库模块
+os = cpython.import("os")
+cwd = os.call("getcwd")
+print("Current working directory:", cwd)
+
+# 获取模块属性
+path = os.get("path")
+print("Path:", path)
+
+# 导入第三方库（需要安装）
+# numpy = cpython.import("numpy")
+# arr = numpy.call("array", [1, 2, 3])
+# print(arr)
+
+# 终止 CPython 运行时（可选，程序退出时会自动清理）
+cpython.finalize()
 ```
 
 ### 模块导入系统
