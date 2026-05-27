@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/gc"
@@ -54,6 +55,11 @@ type VM struct {
 	gcEnabled      bool              // 是否启用垃圾回收
 	gcThreshold    int64             // 垃圾回收阈值（字节）
 	allocatedBytes int64             // 当前已分配字节数
+
+	timeout       time.Duration // 执行超时时间
+	startTime     time.Time     // 执行开始时间
+	instructionCount int64      // 已执行的指令数
+	maxInstructions int64       // 最大指令数限制
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -79,7 +85,26 @@ func New(bytecode *compiler.Bytecode) *VM {
 		gcEnabled:      true,
 		gcThreshold:    1024 * 1024, // 1MB
 		allocatedBytes: 0,
+
+		timeout:         30 * time.Second,
+		maxInstructions: 1000000000,
 	}
+}
+
+func NewWithTimeout(bytecode *compiler.Bytecode, timeout time.Duration, maxInstructions int64) *VM {
+	vm := New(bytecode)
+	vm.timeout = timeout
+	vm.maxInstructions = maxInstructions
+	return vm
+}
+
+func (vm *VM) SetTimeout(timeout time.Duration, maxInstructions int64) {
+	vm.timeout = timeout
+	vm.maxInstructions = maxInstructions
+}
+
+func (vm *VM) InstructionCount() int64 {
+	return vm.instructionCount
 }
 
 func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []objects.Object) *VM {
@@ -173,7 +198,21 @@ func (vm *VM) Run() error {
 	var ins compiler.Instructions
 	var op compiler.Opcode
 
+	vm.startTime = time.Now()
+	vm.instructionCount = 0
+
 	for vm.currentFrame().ip < len(vm.currentFrame().fn.Instructions)-1 {
+		vm.instructionCount++
+		
+		if vm.instructionCount%10000 == 0 {
+			if time.Since(vm.startTime) > vm.timeout {
+				return fmt.Errorf("execution timeout after %v (executed %d instructions)", vm.timeout, vm.instructionCount)
+			}
+			if vm.instructionCount >= vm.maxInstructions {
+				return fmt.Errorf("exceeded maximum instruction count of %d", vm.maxInstructions)
+			}
+		}
+
 		vm.currentFrame().ip++
 		ip = vm.currentFrame().ip
 		ins = vm.currentFrame().fn.Instructions

@@ -436,7 +436,7 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	return lc
 }
 
-func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
+func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
 	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
 	iterable := desugarExpression(forStmt.Iterable)
 
@@ -451,43 +451,21 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	}
 
-	// 创建包含初始化和 while 循环的包装块
-	wrapperStmts := []ast.Statement{
-		// 首先在外部初始化 _i = 0
+	bodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
-			Left:  indexVar,
-			Value: &ast.IntegerLiteral{Token: "0", Value: 0},
-		},
-		// 然后是 while 循环
-		&ast.WhileStatement{
-			Token:     forStmt.Token,
-			Condition: condition,
-			Body: &ast.BlockStatement{
-				Statements: []ast.Statement{
-					// 在循环体内赋值给循环变量
-					&ast.AssignStatement{
-						Token: "=",
-						Left:  forStmt.Value,
-						Value: &ast.IndexExpression{
-							Token: "[",
-							Left:  iterable,
-							Index: indexVar,
-						},
-					},
-				},
+			Left:  forStmt.Value,
+			Value: &ast.IndexExpression{
+				Token: "[",
+				Left:  iterable,
+				Index: indexVar,
 			},
 		},
 	}
 
-	// 获取 while 循环节点
-	whileStmt := wrapperStmts[1].(*ast.WhileStatement)
+	bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
 
-	// 添加原始 for 循环体的语句到 while 循环体中
-	whileStmt.Body.Statements = append(whileStmt.Body.Statements, desugarBlockStatement(forStmt.Body).Statements...)
-
-	// 添加 _i += 1 到 while 循环体末尾
-	whileStmt.Body.Statements = append(whileStmt.Body.Statements, &ast.AssignStatement{
+	bodyStmts = append(bodyStmts, &ast.AssignStatement{
 		Token: "=",
 		Left:  indexVar,
 		Value: &ast.InfixExpression{
@@ -498,12 +476,26 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	})
 
-	// 返回一个包含包装块的无限循环（会在内部 while 循环结束后退出）
-	return &ast.WhileStatement{
+	body := &ast.BlockStatement{
+		Token:      forStmt.Token,
+		Statements: bodyStmts,
+	}
+
+	whileStmt := &ast.WhileStatement{
 		Token:     forStmt.Token,
-		Condition: &ast.Boolean{Token: "true", Value: true},
-		Body: &ast.BlockStatement{
-			Statements: wrapperStmts,
+		Condition: condition,
+		Body:      body,
+	}
+
+	return &ast.BlockStatement{
+		Token: forStmt.Token,
+		Statements: []ast.Statement{
+			&ast.AssignStatement{
+				Token: "=",
+				Left:  indexVar,
+				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+			},
+			whileStmt,
 		},
 	}
 }
