@@ -1360,12 +1360,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 				if free.Scope == GlobalScope {
 					c.emit(OpGetGlobal, free.Index)
 				} else {
-					c.emit1(OpGetLocal, free.Index)
+					c.emit(OpGetLocal, free.Index)
 				}
 			}
 			// Then, load the nested free variables (locals that nested functions need)
 			for _, nestedFree := range nestedFreeSymbols {
-				c.emit1(OpGetLocal, nestedFree.Index)
+				c.emit(OpGetLocal, nestedFree.Index)
 			}
 			totalFree := numFree + len(nestedFreeSymbols)
 			c.emitClosure(constantIndex, totalFree)

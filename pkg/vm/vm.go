@@ -458,8 +458,8 @@ func (vm *VM) Run() error {
 			vm.stack[frame.basePointer+localIndex] = vm.pop()
 
 		case compiler.OpGetFree:
-			freeIndex := int(ins[ip+1])
-			frame.ip += 1
+			freeIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
 
 			// Use the stored free variables from the closure
 			if frame.freeVars != nil && freeIndex < len(frame.freeVars) {
@@ -831,7 +831,7 @@ func (vm *VM) Run() error {
 							if len(args) == 0 {
 								obj, err := list.Pop()
 								if err != nil {
-									return objects.NewIndexError(err.Error())
+									return objects.NewIndexError("%s", err.Error())
 								}
 								return obj
 							}
@@ -841,7 +841,7 @@ func (vm *VM) Run() error {
 							}
 							obj, err := list.Pop(int(idx.Value))
 							if err != nil {
-								return objects.NewIndexError(err.Error())
+								return objects.NewIndexError("%s", err.Error())
 							}
 							return obj
 						},
@@ -1734,7 +1734,7 @@ func (vm *VM) raiseException(errObj objects.Object) bool {
 				ip += 3
 			} else if op == compiler.OpCall {
 				ip += 2
-			} else if op == compiler.OpGetLocal || op == compiler.OpSetLocal {
+			} else if op == compiler.OpGetLocal || op == compiler.OpSetLocal || op == compiler.OpGetFree {
 				ip += 2
 			} else {
 				ip++
