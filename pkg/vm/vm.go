@@ -780,19 +780,83 @@ func (vm *VM) Run() error {
 			}
 			
 			if module, ok := obj.(*objects.Module); ok {
-			if val, ok := module.GetAttr(attrName); ok {
-				err := vm.push(val)
+				if val, ok := module.GetAttr(attrName); ok {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
 				if err != nil {
 					return err
 				}
 				continue
 			}
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
+			
+			if list, ok := obj.(*objects.List); ok {
+				if attrName == "append" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.append",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 1 {
+								return objects.NewTypeError("append() takes exactly 1 argument")
+							}
+							list.Append(args[0])
+							return objects.None_
+						},
+					})
+					continue
+				}
+				if attrName == "pop" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.pop",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) > 1 {
+								return objects.NewTypeError("pop() takes at most 1 argument")
+							}
+							if len(args) == 0 {
+								obj, err := list.Pop()
+								if err != nil {
+									return objects.NewIndexError(err.Error())
+								}
+								return obj
+							}
+							idx, ok := args[0].(*objects.Integer)
+							if !ok {
+								return objects.NewTypeError("pop() argument must be an integer")
+							}
+							obj, err := list.Pop(int(idx.Value))
+							if err != nil {
+								return objects.NewIndexError(err.Error())
+							}
+							return obj
+						},
+					})
+					continue
+				}
+				if attrName == "extend" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.extend",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 1 {
+								return objects.NewTypeError("extend() takes exactly 1 argument")
+							}
+							other, ok := args[0].(*objects.List)
+							if !ok {
+								return objects.NewTypeError("extend() argument must be a list")
+							}
+							list.Extend(other)
+							return objects.None_
+						},
+					})
+					continue
+				}
+				return vm.push(objects.None_)
 			}
-			continue
-		}
 			
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
