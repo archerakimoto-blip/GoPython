@@ -453,17 +453,17 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		case compiler.OpSetLocal:
-			localIndex := int(ins[ip+1])
-			frame.ip += 1
-
-			vm.stack[frame.basePointer+localIndex] = vm.pop()
-
 		case compiler.OpGetLocal:
-			localIndex := int(ins[ip+1])
-			frame.ip += 1
+			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
 
 			vm.push(vm.stack[frame.basePointer+localIndex])
+
+		case compiler.OpSetLocal:
+			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			vm.stack[frame.basePointer+localIndex] = vm.pop()
 
 		case compiler.OpGetFree:
 			freeIndex := int(ins[ip+1])

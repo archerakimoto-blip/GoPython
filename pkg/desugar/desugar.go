@@ -52,18 +52,30 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AugAssignStatement:
-		// 将增强赋值转换为: left = left op value
-		desugaredLeft := desugarExpression(s.Left)
+		// 将增强赋值转换为: temp = left; left = temp op value
+		// 这样可以避免在编译右侧表达式时找不到左侧变量的问题
+		origLeft := s.Left
+		tempVar := &ast.Identifier{Token: "_aug", Value: "_aug_" + origLeft.String()}
 		infixExpr := &ast.InfixExpression{
 			Token:    s.Token,
-			Left:     desugaredLeft,
+			Left:     tempVar,
 			Operator: s.Operator,
 			Right:    desugarExpression(s.Value),
 		}
-		return &ast.AssignStatement{
+		return &ast.BlockStatement{
 			Token: s.Token,
-			Left:  desugaredLeft,
-			Value: infixExpr,
+			Statements: []ast.Statement{
+				&ast.AssignStatement{
+					Token: "=",
+					Left:  tempVar,
+					Value: desugarExpression(origLeft),
+				},
+				&ast.AssignStatement{
+					Token: s.Token,
+					Left:  desugarExpression(origLeft),
+					Value: infixExpr,
+				},
+			},
 		}
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{

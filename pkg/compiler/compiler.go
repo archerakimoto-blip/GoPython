@@ -1107,7 +1107,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if symbol.Scope == GlobalScope {
 			c.emit(OpSetGlobal, symbol.Index)
 		} else {
-			c.emit1(OpSetLocal, symbol.Index)
+			c.emit(OpSetLocal, symbol.Index)
 		}
 
 	case *ast.AssignStatement:
@@ -1169,9 +1169,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
 			c.emit(OpGetGlobal, symbol.Index)
 		} else if symbol.Scope == FreeScope {
-			c.emit1(OpGetFree, symbol.Index)
+			c.emit(OpGetFree, symbol.Index)
 		} else {
-			c.emit1(OpGetLocal, symbol.Index)
+			c.emit(OpGetLocal, symbol.Index)
 		}
 
 	case *ast.ListLiteral:
@@ -1468,7 +1468,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if symbol.Scope == GlobalScope {
 				c.emit(OpSetGlobal, symbol.Index)
 			} else {
-				c.emit1(OpSetLocal, symbol.Index)
+				c.emit(OpSetLocal, symbol.Index)
 			}
 		} else {
 			c.emit(OpPop)
@@ -1576,7 +1576,7 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 				if varSymbol.Scope == GlobalScope {
 					c.emit(OpSetGlobal, varSymbol.Index)
 				} else {
-					c.emit1(OpSetLocal, varSymbol.Index)
+					c.emit(OpSetLocal, varSymbol.Index)
 				}
 			}
 
