@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/go-py/go-python/pkg/ast"
+	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/objects"
 )
 
@@ -248,6 +249,13 @@ func (c *Compiler) registerBuiltins() {
 	jsonIndex := len(c.constants)
 	c.constants = append(c.constants, jsonModule)
 	c.symbolTable.DefineBuiltin("json", jsonIndex)
+
+	// 注册 gc 模块
+	gcModule := gc.CreateGCModule()
+	objects.RegisterModule("gc", gcModule)
+	gcIndex := len(c.constants)
+	c.constants = append(c.constants, gcModule)
+	c.symbolTable.DefineBuiltin("gc", gcIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {

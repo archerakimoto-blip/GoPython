@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-py/go-python/pkg/compiler"
+	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/objects"
 )
 
@@ -49,6 +50,10 @@ type VM struct {
 	exceptionStack []ExceptionHandler // 异常处理器栈
 	pendingError   objects.Object     // 待处理的异常
 	inFinally      bool               // 是否正在执行 finally 块
+
+	gcEnabled      bool              // 是否启用垃圾回收
+	gcThreshold    int64             // 垃圾回收阈值（字节）
+	allocatedBytes int64             // 当前已分配字节数
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -70,6 +75,10 @@ func New(bytecode *compiler.Bytecode) *VM {
 
 		frames:      frames,
 		framesIndex: 1,
+
+		gcEnabled:      true,
+		gcThreshold:    1024 * 1024, // 1MB
+		allocatedBytes: 0,
 	}
 }
 
@@ -1247,6 +1256,82 @@ func (vm *VM) LastPoppedStackElem() objects.Object {
 		return vm.stack[vm.sp-1]
 	}
 	return nil
+}
+
+func (vm *VM) EnableGC(enable bool) {
+	vm.gcEnabled = enable
+	if enable {
+		gc.Enable()
+	} else {
+		gc.Disable()
+	}
+}
+
+func (vm *VM) IsGCEnabled() bool {
+	return vm.gcEnabled
+}
+
+func (vm *VM) SetGCThreshold(threshold int64) {
+	vm.gcThreshold = threshold
+	gc.GetGC().SetThreshold(threshold)
+}
+
+func (vm *VM) GetGCThreshold() int64 {
+	return vm.gcThreshold
+}
+
+func (vm *VM) TriggerGC() {
+	if vm.gcEnabled {
+		vm.updateGCRoots()
+		gc.Collect()
+	}
+}
+
+func (vm *VM) updateGCRoots() {
+	var roots []objects.Object
+
+	for i := 0; i < vm.sp; i++ {
+		if vm.stack[i] != nil {
+			roots = append(roots, vm.stack[i])
+		}
+	}
+
+	for i := 0; i < vm.framesIndex; i++ {
+		frame := vm.frames[i]
+		if frame != nil {
+			if frame.freeVars != nil {
+				roots = append(roots, frame.freeVars...)
+			}
+		}
+	}
+
+	for _, global := range vm.globals {
+		if global != nil {
+			roots = append(roots, global)
+		}
+	}
+
+	for _, constant := range vm.constants {
+		if constant != nil {
+			roots = append(roots, constant)
+		}
+	}
+
+	gc.SetRoots(nil, roots, nil, nil)
+}
+
+func (vm *VM) TrackAllocation(obj objects.Object) {
+	if vm.gcEnabled {
+		gc.GetGC().Register(obj)
+	}
+}
+
+func (vm *VM) GetGCStats() map[string]interface{} {
+	return gc.GetStats()
+}
+
+func (vm *VM) PrintGCStats() {
+	gc.PrintStats()
 }
 
 func (vm *VM) TopStackElem() objects.Object {

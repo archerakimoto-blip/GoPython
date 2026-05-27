@@ -3,7 +3,6 @@ package gc
 import (
 	"fmt"
 	"log"
-	"runtime"
 	"sync"
 	"time"
 
@@ -170,25 +169,15 @@ func (gc *GarbageCollector) markReferences(obj objects.Object) {
 			gc.markObject(elem)
 		}
 	case *objects.Dict:
-		for _, key := range o.Keys() {
+		for keyStr, key := range o.Keys {
 			gc.markObject(key)
-			gc.markObject(o.Get(key))
+			if val, ok := o.Pairs[keyStr]; ok {
+				gc.markObject(val)
+			}
 		}
 	case *objects.Set:
-		for elem := range o.Elements {
+		for _, elem := range o.Elements {
 			gc.markObject(elem)
-		}
-	case *objects.Function:
-		if o.Closure != nil {
-			for _, freeVar := range o.Closure {
-				gc.markObject(freeVar)
-			}
-		}
-	case *objects.Generator:
-		if o.Closure != nil {
-			for _, freeVar := range o.Closure {
-				gc.markObject(freeVar)
-			}
 		}
 	case *objects.Instance:
 		for _, field := range o.Fields {
@@ -288,7 +277,7 @@ func estimateSize(obj objects.Object) int64 {
 		}
 		return size
 	case *objects.Dict:
-		return int64(48 + len(o.Keys())*32)
+		return int64(48 + len(o.Keys)*32)
 	case *objects.Set:
 		return int64(48 + len(o.Elements)*16)
 	default:
@@ -324,11 +313,7 @@ func SetRoots(reg, stack, global, frame []objects.Object) {
 	frameContents = frame
 }
 
-func init() {
-	runtime.SetFinalizer(singleton, func(gc *GarbageCollector) {
-		gc.Collect()
-	})
-}
+
 
 func Collect() {
 	GetGC().Collect()
@@ -354,16 +339,16 @@ func (gc *GarbageCollector) GetStatsAsDict() *objects.Dict {
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
 
-	result := make(map[string]objects.Object)
-	result["allocated_bytes"] = &objects.Integer{Value: gc.allocatedBytes}
-	result["freed_bytes"] = &objects.Integer{Value: gc.freedBytes}
-	result["collection_count"] = &objects.Integer{Value: gc.collectionCount}
-	result["object_count"] = &objects.Integer{Value: int64(len(gc.objects))}
-	result["enabled"] = &objects.Boolean{Value: gc.enabled}
-	result["threshold"] = &objects.Integer{Value: gc.threshold}
-	result["total_pause_time"] = &objects.Float{Value: float64(gc.pauseTime.Seconds())}
+	result := objects.NewDict()
+	result.Set(&objects.String{Value: "allocated_bytes"}, &objects.Integer{Value: gc.allocatedBytes})
+	result.Set(&objects.String{Value: "freed_bytes"}, &objects.Integer{Value: gc.freedBytes})
+	result.Set(&objects.String{Value: "collection_count"}, &objects.Integer{Value: gc.collectionCount})
+	result.Set(&objects.String{Value: "object_count"}, &objects.Integer{Value: int64(len(gc.objects))})
+	result.Set(&objects.String{Value: "enabled"}, &objects.Boolean{Value: gc.enabled})
+	result.Set(&objects.String{Value: "threshold"}, &objects.Integer{Value: gc.threshold})
+	result.Set(&objects.String{Value: "total_pause_time"}, &objects.Float{Value: float64(gc.pauseTime.Seconds())})
 
-	return &objects.Dict{Items: result}
+	return result
 }
 
 type GCModule struct{}
@@ -385,22 +370,24 @@ func (m *GCModule) Disable() objects.Object {
 
 func (m *GCModule) GetStats() objects.Object {
 	stats := GetGC().GetStats()
-	result := make(map[string]objects.Object)
+	result := objects.NewDict()
 	for k, v := range stats {
+		var valObj objects.Object
 		switch val := v.(type) {
 		case int64:
-			result[k] = &objects.Integer{Value: val}
+			valObj = &objects.Integer{Value: val}
 		case int:
-			result[k] = &objects.Integer{Value: int64(val)}
+			valObj = &objects.Integer{Value: int64(val)}
 		case bool:
-			result[k] = &objects.Boolean{Value: val}
+			valObj = &objects.Boolean{Value: val}
 		case time.Duration:
-			result[k] = &objects.Float{Value: float64(val.Seconds())}
+			valObj = &objects.Float{Value: float64(val.Seconds())}
 		default:
-			result[k] = &objects.String{Value: fmt.Sprintf("%v", val)}
+			valObj = &objects.String{Value: fmt.Sprintf("%v", val)}
 		}
+		result.Set(&objects.String{Value: k}, valObj)
 	}
-	return &objects.Dict{Items: result}
+	return result
 }
 
 func (m *GCModule) PrintStats() objects.Object {
@@ -423,41 +410,44 @@ func (m *GCModule) SetVerbose(verbose objects.Object) objects.Object {
 }
 
 func CreateGCModule() *objects.Module {
-	module := objects.NewModule("gc")
-	module.SetAttr("collect", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	module := &objects.Module{
+		Name:   "gc",
+		Fields: make(map[string]objects.Object),
+	}
+	module.Fields["collect"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		Collect()
 		return objects.None_
-	}})
-	module.SetAttr("enable", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["enable"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		Enable()
 		return objects.None_
-	}})
-	module.SetAttr("disable", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["disable"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		Disable()
 		return objects.None_
-	}})
-	module.SetAttr("get_stats", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["get_stats"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		return GetGC().GetStatsAsDict()
-	}})
-	module.SetAttr("print_stats", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["print_stats"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		PrintStats()
 		return objects.None_
-	}})
-	module.SetAttr("set_threshold", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["set_threshold"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		if len(args) > 0 {
 			if t, ok := args[0].(*objects.Integer); ok {
 				GetGC().SetThreshold(t.Value)
 			}
 		}
 		return objects.None_
-	}})
-	module.SetAttr("set_verbose", &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
+	}}
+	module.Fields["set_verbose"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		if len(args) > 0 {
 			if v, ok := args[0].(*objects.Boolean); ok {
 				GetGC().SetVerbose(v.Value)
 			}
 		}
 		return objects.None_
-	}})
+	}}
 	return module
 }
