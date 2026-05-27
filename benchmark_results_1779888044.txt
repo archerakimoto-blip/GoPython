@@ -1,0 +1,8 @@
+Benchmark Results
+=============================================================
+Arithmetic Operations: 10000000 iterations, avg=0s, min=0s, max=0s, throughput=2942281556.93 ops/s
+Loop Operations: 1000000 iterations, avg=75ns, min=75ns, max=75ns, throughput=13231647.07 ops/s
+List Operations: 100000 iterations, avg=126ns, min=126ns, max=126ns, throughput=7910588.20 ops/s
+Dict Operations: 50000 iterations, avg=20.497µs, min=20.497µs, max=20.497µs, throughput=48787.21 ops/s
+Function Calls: 1000000 iterations, avg=0s, min=0s, max=0s, throughput=2829262496.15 ops/s
+String Operations: 50000 iterations, avg=261ns, min=261ns, max=261ns, throughput=3820269.17 ops/s
