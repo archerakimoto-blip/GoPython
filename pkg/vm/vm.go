@@ -426,60 +426,48 @@ func (vm *VM) Run() error {
 
 		case compiler.OpSetLocal:
 			localIndex := int(ins[ip+1])
-			vm.currentFrame().ip += 1
+			frame.ip += 1
 
-			frame := vm.currentFrame()
 			vm.stack[frame.basePointer+localIndex] = vm.pop()
 
 		case compiler.OpGetLocal:
 			localIndex := int(ins[ip+1])
-			vm.currentFrame().ip += 1
+			frame.ip += 1
 
-			frame := vm.currentFrame()
-			err := vm.push(vm.stack[frame.basePointer+localIndex])
-			if err != nil {
-				return err
-			}
+			vm.push(vm.stack[frame.basePointer+localIndex])
 
 		case compiler.OpGetFree:
 			freeIndex := int(ins[ip+1])
-			vm.currentFrame().ip += 1
+			frame.ip += 1
 
-			frame := vm.currentFrame()
 			// Use the stored free variables from the closure
 			if frame.freeVars != nil && freeIndex < len(frame.freeVars) {
-				err := vm.push(frame.freeVars[freeIndex])
-				if err != nil {
-					return err
-				}
+				vm.push(frame.freeVars[freeIndex])
 			} else {
 				// Fallback: try to get from stack (for non-closure functions)
-				err := vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
-				if err != nil {
-					return err
-				}
+				vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
 			}
 
 		case compiler.OpBeginTry:
-		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
-		vm.currentFrame().ip += 4
-		tryBlockStartIP := ip + 5
-		handler := ExceptionHandler{
-			handlerIP:       -1,
-			stackPtr:        vm.sp,
-			exceptionType:   "",
-			varName:         "",
-			handlerStartIP:  -1,
-			tryBlockStartIP: tryBlockStartIP,
-			hasFinally:      hasFinally == 1,
-			finallyStartIP:  -1,
-			finallyEndIP:    -1,
-			pendingError:    nil,
-		}
-		handler.exceptCount = exceptCount
-		handler.baseIP = vm.currentFrame().ip + 1
-		vm.exceptionStack = append(vm.exceptionStack, handler)
+			exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
+			frame.ip += 4
+			tryBlockStartIP := ip + 5
+			handler := ExceptionHandler{
+				handlerIP:       -1,
+				stackPtr:        vm.sp,
+				exceptionType:   "",
+				varName:         "",
+				handlerStartIP:  -1,
+				tryBlockStartIP: tryBlockStartIP,
+				hasFinally:      hasFinally == 1,
+				finallyStartIP:  -1,
+				finallyEndIP:    -1,
+				pendingError:    nil,
+			}
+			handler.exceptCount = exceptCount
+			handler.baseIP = frame.ip + 1
+			vm.exceptionStack = append(vm.exceptionStack, handler)
 		case compiler.OpEndTry:
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
@@ -502,16 +490,16 @@ func (vm *VM) Run() error {
 
 						if handler.hasFinally {
 							vm.exceptionStack[i].pendingError = pendingError
-							vm.currentFrame().ip = handler.finallyStartIP - 1
+							frame.ip = handler.finallyStartIP - 1
 							caught = true
 							break
 						}
 
 						ip := handler.tryBlockStartIP
-						for ip < len(vm.currentFrame().fn.Instructions) {
-							op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
+						for ip < len(frame.fn.Instructions) {
+							op := compiler.Opcode(frame.fn.Instructions[ip])
 							if op == compiler.OpExceptHandler {
-								typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+								typeIdx := int(uint16(frame.fn.Instructions[ip+2])<<8 | uint16(frame.fn.Instructions[ip+1]))
 								var exceptionType string
 								if typeIdx > 0 && typeIdx < len(vm.constants) {
 									if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
@@ -520,10 +508,8 @@ func (vm *VM) Run() error {
 								}
 								if exceptionType == "" || matchesException(pendingError, exceptionType) {
 									vm.sp = handler.stackPtr
-									if err := vm.push(pendingError); err != nil {
-										return err
-									}
-									vm.currentFrame().ip = ip + 5 - 1
+									vm.push(pendingError)
+									frame.ip = ip + 5 - 1
 									caught = true
 								}
 								break
@@ -556,16 +542,16 @@ func (vm *VM) Run() error {
 
 				if handler.hasFinally {
 					vm.exceptionStack[i].pendingError = errObj
-					vm.currentFrame().ip = handler.finallyStartIP - 1
+					frame.ip = handler.finallyStartIP - 1
 					caught = true
 					break
 				}
 
 				ip := handler.tryBlockStartIP
-				for ip < len(vm.currentFrame().fn.Instructions) {
-					op := compiler.Opcode(vm.currentFrame().fn.Instructions[ip])
+				for ip < len(frame.fn.Instructions) {
+					op := compiler.Opcode(frame.fn.Instructions[ip])
 					if op == compiler.OpExceptHandler {
-						typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+						typeIdx := int(uint16(frame.fn.Instructions[ip+2])<<8 | uint16(frame.fn.Instructions[ip+1]))
 						var exceptionType string
 						if typeIdx > 0 && typeIdx < len(vm.constants) {
 							if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
@@ -577,7 +563,7 @@ func (vm *VM) Run() error {
 							if err := vm.push(errObj); err != nil {
 								return err
 							}
-							vm.currentFrame().ip = ip + 5 - 1
+							frame.ip = ip + 5 - 1
 							caught = true
 						}
 						break
@@ -599,7 +585,7 @@ func (vm *VM) Run() error {
 		case compiler.OpExceptHandler:
 			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
-			vm.currentFrame().ip += 4
+			frame.ip += 4
 
 			var exceptionType, varName string
 			if typeIdx > 0 {
@@ -613,7 +599,7 @@ func (vm *VM) Run() error {
 				}
 			}
 
-			handlerStartIP := vm.currentFrame().ip + 1
+			handlerStartIP := frame.ip + 1
 
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
@@ -623,7 +609,7 @@ func (vm *VM) Run() error {
 				if lastIdx >= 0 {
 					existingHandler := vm.exceptionStack[lastIdx]
 					vm.exceptionStack[lastIdx] = ExceptionHandler{
-						handlerIP:       vm.currentFrame().ip,
+						handlerIP:       frame.ip,
 						stackPtr:        vm.sp - 1,
 						exceptionType:   exceptionType,
 						varName:         varName,
@@ -638,7 +624,7 @@ func (vm *VM) Run() error {
 			}
 		case compiler.OpFinally:
 			finallyEndIP := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
@@ -731,7 +717,7 @@ func (vm *VM) Run() error {
 		case compiler.OpCreateClass:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			err := vm.push(class)
 			if err != nil {
 				return err
@@ -739,7 +725,7 @@ func (vm *VM) Run() error {
 		case compiler.OpCreateClassWithSuper:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			
 			// Pop super class from stack
 			superClass := vm.pop()
@@ -761,7 +747,7 @@ func (vm *VM) Run() error {
 			}
 		case compiler.OpGetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
@@ -866,7 +852,7 @@ func (vm *VM) Run() error {
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			attrName := vm.constants[idx].(*objects.String).Value
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			
 			value := vm.pop()
 			obj := vm.pop()
@@ -879,7 +865,7 @@ func (vm *VM) Run() error {
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
 		case compiler.OpFormatString:
 			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			vm.currentFrame().ip += 2
+			frame.ip += 2
 			
 			// 从栈上获取所有的部分，按顺序拼接
 			var result string
@@ -946,7 +932,6 @@ func (vm *VM) Run() error {
 			}
 		
 		case compiler.OpYieldValue:
-			frame := vm.currentFrame()
 			// 获取要产出的值
 			yieldValue := vm.pop()
 			
@@ -974,20 +959,20 @@ func (vm *VM) Run() error {
 			}
 			
 			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
-			vm.currentFrame().ip--
+			frame.ip--
 			gen := &objects.Generator{
-				Instructions: vm.currentFrame().fn.Instructions,
+				Instructions: frame.fn.Instructions,
 				Constants:    vm.constants,
-				Locals:       make([]objects.Object, len(vm.stack)-vm.currentFrame().basePointer),
-				IP:           vm.currentFrame().ip + 1,
-				Stack:        make([]objects.Object, vm.sp),
-				StackPtr:     vm.sp,
-				BasePointer:  vm.currentFrame().basePointer,
-				Done:         false,
+				Locals:     make([]objects.Object, len(vm.stack)-frame.basePointer),
+				IP:         frame.ip + 1,
+				Stack:      make([]objects.Object, vm.sp),
+				StackPtr:  vm.sp,
+				BasePointer: frame.basePointer,
+				Done:       false,
 			}
-			copy(gen.Locals, vm.stack[vm.currentFrame().basePointer:])
+			copy(gen.Locals, vm.stack[frame.basePointer:])
 			copy(gen.Stack, vm.stack[:vm.sp])
-			vm.sp = vm.currentFrame().basePointer - 1
+			vm.sp = frame.basePointer - 1
 			vm.popFrame()
 			vm.push(gen)
 	}
@@ -1175,6 +1160,17 @@ func (vm *VM) executeBangOperator() error {
 func (vm *VM) executeComparison(op compiler.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+
+	if left == nil || right == nil {
+		switch op {
+		case compiler.OpEqual:
+			return vm.push(nativeBoolToBooleanObject(left == right))
+		case compiler.OpNotEqual:
+			return vm.push(nativeBoolToBooleanObject(left != right))
+		default:
+			return fmt.Errorf("unknown operator: %d (nil %s)", op, left.Type())
+		}
+	}
 
 	if left.Type() == objects.INTEGER_OBJ && right.Type() == objects.INTEGER_OBJ {
 		return vm.executeIntegerComparison(op, left, right)
