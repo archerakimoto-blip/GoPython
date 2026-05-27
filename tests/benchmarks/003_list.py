@@ -1,44 +1,30 @@
-#!/usr/bin/env python3
-"""
-列表操作基准测试
-"""
+print("=== 列表操作基准测试 ===")
 
-def create_and_append():
-    lst = []
-    for i in range(10000):
-        lst.append(i)
-    return len(lst)
+print()
+print("1. Create and append (10000 elements):")
 
-def list_comprehension():
-    lst = [x * 2 for x in range(5000)]
-    return len(lst)
+lst = []
+i = 0
+while i < 10000:
+    lst.append(i)
+    i = i + 1
+print(len(lst))
 
-def list_indexing():
-    lst = list(range(10000))
-    total = 0
-    for i in range(1000):
-        total += lst[i]
-    return total
+print()
+print("2. List indexing (1000 accesses):")
 
-def main():
-    print("=== 列表操作基准测试 ===")
-    
-    # 列表创建和追加测试
-    print("\n1. Create and append (10000 elements):")
-    result = create_and_append()
-    print(f"   Length: {result}")
-    
-    # 列表推导式测试
-    print("\n2. List comprehension (5000 elements):")
-    result = list_comprehension()
-    print(f"   Length: {result}")
-    
-    # 列表索引测试
-    print("\n3. List indexing (1000 accesses):")
-    result = list_indexing()
-    print(f"   Total: {result}")
-    
-    print("\n=== 列表操作测试完成 ===")
+lst = []
+i = 0
+while i < 10000:
+    lst.append(i)
+    i = i + 1
 
-if __name__ == "__main__":
-    main()
+total = 0
+idx = 0
+while idx < 1000:
+    total = total + lst[idx]
+    idx = idx + 1
+print(total)
+
+print()
+print("=== 列表操作测试完成 ===")

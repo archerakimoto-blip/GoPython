@@ -1,48 +1,27 @@
-#!/usr/bin/env python3
-"""
-字符串操作基准测试
-"""
+print("=== 字符串操作基准测试 ===")
 
-def string_concatenation():
-    result = ""
-    for i in range(1000):
-        result += str(i)
-    return len(result)
+print()
+print("1. String concatenation (1000 iterations):")
 
-def string_formatting():
-    result = ""
-    for i in range(500):
-        result += f"Number: {i}, Value: {i*2}"
-    return len(result)
+result = ""
+i = 0
+while i < 1000:
+    result = result + str(i)
+    i = i + 1
+print(len(result))
 
-def string_comparison():
-    count = 0
-    str1 = "test"
-    str2 = "test"
-    for i in range(1000):
-        if str1 == str2:
-            count += 1
-    return count
+print()
+print("2. String comparison (1000 iterations):")
 
-def main():
-    print("=== 字符串操作基准测试 ===")
-    
-    # 字符串拼接测试
-    print("\n1. String concatenation (1000 iterations):")
-    result = string_concatenation()
-    print(f"   Length: {result}")
-    
-    # 字符串格式化测试
-    print("\n2. String formatting (500 iterations):")
-    result = string_formatting()
-    print(f"   Length: {result}")
-    
-    # 字符串比较测试
-    print("\n3. String comparison (1000 iterations):")
-    result = string_comparison()
-    print(f"   Count: {result}")
-    
-    print("\n=== 字符串操作测试完成 ===")
+count = 0
+str1 = "test"
+str2 = "test"
+i = 0
+while i < 1000:
+    if str1 == str2:
+        count = count + 1
+    i = i + 1
+print(count)
 
-if __name__ == "__main__":
-    main()
+print()
+print("=== 字符串操作测试完成 ===")
