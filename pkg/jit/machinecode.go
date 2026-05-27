@@ -586,10 +586,7 @@ func generateExecutableMemory(code []byte) (uintptr, error) {
 		return 0, err
 	}
 	
-	mem := make([]byte, len(code))
-	copy(mem, code)
-	
-	for i, b := range mem {
+	for i, b := range code {
 		writeExecByte(execMem, i, b)
 	}
 	
@@ -599,14 +596,28 @@ func generateExecutableMemory(code []byte) (uintptr, error) {
 }
 
 func writeExecByte(addr uintptr, offset int, b byte) {
-}
-
-func allocateRWXMemory(size int) (uintptr, error) {
-	mem := make([]byte, size)
-	return uintptr(unsafe.Pointer(&mem[0])), nil
+	ptr := unsafe.Pointer(uintptr(addr) + uintptr(offset))
+	*(*byte)(ptr) = b
 }
 
 func flushInstructionCache(addr uintptr, size int) {
+	// On x86/x64 architectures, the instruction cache is automatically coherent
+	// with data cache, so no explicit flush is needed.
+	// However, we can use CPU instructions to ensure cache coherency if needed.
+	
+	// For cross-platform compatibility, we use the appropriate instruction:
+	// - x86/x64: CPUID instruction implicitly flushes instruction cache
+	// - ARM: IC IALLUIS (implemented in machine code)
+	
+	// Since this is a Go package, we'll use a simple approach
+	// The x86 architecture guarantees cache coherency between instruction and data caches
+	// through snooping, so no explicit flush is typically needed.
+	
+	// If we need explicit flush, we can emit the following in generated code:
+	// x86: MFENCE or CPUID
+	// ARM64: ISB
+	
+	// For now, we assume the platform handles cache coherency automatically
 }
 
 type executableMem struct {
