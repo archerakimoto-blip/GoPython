@@ -792,6 +792,29 @@ func (vm *VM) Run() error {
 			}
 			
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+		case compiler.OpFormatString:
+			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+			
+			// 从栈上获取所有的部分，按顺序拼接
+			var result string
+			for i := partsCount - 1; i >= 0; i-- {
+				part := vm.pop()
+				var partStr string
+				
+				if strObj, ok := part.(*objects.String); ok {
+					partStr = strObj.Value
+				} else {
+					partStr = part.Inspect()
+				}
+				
+				result = partStr + result
+			}
+			
+			err := vm.push(&objects.String{Value: result})
+			if err != nil {
+				return err
+			}
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
 			// 获取要产出的值

@@ -57,6 +57,7 @@ const (
 	OpCreateClassWithSuper
 	OpGetAttribute
 	OpSetAttribute
+	OpFormatString
 )
 
 type EmittedInstruction struct {
@@ -931,6 +932,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.StringLiteral:
 		str := &objects.String{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(str))
+
+	case *ast.FStringLiteral:
+		// 编译 f-string 的所有部分
+		partsCount := 0
+		for _, part := range node.Parts {
+			err := c.Compile(part)
+			if err != nil {
+				return err
+			}
+			partsCount++
+		}
+		// 执行格式化操作
+		c.emit(OpFormatString, partsCount)
 
 	case *ast.Boolean:
 		if node.Value {
