@@ -10,7 +10,7 @@ import (
 	"github.com/go-py/go-python/pkg/objects"
 )
 
-const StackSize = 2048
+const StackSize = 65536
 const GlobalSize = 65536
 const MaxFrames = 1024
 
