@@ -76,6 +76,9 @@ type Compiler struct {
 	instructions        Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+	
+	currentFunctionName string          // 当前正在编译的函数名（用于递归）
+	backpatchPositions  []int           // 需要用常量索引更新的指令位置列表
 }
 
 type Bytecode struct {
@@ -1129,7 +1132,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
 
-		if symbol.Scope == BuiltinScope {
+		if node.Value == c.currentFunctionName {
+			// 这是对当前正在编译的函数的递归调用！
+			// 我们需要发出一个占位符 OpConstant，之后用函数的实际常量索引进行修补
+			pos := c.emit(OpConstant, 9999) // 临时占位符索引
+			c.backpatchPositions = append(c.backpatchPositions, pos)
+		} else if symbol.Scope == BuiltinScope {
 			c.emit(OpConstant, symbol.Index)
 		} else if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
 			c.emit(OpGetGlobal, symbol.Index)
@@ -1220,6 +1228,21 @@ func (c *Compiler) Compile(node ast.Node) error {
 		outerInstructions := c.instructions
 		c.instructions = make(Instructions, 0)
 
+		// 保存之前的状态，以便稍后恢复
+		previousFunctionName := c.currentFunctionName
+		previousBackpatchPositions := c.backpatchPositions
+		currentBackpatchPositions := []int{} // 重置用于该函数的新列表
+		c.backpatchPositions = currentBackpatchPositions
+
+		// If this function has a name, define it in the outer scope FIRST so
+		// that recursive calls in the body can resolve it!
+		if node.Name != "" {
+			c.symbolTable.DefineFunctionName(node.Name)
+			c.currentFunctionName = node.Name
+		} else {
+			c.currentFunctionName = ""
+		}
+
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 
 		for _, p := range node.Parameters {
@@ -1238,7 +1261,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpReturn)
 		}
 
-		fnInstructions := c.instructions
+		fnInstructions := c.instructions // 此时，内部函数的指令都在这里
 		numLocals := c.symbolTable.numDefinitions
 		freeVars := c.symbolTable.Free
 		numFree := len(freeVars)
@@ -1267,11 +1290,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:  fnInstructions,
+			Instructions:  fnInstructions, // 现在我们需要修改这个数组中的操作数！
 			NumLocals:     numLocals,
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
 			Free:          allFreeVars,
+		}
+
+		// 将编译好的函数添加到常量区并获取索引
+		constantIndex := c.addConstant(compiledFn)
+		
+		// 现在，在内部函数的指令（fnInstructions）上进行修补！
+		// 我们需要修改 fnInstructions 中那些位置的操作数，而不是外部 c.instructions 中的！
+		positionsToPatch := c.backpatchPositions
+		for _, pos := range positionsToPatch {
+			// pos 是 fnInstructions 数组中的偏移量，在该位置我们调用了 c.emit 并放置了占位符
+			// OpConstant 操作数是 pos + 1（高字节）和 pos + 2（低字节）
+			if pos+2 < len(fnInstructions) {
+				fnInstructions[pos+1] = byte((constantIndex >> 8) & 0xFF)
+				fnInstructions[pos+2] = byte(constantIndex & 0xFF)
+			}
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
@@ -1298,13 +1336,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 				c.emit1(OpGetLocal, nestedFree.Index)
 			}
 			totalFree := numFree + len(nestedFreeSymbols)
-			c.emitClosure(c.addConstant(compiledFn), totalFree)
+			c.emitClosure(constantIndex, totalFree)
 		} else {
-			c.emit(OpConstant, c.addConstant(compiledFn))
+			c.emit(OpConstant, constantIndex)
 		}
 		if compiledFn.IsGenerator {
 			c.emit(OpMakeGenerator)
 		}
+
+		// 恢复之前的状态
+		c.currentFunctionName = previousFunctionName
+		c.backpatchPositions = previousBackpatchPositions
 
 	case *ast.LambdaExpression:
 		funcLit := &ast.FunctionLiteral{
