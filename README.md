@@ -10,7 +10,7 @@
 2. **语法分析器 (Parser)**: 将标记序列构建为抽象语法树 (AST)
 3. **编译器 (Compiler)**: 将 AST 编译为字节码
 4. **虚拟机 (VM)**: 执行字节码
-5. **JIT 编译器**: 即时编译热点代码，支持自动优化
+5. **JIT 编译器**: 即时编译热点代码，支持自动优化，支持 x86-64 和 ARM64 双平台
 6. **调试器 (Debugger)**: 交互式调试工具，支持断点、单步执行等
 7. **性能分析器 (Profiler)**: 性能分析工具，统计函数调用和执行时间
 
@@ -28,7 +28,7 @@
 │   ├── compiler/       # 字节码编译器
 │   ├── vm/             # 虚拟机（包含单元测试）
 │   ├── objects/        # 核心对象系统
-│   ├── jit/            # JIT 编译器完整实现
+│   ├── jit/            # JIT 编译器完整实现（支持 x86-64 和 ARM64）
 │   ├── debugger/       # 调试器
 │   └── profiler/       # 性能分析器
 ├── tests/
@@ -72,6 +72,28 @@ go build -o gopy ./cmd/gopy
 ./gopy -profile test.py
 ```
 
+### 使用 JIT 编译
+
+```bash
+# 启用 JIT 编译
+./gopy --jit test.py
+
+# 指定 ARM64 平台
+./gopy --jit --jit-platform arm64 test.py
+
+# 指定 x86-64 平台
+./gopy --jit --jit-platform x86_64 test.py
+
+# 启用激进优化
+./gopy --jit --jit-aggressive test.py
+
+# 启用性能分析
+./gopy --jit --jit-profiling test.py
+
+# 组合使用所有选项
+./gopy --jit --jit-platform arm64 --jit-aggressive --jit-profiling test.py
+```
+
 ## 特性
 
 ### 基础特性
@@ -108,10 +130,11 @@ go build -o gopy ./cmd/gopy
 - [x] **sys 系统模块**
 - [x] **os 操作系统模块**
 - [x] **json 数据处理模块**
-- [x] **JIT 即时编译器**
+- [x] **JIT 即时编译器（支持 x86-64 和 ARM64）**
 - [x] **调试器工具**
 - [x] **性能分析器**
 - [x] **模块导入系统**（import 和 from...import）
+- [x] **激进优化功能**（循环展开、内联优化、分支预测等）
 
 ### 异常类型系统
 
@@ -276,11 +299,34 @@ print(parsed)  # Hello, GoPy!
 
 GoPy 的 JIT 编译器提供以下功能：
 
+- **跨平台支持**: 支持 x86-64 和 ARM64 双平台
+- **自动平台检测**: 基于 runtime.GOARCH 自动选择目标平台
 - **热点检测**: 自动识别频繁调用的函数
 - **代码分析**: 分析指令数量、循环检测、复杂度计算
-- **自动优化**: 对热点函数进行优化编译
+- **多级别优化**: 5级优化级别控制
+- **激进优化**: 循环展开、内联优化、分支预测、死代码消除
 - **缓存管理**: 智能缓存和驱逐策略
 - **线程安全**: 支持并发访问
+- **性能分析**: 收集函数调用次数、执行周期、热点路径分析
+
+#### JIT 命令行选项
+
+| 选项 | 描述 | 示例 |
+|------|------|------|
+| `--jit` | 启用 JIT 编译 | `./gopy --jit test.py` |
+| `--jit-platform` | 指定目标平台 (x86_64/arm64) | `./gopy --jit --jit-platform arm64 test.py` |
+| `--jit-aggressive` | 启用激进优化 | `./gopy --jit --jit-aggressive test.py` |
+| `--jit-profiling` | 启用性能分析 | `./gopy --jit --jit-profiling test.py` |
+
+#### 激进优化功能
+
+GoPy 的激进优化包括：
+
+1. **循环展开**: 将小循环展开4次减少分支开销
+2. **内联优化**: 将小函数内联到调用点
+3. **分支预测**: 优化分支指令顺序，提高 CPU 分支预测命中率
+4. **激进死代码消除**: 移除未使用的常量和指令
+5. **Peephole 优化**: 优化指令序列，合并冗余操作
 
 ### 调试器特性
 
@@ -305,6 +351,7 @@ GoPy 提供了性能分析工具：
 - **函数调用统计**: 统计函数调用次数和总执行时间
 - **指令统计**: 统计每条字节码指令的执行次数和耗时
 - **详细报告**: 按执行时间排序的性能报告
+- **热点路径分析**: 识别占用 10% 以上执行时间的函数
 
 ### 对象系统特性
 
@@ -559,6 +606,12 @@ go test ./...
 
 # 使用性能分析器
 ./gopy -profile tests/features/test_fstring_braces.py
+
+# 使用 JIT 编译
+./gopy --jit tests/python/test_all_comprehensive.py
+
+# 使用 JIT 激进优化
+./gopy --jit --jit-aggressive tests/python/test_all_comprehensive.py
 ```
 
 ## 未来计划
@@ -569,10 +622,11 @@ go test ./...
 - [x] 支持模块导入系统（import 和 from...import）
 - [x] 完善对象系统（Set, Dict, List 的现代化实现）
 - [x] 实现更多内置模块（os, sys, json 等）
+- [x] 增强 JIT 编译优化（真正编译到机器码，支持 x86-64 和 ARM64）
+- [x] 添加激进优化功能（循环展开、内联优化等）
 - [ ] 实现与现有 Python 库的兼容性
 - [ ] 实现垃圾回收
 - [ ] 添加更多 Python 标准库功能
-- [ ] 增强 JIT 编译优化（真正编译到机器码）
 
 ## 贡献
 
