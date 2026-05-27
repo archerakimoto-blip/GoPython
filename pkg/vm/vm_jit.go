@@ -38,7 +38,7 @@ func NewVMWithJIT(bytecode *compiler.Bytecode, config *jit.JITConfig) *VMWithJIT
 		globals:      make([]objects.Object, GlobalSize),
 		frames:       frames,
 		framesIndex:  1,
-		timeout:      30 * time.Second,
+		timeout:      5 * time.Minute,
 		maxInstructions: 1000000000,
 	}
 

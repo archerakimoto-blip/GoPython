@@ -26,7 +26,7 @@ var (
 	jitPlatform          = flag.String("jit-platform", "", "Target platform for JIT (x86_64, arm64)")
 	jitAggressive        = flag.Bool("jit-aggressive", false, "Enable aggressive optimizations")
 	jitProfiling         = flag.Bool("jit-profiling", false, "Enable JIT profiling")
-	timeout              = flag.Duration("timeout", 30*time.Second, "Execution timeout (e.g., 30s, 1m)")
+	timeout              = flag.Duration("timeout", 5*time.Minute, "Execution timeout (e.g., 30s, 1m)")
 	maxInstructions      = flag.Int64("max-instructions", 1000000000, "Maximum number of instructions to execute")
 )
 

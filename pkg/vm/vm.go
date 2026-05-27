@@ -86,7 +86,7 @@ func New(bytecode *compiler.Bytecode) *VM {
 		gcThreshold:    1024 * 1024, // 1MB
 		allocatedBytes: 0,
 
-		timeout:         30 * time.Second,
+		timeout:         5 * time.Minute,
 		maxInstructions: 1000000000,
 	}
 }
@@ -204,7 +204,7 @@ func (vm *VM) Run() error {
 	for vm.currentFrame().ip < len(vm.currentFrame().fn.Instructions)-1 {
 		vm.instructionCount++
 		
-		if vm.instructionCount%10000 == 0 {
+		if vm.instructionCount%100000 == 0 {
 			if time.Since(vm.startTime) > vm.timeout {
 				return fmt.Errorf("execution timeout after %v (executed %d instructions)", vm.timeout, vm.instructionCount)
 			}
