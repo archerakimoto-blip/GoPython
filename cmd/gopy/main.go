@@ -302,7 +302,7 @@ func runFileWithFastVM(filename string) {
 	code := comp.Bytecode()
 
 	start := time.Now()
-	machine := vm.NewFastVM(code)
+	machine := vm.New(code)
 	err = machine.Run()
 	elapsed := time.Since(start)
 
@@ -311,7 +311,7 @@ func runFileWithFastVM(filename string) {
 		return
 	}
 
-	fmt.Printf("[Fast VM executed in %v]\n", elapsed)
+	fmt.Printf("[VM executed in %v]\n", elapsed)
 }
 
 func runBenchmarkSuite() {
@@ -388,7 +388,7 @@ func runSingleBenchmark(file string, useFast bool) time.Duration {
 
 	start := time.Now()
 	if useFast {
-		machine := vm.NewFastVM(code)
+		machine := vm.New(code)
 		machine.Run()
 	} else {
 		machine := vm.New(code)

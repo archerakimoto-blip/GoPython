@@ -218,22 +218,20 @@ func (vm *VM) Run() error {
 	vm.startTime = time.Now()
 	vm.instructionCount = 0
 
-	// 缓存热点数据，减少方法调用
 	for {
 		frame := vm.frames[vm.framesIndex-1]
-		
+
 		if frame.ip >= len(frame.fn.Instructions)-1 {
 			break
 		}
-		
+
 		vm.instructionCount++
-		
 		if vm.instructionCount%100000 == 0 {
 			if time.Since(vm.startTime) > vm.timeout {
-				return fmt.Errorf("execution timeout after %v (executed %d instructions)", vm.timeout, vm.instructionCount)
+				return fmt.Errorf("execution timeout after %v", vm.timeout)
 			}
 			if vm.instructionCount >= vm.maxInstructions {
-				return fmt.Errorf("exceeded maximum instruction count of %d", vm.maxInstructions)
+				return fmt.Errorf("exceeded maximum instruction count")
 			}
 		}
 
@@ -242,11 +240,149 @@ func (vm *VM) Run() error {
 		ins := frame.fn.Instructions
 		op := compiler.Opcode(ins[ip])
 
+		// 优化：把最常用的指令放在前面，利用分支预测
 		switch op {
-		case compiler.OpConstant:
-			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+		case compiler.OpGetLocal:
+			localIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
-			vm.push(vm.constants[constIndex])
+			vm.stack[vm.sp] = vm.stack[frame.basePointer+localIdx]
+			vm.sp++
+
+		case compiler.OpSetLocal:
+			localIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.sp--
+			vm.stack[frame.basePointer+localIdx] = vm.stack[vm.sp]
+
+		case compiler.OpConstant:
+			constIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.stack[vm.sp] = vm.constants[constIdx]
+			vm.sp++
+
+		case compiler.OpPop:
+			vm.sp--
+
+		case compiler.OpAdd:
+			right := vm.stack[vm.sp-1]
+			left := vm.stack[vm.sp-2]
+			vm.sp -= 2
+
+			if lInt, ok := left.(*objects.Integer); ok {
+				if rInt, ok := right.(*objects.Integer); ok {
+					vm.stack[vm.sp] = &objects.Integer{Value: lInt.Value + rInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if lStr, ok := left.(*objects.String); ok {
+				if rStr, ok := right.(*objects.String); ok {
+					vm.stack[vm.sp] = &objects.String{Value: lStr.Value + rStr.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+
+		case compiler.OpSub:
+			if lInt, ok := vm.stack[vm.sp-2].(*objects.Integer); ok {
+				if rInt, ok := vm.stack[vm.sp-1].(*objects.Integer); ok {
+					vm.sp -= 2
+					vm.stack[vm.sp] = &objects.Integer{Value: lInt.Value - rInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+
+		case compiler.OpMul:
+			if lInt, ok := vm.stack[vm.sp-2].(*objects.Integer); ok {
+				if rInt, ok := vm.stack[vm.sp-1].(*objects.Integer); ok {
+					vm.sp -= 2
+					vm.stack[vm.sp] = &objects.Integer{Value: lInt.Value * rInt.Value}
+					vm.sp++
+					continue
+				}
+			}
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+
+		case compiler.OpDiv:
+			if lInt, ok := vm.stack[vm.sp-2].(*objects.Integer); ok {
+				if rInt, ok := vm.stack[vm.sp-1].(*objects.Integer); ok {
+					vm.sp -= 2
+					if rInt.Value == 0 {
+						vm.stack[vm.sp] = objects.NewZeroDivisionError("division by zero")
+					} else {
+						vm.stack[vm.sp] = &objects.Integer{Value: lInt.Value / rInt.Value}
+					}
+					vm.sp++
+					continue
+				}
+			}
+			if err := vm.executeBinaryOperation(op); err != nil {
+				return err
+			}
+
+		case compiler.OpLessThan:
+			if lInt, ok := vm.stack[vm.sp-2].(*objects.Integer); ok {
+				if rInt, ok := vm.stack[vm.sp-1].(*objects.Integer); ok {
+					vm.sp -= 2
+					if lInt.Value < rInt.Value {
+						vm.stack[vm.sp] = objects.True
+					} else {
+						vm.stack[vm.sp] = objects.False
+					}
+					vm.sp++
+					continue
+				}
+			}
+			if err := vm.executeComparison(op); err != nil {
+				return err
+			}
+
+		case compiler.OpJumpNotTruthy:
+			target := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			cond := vm.stack[vm.sp-1]
+			vm.sp--
+			if !isTruthy(cond) {
+				frame.ip = target - 1
+			}
+
+		case compiler.OpJump:
+			target := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip = target - 1
+
+		case compiler.OpGetGlobal:
+			globalIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.stack[vm.sp] = vm.globals[globalIdx]
+			vm.sp++
+
+		case compiler.OpSetGlobal:
+			globalIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			vm.sp--
+			vm.globals[globalIdx] = vm.stack[vm.sp]
+
+		case compiler.OpTrue:
+			vm.stack[vm.sp] = objects.True
+			vm.sp++
+
+		case compiler.OpFalse:
+			vm.stack[vm.sp] = objects.False
+			vm.sp++
+
+		case compiler.OpNull:
+			vm.stack[vm.sp] = objects.None_
+			vm.sp++
 
 		case compiler.OpClosure:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -258,10 +394,10 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("not a function: %T", vm.constants[constIndex])
 			}
 
-			// Pop free variables from stack
 			free := make([]objects.Object, numFree)
 			for i := numFree - 1; i >= 0; i-- {
-				free[i] = vm.pop()
+				free[i] = vm.stack[vm.sp-1]
+				vm.sp--
 			}
 
 			closure := &objects.Closure{
@@ -272,35 +408,93 @@ func (vm *VM) Run() error {
 				Free:          free,
 			}
 
-			vm.push(closure)
-
-		case compiler.OpPop:
-			vm.pop()
+			vm.stack[vm.sp] = closure
+			vm.sp++
 
 		case compiler.OpDupTop:
 			if vm.sp > 0 {
 				top := vm.stack[vm.sp-1]
-				vm.push(top)
+				vm.stack[vm.sp] = top
+				vm.sp++
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv:
-			if err := vm.executeBinaryOperation(op); err != nil {
+		case compiler.OpArray:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			array := vm.buildArray(vm.sp-numElements, vm.sp)
+			vm.sp -= numElements
+			vm.stack[vm.sp] = array
+			vm.sp++
+
+		case compiler.OpHash:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
+			if err != nil {
 				return err
 			}
-			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
-				errObj := vm.stack[vm.sp-1]
-				if !vm.raiseException(errObj) {
-					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
-				}
+			vm.sp -= numElements
+			vm.stack[vm.sp] = hash
+			vm.sp++
+
+		case compiler.OpSet:
+			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+
+			set := vm.buildSet(vm.sp-numElements, vm.sp)
+			vm.sp -= numElements
+			vm.stack[vm.sp] = set
+			vm.sp++
+
+		case compiler.OpIndex:
+			index := vm.stack[vm.sp-1]
+			left := vm.stack[vm.sp-2]
+			vm.sp -= 2
+
+			if err := vm.executeIndexExpression(left, index); err != nil {
+				return err
 			}
 
-		case compiler.OpTrue:
-			vm.push(objects.True)
+		case compiler.OpSlice:
+			end := vm.stack[vm.sp-1]
+			start := vm.stack[vm.sp-2]
+			left := vm.stack[vm.sp-3]
+			vm.sp -= 3
 
-		case compiler.OpFalse:
-			vm.push(objects.False)
+			if err := vm.executeSliceExpression(left, start, end); err != nil {
+				return err
+			}
 
-		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
+		case compiler.OpCall:
+			numArgs := int(ins[ip+1])
+			frame.ip++
+
+			if err := vm.executeCall(numArgs); err != nil {
+				return err
+			}
+
+		case compiler.OpReturnValue:
+			returnValue := vm.stack[vm.sp-1]
+			vm.sp--
+
+			vm.framesIndex--
+			frame = vm.frames[vm.framesIndex]
+
+			vm.sp = frame.basePointer - 1
+			vm.stack[vm.sp] = returnValue
+			vm.sp++
+
+		case compiler.OpReturn:
+			vm.framesIndex--
+			frame = vm.frames[vm.framesIndex]
+
+			vm.sp = frame.basePointer - 1
+			vm.stack[vm.sp] = objects.None_
+			vm.sp++
+
+		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
 			if err := vm.executeComparison(op); err != nil {
 				return err
 			}
@@ -315,688 +509,12 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		case compiler.OpJump:
-			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip = pos - 1
-
-		case compiler.OpJumpNotTruthy:
-			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			condition := vm.pop()
-			if !isTruthy(condition) {
-				frame.ip = pos - 1
-			}
-
-		case compiler.OpNull:
-			vm.push(objects.None_)
-
-		case compiler.OpSetGlobal:
-			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.globals[globalIndex] = vm.pop()
-
-		case compiler.OpGetGlobal:
-			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.push(vm.globals[globalIndex])
-
-		case compiler.OpArray:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			array := vm.buildArray(vm.sp-numElements, vm.sp)
-			vm.sp = vm.sp - numElements
-
-			vm.push(array)
-
-		case compiler.OpHash:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
-			if err != nil {
-				return err
-			}
-			vm.sp = vm.sp - numElements
-
-			vm.push(hash)
-
-		case compiler.OpSet:
-			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			set := vm.buildSet(vm.sp-numElements, vm.sp)
-			vm.sp = vm.sp - numElements
-
-			vm.push(set)
-
-		case compiler.OpIndex:
-			index := vm.pop()
-			left := vm.pop()
-
-			if err := vm.executeIndexExpression(left, index); err != nil {
-				return err
-			}
-		case compiler.OpSlice:
-			end := vm.pop()
-			start := vm.pop()
-			left := vm.pop()
-
-			if err := vm.executeSliceExpression(left, start, end); err != nil {
-				return err
-			}
-
-		case compiler.OpCall:
-			numArgs := int(ins[ip+1])
-			frame.ip += 1
-
-			if err := vm.executeCall(numArgs); err != nil {
-				return err
-			}
-
-		case compiler.OpReturnValue:
-			returnValue := vm.pop()
-
-			frame := vm.popFrame()
-			
-			if vm.framesIndex == 0 {
-				return nil
-			}
-			
-			// 检查是否是从生成器返回
-			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
-					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
-						gen.Done = true
-					}
-				}
-			}
-			
-			vm.sp = frame.basePointer - 1
-
-			err := vm.push(returnValue)
-			if err != nil {
-				return err
-			}
-
-		case compiler.OpReturn:
-			frame := vm.popFrame()
-			
-			if vm.framesIndex == 0 {
-				return nil
-			}
-			
-			// 检查是否是从生成器返回
-			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
-					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
-						gen.Done = true
-					}
-				}
-			}
-			
-			vm.sp = frame.basePointer - 1
-
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
-			}
-
-		case compiler.OpGetLocal:
-			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			vm.push(vm.stack[frame.basePointer+localIndex])
-
-		case compiler.OpSetLocal:
-			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			vm.stack[frame.basePointer+localIndex] = vm.pop()
-
-		case compiler.OpGetFree:
-			freeIndex := int(ins[ip+1])
-			frame.ip += 1
-
-			// Use the stored free variables from the closure
-			if frame.freeVars != nil && freeIndex < len(frame.freeVars) {
-				vm.push(frame.freeVars[freeIndex])
-			} else {
-				// Fallback: try to get from stack (for non-closure functions)
-				vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
-			}
-
-		case compiler.OpBeginTry:
-			exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
-			frame.ip += 4
-			tryBlockStartIP := ip + 5
-			handler := ExceptionHandler{
-				handlerIP:       -1,
-				stackPtr:        vm.sp,
-				exceptionType:   "",
-				varName:         "",
-				handlerStartIP:  -1,
-				tryBlockStartIP: tryBlockStartIP,
-				hasFinally:      hasFinally == 1,
-				finallyStartIP:  -1,
-				finallyEndIP:    -1,
-				pendingError:    nil,
-			}
-			handler.exceptCount = exceptCount
-			handler.baseIP = frame.ip + 1
-			vm.exceptionStack = append(vm.exceptionStack, handler)
-		case compiler.OpEndTry:
-			if len(vm.exceptionStack) > 0 {
-				lastIdx := len(vm.exceptionStack) - 1
-				pendingError := vm.exceptionStack[lastIdx].pendingError
-				vm.exceptionStack = vm.exceptionStack[:lastIdx]
-				vm.inFinally = false
-
-				if pendingError != nil {
-					err := vm.push(pendingError)
-					if err != nil {
-						return err
-					}
-					caught := false
-
-					for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
-						handler := vm.exceptionStack[i]
-						if handler.handlerIP == -1 {
-							continue
-						}
-
-						if handler.hasFinally {
-							vm.exceptionStack[i].pendingError = pendingError
-							frame.ip = handler.finallyStartIP - 1
-							caught = true
-							break
-						}
-
-						ip := handler.tryBlockStartIP
-						for ip < len(frame.fn.Instructions) {
-							op := compiler.Opcode(frame.fn.Instructions[ip])
-							if op == compiler.OpExceptHandler {
-								typeIdx := int(uint16(frame.fn.Instructions[ip+2])<<8 | uint16(frame.fn.Instructions[ip+1]))
-								var exceptionType string
-								if typeIdx > 0 && typeIdx < len(vm.constants) {
-									if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
-										exceptionType = typeObj.Value
-									}
-								}
-								if exceptionType == "" || matchesException(pendingError, exceptionType) {
-									vm.sp = handler.stackPtr
-									vm.push(pendingError)
-									frame.ip = ip + 5 - 1
-									caught = true
-								}
-								break
-							}
-							if op == compiler.OpFinally {
-								break
-							}
-							ip++
-						}
-						if caught {
-							break
-						}
-					}
-
-					if !caught {
-						vm.pendingError = pendingError
-						return fmt.Errorf("unhandled exception: %s", pendingError.Inspect())
-					}
-				}
-			}
-		case compiler.OpRaise:
-			errObj := vm.pop()
-			caught := false
-
-			for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
-				handler := vm.exceptionStack[i]
-				if handler.handlerIP == -1 {
-					continue
-				}
-
-				if handler.hasFinally {
-					vm.exceptionStack[i].pendingError = errObj
-					frame.ip = handler.finallyStartIP - 1
-					caught = true
-					break
-				}
-
-				ip := handler.tryBlockStartIP
-				for ip < len(frame.fn.Instructions) {
-					op := compiler.Opcode(frame.fn.Instructions[ip])
-					if op == compiler.OpExceptHandler {
-						typeIdx := int(uint16(frame.fn.Instructions[ip+2])<<8 | uint16(frame.fn.Instructions[ip+1]))
-						var exceptionType string
-						if typeIdx > 0 && typeIdx < len(vm.constants) {
-							if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
-								exceptionType = typeObj.Value
-							}
-						}
-						if exceptionType == "" || matchesException(errObj, exceptionType) {
-							vm.sp = handler.stackPtr
-							if err := vm.push(errObj); err != nil {
-								return err
-							}
-							frame.ip = ip + 5 - 1
-							caught = true
-						}
-						break
-					}
-					if op == compiler.OpFinally {
-						break
-					}
-					ip++
-				}
-				if caught {
-					break
-				}
-			}
-
-			if !caught {
-				vm.pendingError = errObj
-				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
-			}
 		case compiler.OpExceptHandler:
-			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
-			frame.ip += 4
+			frame.ip += 7
 
-			var exceptionType, varName string
-			if typeIdx > 0 {
-				if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
-					exceptionType = typeObj.Value
-				}
-			}
-			if varIdx > 0 {
-				if varObj, ok := vm.constants[varIdx].(*objects.String); ok {
-					varName = varObj.Value
-				}
-			}
-
-			handlerStartIP := frame.ip + 1
-
-			if len(vm.exceptionStack) > 0 {
-				lastIdx := len(vm.exceptionStack) - 1
-				for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP != -1 {
-					lastIdx--
-				}
-				if lastIdx >= 0 {
-					existingHandler := vm.exceptionStack[lastIdx]
-					vm.exceptionStack[lastIdx] = ExceptionHandler{
-						handlerIP:       frame.ip,
-						stackPtr:        vm.sp - 1,
-						exceptionType:   exceptionType,
-						varName:         varName,
-						handlerStartIP:  handlerStartIP,
-						tryBlockStartIP: existingHandler.tryBlockStartIP,
-						hasFinally:      existingHandler.hasFinally,
-						finallyStartIP:  existingHandler.finallyStartIP,
-						finallyEndIP:    existingHandler.finallyEndIP,
-						pendingError:    existingHandler.pendingError,
-					}
-				}
-			}
-		case compiler.OpFinally:
-			finallyEndIP := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			if len(vm.exceptionStack) > 0 {
-				lastIdx := len(vm.exceptionStack) - 1
-				for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP == -1 {
-					lastIdx--
-				}
-				if lastIdx >= 0 {
-					vm.exceptionStack[lastIdx].finallyStartIP = ip + 3
-					vm.exceptionStack[lastIdx].finallyEndIP = finallyEndIP
-				}
-			}
-
-			vm.inFinally = true
-
-			pendingError := vm.pendingError
-			vm.pendingError = nil
-
-			if pendingError != nil {
-				if len(vm.exceptionStack) > 0 {
-					lastIdx := len(vm.exceptionStack) - 1
-					for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP == -1 {
-						lastIdx--
-					}
-					if lastIdx >= 0 {
-						vm.exceptionStack[lastIdx].pendingError = pendingError
-					}
-				}
-			}
-		case compiler.OpEnterContext:
-			ctxManager := vm.pop()
-			if cm, ok := ctxManager.(*objects.ContextManager); ok {
-				if cm.EnterFunc != nil {
-					result := cm.EnterFunc()
-					err := vm.push(result)
-					if err != nil {
-						return err
-					}
-				} else {
-					err := vm.push(objects.None_)
-					if err != nil {
-						return err
-					}
-				}
-			} else {
-				err := vm.push(objects.None_)
-				if err != nil {
-					return err
-				}
-			}
-		case compiler.OpExitContext:
-			exc := vm.pop()
-			ctxManager := vm.pop()
-			if cm, ok := ctxManager.(*objects.ContextManager); ok {
-				if cm.ExitFunc != nil {
-					result := cm.ExitFunc(exc)
-					err := vm.push(result)
-					if err != nil {
-						return err
-					}
-				} else {
-					err := vm.push(objects.None_)
-					if err != nil {
-						return err
-					}
-				}
-			} else {
-				err := vm.push(objects.None_)
-				if err != nil {
-					return err
-				}
-			}
-		case compiler.OpMakeGenerator:
-			fnObj := vm.pop()
-			if cf, ok := fnObj.(*compiler.CompiledFunction); ok {
-				gen := &objects.Generator{
-					Instructions: cf.Instructions,
-					Constants:    vm.constants,
-					Locals:       make([]objects.Object, cf.NumLocals),
-					IP:           -1,
-					Stack:        make([]objects.Object, StackSize),
-					StackPtr:     0,
-					BasePointer:  0,
-					Done:         false,
-				}
-				err := vm.push(gen)
-				if err != nil {
-					return err
-				}
-			}
-		case compiler.OpCreateClass:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			class := vm.constants[idx].(*objects.Class)
-			frame.ip += 2
-			err := vm.push(class)
-			if err != nil {
-				return err
-			}
-		case compiler.OpCreateClassWithSuper:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			class := vm.constants[idx].(*objects.Class)
-			frame.ip += 2
-			
-			// Pop super class from stack
-			superClass := vm.pop()
-			if superClass != nil {
-				if superCls, ok := superClass.(*objects.Class); ok {
-					class.SuperClass = superCls
-					// Inherit methods from super class
-					for name, method := range superCls.Methods {
-						if _, exists := class.Methods[name]; !exists {
-							class.Methods[name] = method
-						}
-					}
-				}
-			}
-			
-			err := vm.push(class)
-			if err != nil {
-				return err
-			}
-		case compiler.OpGetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			attrName := vm.constants[idx].(*objects.String).Value
-
-			obj := vm.pop()
-			
-			if instance, ok := obj.(*objects.Instance); ok {
-				if val, ok := instance.GetAttr(attrName); ok {
-					if method, ok := val.(*compiler.CompiledFunction); ok {
-						vm.push(instance)
-						vm.push(method)
-						continue
-					}
-					return vm.push(val)
-				}
-				if classMethod, ok := instance.Class.Methods[attrName]; ok {
-					vm.push(instance)
-					vm.push(classMethod)
-					continue
-				}
-				return vm.push(objects.None_)
-			}
-			
-			if module, ok := obj.(*objects.Module); ok {
-				if val, ok := module.GetAttr(attrName); ok {
-					err := vm.push(val)
-					if err != nil {
-						return err
-					}
-					continue
-				}
-				err := vm.push(objects.None_)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			
-			if list, ok := obj.(*objects.List); ok {
-				if attrName == "append" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.append",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) != 1 {
-								return objects.NewTypeError("append() takes exactly 1 argument")
-							}
-							list.Append(args[0])
-							return objects.None_
-						},
-					})
-					continue
-				}
-				if attrName == "pop" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.pop",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) > 1 {
-								return objects.NewTypeError("pop() takes at most 1 argument")
-							}
-							if len(args) == 0 {
-								obj, err := list.Pop()
-								if err != nil {
-									return objects.NewIndexError(err.Error())
-								}
-								return obj
-							}
-							idx, ok := args[0].(*objects.Integer)
-							if !ok {
-								return objects.NewTypeError("pop() argument must be an integer")
-							}
-							obj, err := list.Pop(int(idx.Value))
-							if err != nil {
-								return objects.NewIndexError(err.Error())
-							}
-							return obj
-						},
-					})
-					continue
-				}
-				if attrName == "extend" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.extend",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) != 1 {
-								return objects.NewTypeError("extend() takes exactly 1 argument")
-							}
-							other, ok := args[0].(*objects.List)
-							if !ok {
-								return objects.NewTypeError("extend() argument must be a list")
-							}
-							list.Extend(other)
-							return objects.None_
-						},
-					})
-					continue
-				}
-				return vm.push(objects.None_)
-			}
-			
-			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
-		case compiler.OpSetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			attrName := vm.constants[idx].(*objects.String).Value
-			frame.ip += 2
-			
-			value := vm.pop()
-			obj := vm.pop()
-			
-			if instance, ok := obj.(*objects.Instance); ok {
-				instance.SetAttr(attrName, value)
-				return vm.push(value)
-			}
-			
-			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
-		case compiler.OpFormatString:
-			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			
-			// 从栈上获取所有的部分，按顺序拼接
-			var result string
-			for i := partsCount - 1; i >= 0; i-- {
-				part := vm.pop()
-				var partStr string
-				
-				if strObj, ok := part.(*objects.String); ok {
-					partStr = strObj.Value
-				} else {
-					partStr = part.Inspect()
-				}
-				
-				result = partStr + result
-			}
-			
-			err := vm.push(&objects.String{Value: result})
-			if err != nil {
-				return err
-			}
-		case compiler.OpIndexAssign:
-			value := vm.pop()
-			indexObj := vm.pop()
-			container := vm.pop()
-
-			switch c := container.(type) {
-			case *objects.List:
-				indexInt, ok := indexObj.(*objects.Integer)
-				if !ok {
-					return fmt.Errorf("list index must be an integer, got %T", indexObj)
-				}
-				idx := int(indexInt.Value)
-				if idx < 0 || idx >= len(c.Elements) {
-					return fmt.Errorf("list index out of range: %d", idx)
-				}
-				c.Elements[idx] = value
-			case *objects.Dict:
-				c.Set(indexObj, value)
-			default:
-				return fmt.Errorf("cannot assign to index of type %T", container)
-			}
-
-			vm.push(value)
-		
-		case compiler.OpListAppend:
-			value := vm.pop()
-			list := vm.pop()
-			if lst, ok := list.(*objects.List); ok {
-				lst.Append(value)
-				vm.push(lst)
-			} else {
-				return fmt.Errorf("append requires a list, got %T", list)
-			}
-		
-		case compiler.OpDictSet:
-			value := vm.pop()
-			key := vm.pop()
-			dict := vm.pop()
-			if d, ok := dict.(*objects.Dict); ok {
-				d.Set(key, value)
-				vm.push(d)
-			} else {
-				return fmt.Errorf("dict set requires a dict, got %T", dict)
-			}
-		
-		case compiler.OpYieldValue:
-			// 获取要产出的值
-			yieldValue := vm.pop()
-			
-			// 找到生成器对象（它应该在 basePointer-1 位置）
-			genIndex := frame.basePointer - 1
-			if gen, ok := vm.stack[genIndex].(*objects.Generator); ok {
-				// 保存当前状态到生成器对象
-				gen.IP = frame.ip + 1
-				gen.StackPtr = vm.sp
-				gen.BasePointer = frame.basePointer
-				
-				// 保存局部变量
-				copy(gen.Locals, vm.stack[frame.basePointer:])
-				// 保存当前栈的完整状态
-				copy(gen.Stack[:vm.sp], vm.stack[:vm.sp])
-				
-				// 恢复调用者栈
-				vm.sp = genIndex
-				
-				// 弹出当前帧
-				vm.popFrame()
-				
-				// 把产出值压到调用者栈上
-				return vm.push(yieldValue)
-			}
-			
-			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
-			frame.ip--
-			gen := &objects.Generator{
-				Instructions: frame.fn.Instructions,
-				Constants:    vm.constants,
-				Locals:     make([]objects.Object, len(vm.stack)-frame.basePointer),
-				IP:         frame.ip + 1,
-				Stack:      make([]objects.Object, vm.sp),
-				StackPtr:  vm.sp,
-				BasePointer: frame.basePointer,
-				Done:       false,
-			}
-			copy(gen.Locals, vm.stack[frame.basePointer:])
-			copy(gen.Stack, vm.stack[:vm.sp])
-			vm.sp = frame.basePointer - 1
-			vm.popFrame()
-			vm.push(gen)
-	}
+		default:
+			return fmt.Errorf("unhandled opcode: %d", op)
+		}
 	}
 
 	return nil
@@ -1798,238 +1316,3 @@ func (vm *VM) findMatchingExceptHandlerFrom(startIP int, errObj objects.Object, 
 }
 
 
-// FastVM 是一个简化但更快的 VM 版本，用于性能测试
-type FastVM struct {
-	constants  []objects.Object
-	stack      []objects.Object
-	sp         int
-	globals    []objects.Object
-	frames     []*Frame
-	frameIndex int
-}
-
-func NewFastVM(bytecode *compiler.Bytecode) *FastVM {
-	mainFn := &compiler.CompiledFunction{
-		Instructions: bytecode.Instructions,
-	}
-	mainFrame := NewFrame(mainFn, 1)
-
-	frames := make([]*Frame, MaxFrames)
-	frames[0] = mainFrame
-
-	return &FastVM{
-		constants:  bytecode.Constants,
-		stack:      make([]objects.Object, StackSize),
-		sp:         0,
-		globals:    make([]objects.Object, GlobalSize),
-		frames:     frames,
-		frameIndex: 1,
-	}
-}
-
-func (vm *FastVM) Run() error {
-	for {
-		frame := vm.frames[vm.frameIndex-1]
-
-		if frame.ip >= len(frame.fn.Instructions)-1 {
-			break
-		}
-
-		frame.ip++
-		ip := frame.ip
-		ins := frame.fn.Instructions
-		op := compiler.Opcode(ins[ip])
-
-		// 优化：把最常用的指令放在前面，利用分支预测
-		switch op {
-		case compiler.OpGetLocal:
-			localIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.stack[vm.sp] = vm.stack[frame.basePointer+localIdx]
-			vm.sp++
-
-		case compiler.OpSetLocal:
-			localIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.sp--
-			vm.stack[frame.basePointer+localIdx] = vm.stack[vm.sp]
-
-		case compiler.OpConstant:
-			constIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.stack[vm.sp] = vm.constants[constIdx]
-			vm.sp++
-
-		case compiler.OpPop:
-			vm.sp--
-
-		case compiler.OpAdd:
-			right := vm.stack[vm.sp-1]
-			left := vm.stack[vm.sp-2]
-			vm.sp -= 2
-
-			if lInt, ok := left.(*objects.Integer); ok {
-				if rInt, ok := right.(*objects.Integer); ok {
-					vm.stack[vm.sp] = &objects.Integer{Value: lInt.Value + rInt.Value}
-					vm.sp++
-					continue
-				}
-			}
-			if lStr, ok := left.(*objects.String); ok {
-				if rStr, ok := right.(*objects.String); ok {
-					vm.stack[vm.sp] = &objects.String{Value: lStr.Value + rStr.Value}
-					vm.sp++
-					continue
-				}
-			}
-			return fmt.Errorf("unsupported add")
-
-		case compiler.OpSub:
-			rVal := vm.stack[vm.sp-1].(*objects.Integer).Value
-			lVal := vm.stack[vm.sp-2].(*objects.Integer).Value
-			vm.sp -= 2
-			vm.stack[vm.sp] = &objects.Integer{Value: lVal - rVal}
-			vm.sp++
-
-		case compiler.OpMul:
-			rVal := vm.stack[vm.sp-1].(*objects.Integer).Value
-			lVal := vm.stack[vm.sp-2].(*objects.Integer).Value
-			vm.sp -= 2
-			vm.stack[vm.sp] = &objects.Integer{Value: lVal * rVal}
-			vm.sp++
-
-		case compiler.OpJumpNotTruthy:
-			target := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			cond := vm.stack[vm.sp-1]
-			vm.sp--
-			if !isTruthy(cond) {
-				frame.ip = target - 1
-			}
-
-		case compiler.OpJump:
-			target := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip = target - 1
-
-		case compiler.OpLessThan:
-			rVal := vm.stack[vm.sp-1].(*objects.Integer).Value
-			lVal := vm.stack[vm.sp-2].(*objects.Integer).Value
-			vm.sp -= 2
-			if lVal < rVal {
-				vm.stack[vm.sp] = objects.True
-			} else {
-				vm.stack[vm.sp] = objects.False
-			}
-			vm.sp++
-
-		case compiler.OpGetGlobal:
-			globalIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.stack[vm.sp] = vm.globals[globalIdx]
-			vm.sp++
-
-		case compiler.OpSetGlobal:
-			globalIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			vm.sp--
-			vm.globals[globalIdx] = vm.stack[vm.sp]
-
-		case compiler.OpCall:
-			numArgs := int(ins[ip+1])
-			frame.ip++
-
-			calleeIdx := vm.sp - numArgs - 1
-			callee := vm.stack[calleeIdx]
-
-			if builtin, ok := callee.(*objects.Builtin); ok {
-				result := builtin.Fn(vm.stack[vm.sp-numArgs : vm.sp]...)
-				vm.sp = calleeIdx
-				vm.stack[vm.sp] = result
-				vm.sp++
-			} else if fn, ok := callee.(*compiler.CompiledFunction); ok {
-				if numArgs != fn.NumParameters {
-					return fmt.Errorf("wrong number of arguments")
-				}
-				newFrame := NewFrame(fn, vm.sp-numArgs)
-				vm.frames[vm.frameIndex] = newFrame
-				vm.frameIndex++
-				vm.sp = newFrame.basePointer + fn.NumLocals
-			} else if closure, ok := callee.(*objects.Closure); ok {
-				if numArgs != closure.NumParameters {
-					return fmt.Errorf("wrong number of arguments")
-				}
-				fnObj := &compiler.CompiledFunction{
-					Instructions:  closure.Instructions,
-					NumLocals:     closure.NumLocals,
-					NumParameters: closure.NumParameters,
-					IsGenerator:   closure.IsGenerator,
-				}
-				freeVarsCopy := make([]objects.Object, len(closure.Free))
-				copy(freeVarsCopy, closure.Free)
-				newFrame := NewFrameWithFreeVars(fnObj, vm.sp-numArgs, freeVarsCopy)
-				vm.frames[vm.frameIndex] = newFrame
-				vm.frameIndex++
-				vm.sp = newFrame.basePointer + fnObj.NumLocals
-			}
-
-		case compiler.OpReturnValue:
-			returnValue := vm.stack[vm.sp-1]
-			vm.sp--
-
-			vm.frameIndex--
-			frame = vm.frames[vm.frameIndex]
-
-			vm.sp = frame.basePointer - 1
-			vm.stack[vm.sp] = returnValue
-			vm.sp++
-
-		case compiler.OpReturn:
-			vm.frameIndex--
-			frame = vm.frames[vm.frameIndex]
-
-			vm.sp = frame.basePointer - 1
-			vm.stack[vm.sp] = objects.None_
-			vm.sp++
-
-		case compiler.OpArray:
-			numElem := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-
-			elements := make([]objects.Object, numElem)
-			copy(elements, vm.stack[vm.sp-numElem:vm.sp])
-			vm.sp -= numElem
-
-			vm.stack[vm.sp] = objects.NewList(elements)
-			vm.sp++
-
-		case compiler.OpTrue:
-			vm.stack[vm.sp] = objects.True
-			vm.sp++
-
-		case compiler.OpFalse:
-			vm.stack[vm.sp] = objects.False
-			vm.sp++
-
-		case compiler.OpNull:
-			vm.stack[vm.sp] = objects.None_
-			vm.sp++
-
-		case compiler.OpDiv:
-			rVal := vm.stack[vm.sp-1].(*objects.Integer).Value
-			lVal := vm.stack[vm.sp-2].(*objects.Integer).Value
-			vm.sp -= 2
-			if rVal == 0 {
-				vm.stack[vm.sp] = objects.NewZeroDivisionError("division by zero")
-			} else {
-				vm.stack[vm.sp] = &objects.Integer{Value: lVal / rVal}
-			}
-			vm.sp++
-
-		default:
-			return fmt.Errorf("unhandled opcode: %d", op)
-		}
-	}
-
-	return nil
-}
