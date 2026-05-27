@@ -522,27 +522,43 @@ func (ls *LetStatement) String() string {
 
 type AssignStatement struct {
 	Token       string
-	Name        *Identifier
+	Left        Expression
 	Value       Expression
 }
 
 func (as *AssignStatement) statementNode()       {}
 func (as *AssignStatement) TokenLiteral() string { return as.Token }
 func (as *AssignStatement) String() string {
-	return as.Name.String() + " = " + as.Value.String()
+	leftStr := "nil"
+	if as.Left != nil {
+		leftStr = as.Left.String()
+	}
+	valueStr := "nil"
+	if as.Value != nil {
+		valueStr = as.Value.String()
+	}
+	return leftStr + " = " + valueStr
 }
 
 type AugAssignStatement struct {
-	Token   string
-	Name    *Identifier
+	Token    string
+	Left     Expression
 	Operator string
-	Value   Expression
+	Value    Expression
 }
 
 func (as *AugAssignStatement) statementNode()       {}
 func (as *AugAssignStatement) TokenLiteral() string { return as.Token }
 func (as *AugAssignStatement) String() string {
-	return as.Name.String() + " " + as.Operator + "= " + as.Value.String()
+	leftStr := "nil"
+	if as.Left != nil {
+		leftStr = as.Left.String()
+	}
+	valueStr := "nil"
+	if as.Value != nil {
+		valueStr = as.Value.String()
+	}
+	return leftStr + " " + as.Operator + "= " + valueStr
 }
 
 type ImportStatement struct {

@@ -48,21 +48,21 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		// 保持赋值语句不变，编译器会专门处理它
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Left:  desugarExpression(s.Left),
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AugAssignStatement:
-		// 将增强赋值转换为: name = name op value
-		leftIdent := &ast.Identifier{Token: s.Name.Token, Value: s.Name.Value}
+		// 将增强赋值转换为: left = left op value
+		desugaredLeft := desugarExpression(s.Left)
 		infixExpr := &ast.InfixExpression{
 			Token:    s.Token,
-			Left:     leftIdent,
+			Left:     desugaredLeft,
 			Operator: s.Operator,
 			Right:    desugarExpression(s.Value),
 		}
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Left:  desugaredLeft,
 			Value: infixExpr,
 		}
 	case *ast.ReturnStatement:
@@ -454,7 +454,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 	bodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
-			Name:  forStmt.Value,
+			Left:  forStmt.Value,
 			Value: &ast.IndexExpression{
 				Token: "[",
 				Left:  iterable,
@@ -467,7 +467,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 
 	bodyStmts = append(bodyStmts, &ast.AugAssignStatement{
 		Token:    "+=",
-		Name:     indexVar,
+		Left:     indexVar,
 		Operator: "+",
 		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
 	})

@@ -92,6 +92,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.RETURN, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.INDENT, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.DEDENT, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.ASSIGN, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.PLUS_EQ, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.MINUS_EQ, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.MUL_EQ, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.DIV_EQ, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -227,25 +232,16 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseImportStatement()
 	case lexer.FROM:
 		return p.parseFromImportStatement()
-	case lexer.IDENT:
-		// 检查是否是赋值语句或增强赋值语句
-		switch p.peekToken.Type {
-		case lexer.ASSIGN:
-			return p.parseAssignStatement()
-		case lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ:
-			return p.parseAugAssignStatement()
-		default:
-			return p.parseExpressionStatement()
-		}
-	case lexer.ASSIGN, lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ:
-		return nil
-	case lexer.RBRACE:
-		return nil
-	case lexer.EOF:
-		return nil
-	case lexer.LBRACKET:
-		return p.parseExpressionStatement()
 	default:
+		// 检查下一个token是否是赋值或增强赋值操作符
+		if p.peekTokenIs(lexer.ASSIGN) || p.peekTokenIs(lexer.PLUS_EQ) || p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ) {
+			if p.peekTokenIs(lexer.ASSIGN) {
+				return p.parseAssignStatement()
+			} else {
+				return p.parseAugAssignStatement()
+			}
+		}
+
 		// 检查是否是 break 或 continue
 		if p.curToken.Type == lexer.IDENT {
 			if p.curToken.Literal == "break" {
@@ -379,7 +375,7 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 func (p *Parser) parseAssignStatement() *ast.AssignStatement {
 	stmt := &ast.AssignStatement{Token: p.curToken.Literal}
 
-	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Left = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	if !p.expectPeek(lexer.ASSIGN) {
 		return nil
@@ -400,7 +396,7 @@ func (p *Parser) parseAssignStatement() *ast.AssignStatement {
 func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 	stmt := &ast.AugAssignStatement{Token: p.curToken.Literal}
 
-	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Left = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	// 获取运算符
 	p.nextToken()
@@ -426,13 +422,54 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 	return stmt
 }
 
-func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
+func (p *Parser) parseExpressionStatement() ast.Statement {
 	stmt := &ast.ExpressionStatement{Token: p.curToken.Literal}
 
 	stmt.Expression = p.parseExpression(LOWEST)
 	
 	if stmt.Expression == nil {
 		return nil
+	}
+
+	// 检查下一个token是否是赋值或增强赋值操作符
+	if p.peekTokenIs(lexer.ASSIGN) {
+		// 这是一个赋值语句
+		p.nextToken() // curToken is now ASSIGN
+		p.nextToken() // now curToken is first token of value
+		assignStmt := &ast.AssignStatement{
+			Token: "=",
+			Left:  stmt.Expression,
+			Value: p.parseExpression(LOWEST),
+		}
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		return assignStmt
+	} else if p.peekTokenIs(lexer.PLUS_EQ) || p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ) {
+		// 这是一个增强赋值语句
+		op := ""
+		switch p.peekToken.Type {
+		case lexer.PLUS_EQ:
+			op = "+"
+		case lexer.MINUS_EQ:
+			op = "-"
+		case lexer.MUL_EQ:
+			op = "*"
+		case lexer.DIV_EQ:
+			op = "/"
+		}
+		p.nextToken() // curToken is now the aug assignment operator
+		p.nextToken() // now curToken is first token of value
+		augAssignStmt := &ast.AugAssignStatement{
+			Token:    p.curToken.Literal,
+			Left:     stmt.Expression,
+			Operator: op,
+			Value:    p.parseExpression(LOWEST),
+		}
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		return augAssignStmt
 	}
 
 	if p.peekTokenIs(lexer.SEMICOLON) {
@@ -480,7 +517,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}

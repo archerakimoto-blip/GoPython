@@ -62,6 +62,7 @@ const (
 	OpGetAttribute
 	OpSetAttribute
 	OpFormatString
+	OpIndexAssign
 )
 
 type EmittedInstruction struct {
@@ -1108,22 +1109,46 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.AssignStatement:
-		// 编译右侧表达式
-		err := c.Compile(node.Value)
-		if err != nil {
-			return err
-		}
+		// 检查左侧表达式类型
+		switch left := node.Left.(type) {
+		case *ast.Identifier:
+			// 编译右侧表达式
+			err := c.Compile(node.Value)
+			if err != nil {
+				return err
+			}
 
-		// 查找变量，如果不存在就自动定义
-		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
-		if !ok {
-			symbol = c.symbolTable.Define(node.Name.Value)
-		}
+			// 查找变量，如果不存在就自动定义
+			symbol, ok := c.symbolTable.Resolve(left.Value)
+			if !ok {
+				symbol = c.symbolTable.Define(left.Value)
+			}
 
-		if symbol.Scope == GlobalScope {
-			c.emit(OpSetGlobal, symbol.Index)
-		} else {
-			c.emit(OpSetLocal, symbol.Index)
+			if symbol.Scope == GlobalScope {
+				c.emit(OpSetGlobal, symbol.Index)
+			} else {
+				c.emit(OpSetLocal, symbol.Index)
+			}
+		case *ast.IndexExpression:
+			// 编译容器表达式的左部分
+			err := c.Compile(left.Left)
+			if err != nil {
+				return err
+			}
+			// 编译索引表达式
+			err = c.Compile(left.Index)
+			if err != nil {
+				return err
+			}
+			// 编译右侧值
+			err = c.Compile(node.Value)
+			if err != nil {
+				return err
+			}
+			// 发射索引赋值操作码
+			c.emit(OpIndexAssign)
+		default:
+			return fmt.Errorf("unsupported left-hand side expression type: %T", node.Left)
 		}
 
 	case *ast.Identifier:

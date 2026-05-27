@@ -832,6 +832,36 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+		case compiler.OpIndexAssign:
+			// 从栈上弹出值、索引和容器
+			value := vm.pop()
+			indexObj := vm.pop()
+			container := vm.pop()
+
+			switch c := container.(type) {
+			case *objects.List:
+				// 列表索引赋值
+				indexInt, ok := indexObj.(*objects.Integer)
+				if !ok {
+					return fmt.Errorf("list index must be an integer, got %T", indexObj)
+				}
+				idx := int(indexInt.Value)
+				if idx < 0 || idx >= len(c.Elements) {
+					return fmt.Errorf("list index out of range: %d", idx)
+				}
+				c.Elements[idx] = value
+			case *objects.Dict:
+				// 字典索引赋值
+				c.Set(indexObj, value)
+			default:
+				return fmt.Errorf("cannot assign to index of type %T", container)
+			}
+
+			// 赋值表达式需要把值压回栈上，让它能继续参与表达式运算
+			err := vm.push(value)
+			if err != nil {
+				return err
+			}
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
 			// 获取要产出的值
