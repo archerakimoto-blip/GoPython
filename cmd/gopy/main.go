@@ -19,10 +19,13 @@ import (
 const PROMPT = ">> "
 
 var (
-	debugFlag   = flag.Bool("debug", false, "Enable debugger")
-	profileFlag = flag.Bool("profile", false, "Enable performance profiler")
-	breakpoints = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
-	jitFlag    = flag.Bool("jit", false, "Enable JIT compilation")
+	debugFlag            = flag.Bool("debug", false, "Enable debugger")
+	profileFlag          = flag.Bool("profile", false, "Enable performance profiler")
+	breakpoints          = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
+	jitFlag              = flag.Bool("jit", false, "Enable JIT compilation")
+	jitPlatform          = flag.String("jit-platform", "", "Target platform for JIT (x86_64, arm64)")
+	jitAggressive        = flag.Bool("jit-aggressive", false, "Enable aggressive optimizations")
+	jitProfiling         = flag.Bool("jit-profiling", false, "Enable JIT profiling")
 )
 
 func main() {
@@ -207,10 +210,26 @@ func runFileWithJIT(filename string) {
 	code := comp.Bytecode()
 
 	fmt.Println("=== JIT Compilation Enabled ===")
+	
+	var platform jit.PlatformType
+	if *jitPlatform == "arm64" {
+		platform = jit.PlatformARM64
+	} else if *jitPlatform == "x86_64" {
+		platform = jit.PlatformX86_64
+	}
+	
+	optimizationLevel := 3
+	if *jitAggressive {
+		optimizationLevel = 5
+	}
+
 	jitConfig := &jit.JITConfig{
-		EnableMachineCode: true,
-		OptimizationLevel: 3,
+		EnableMachineCode:  true,
+		OptimizationLevel: optimizationLevel,
 		HotThreshold:      2,
+		Platform:          platform,
+		EnableProfiling:   *jitProfiling,
+		AggressiveOptimize: *jitAggressive,
 	}
 
 	machine := vm.NewVMWithJIT(code, jitConfig)

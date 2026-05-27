@@ -163,7 +163,7 @@ func (g *ARMMachineCodeGenerator) emitBytecode(instructions []byte) error {
 			ip++
 
 		case compiler.OpPop:
-			g.emitPop()
+			g.emitPop(X0)
 			ip++
 
 		case compiler.OpDupTop:
@@ -294,55 +294,55 @@ func (g *ARMMachineCodeGenerator) emitMovImm64(reg int, imm int64) {
 	if imm >= -0x80000000 && imm <= 0x7FFFFFFF {
 		g.emitMovImm32(reg, int32(imm))
 	} else {
-		g.emitMovz(reg, uint64(imm)&0xFFFF, 0)
+		g.emitMovz(uint64(reg), uint64(imm)&0xFFFF, 0)
 		if imm >> 16 != 0 {
-			g.emitMovk(reg, uint64(imm>>16)&0xFFFF, 16)
+			g.emitMovk(uint64(reg), uint64(imm>>16)&0xFFFF, 16)
 		}
 		if imm >> 32 != 0 {
-			g.emitMovk(reg, uint64(imm>>32)&0xFFFF, 32)
+			g.emitMovk(uint64(reg), uint64(imm>>32)&0xFFFF, 32)
 		}
 		if imm >> 48 != 0 {
-			g.emitMovk(reg, uint64(imm>>48)&0xFFFF, 48)
+			g.emitMovk(uint64(reg), uint64(imm>>48)&0xFFFF, 48)
 		}
 	}
 }
 
 func (g *ARMMachineCodeGenerator) emitMovImm32(reg int, imm int32) {
 	if imm >= 0 && imm <= 0xFF {
-		g.emitMovz(reg, uint64(imm), 0)
+		g.emitMovz(uint64(reg), uint64(imm), 0)
 	} else if imm >= -0x100000 && imm <= 0xFFFFF {
-		g.emitMovn(reg, uint64(-imm), 0)
+		g.emitMovn(uint64(reg), uint64(-imm), 0)
 	} else {
-		g.emitMovz(reg, uint64(imm)&0xFFFF, 0)
+		g.emitMovz(uint64(reg), uint64(imm)&0xFFFF, 0)
 		if imm >> 16 != 0 {
-			g.emitMovk(reg, uint64(imm>>16)&0xFFFF, 16)
+			g.emitMovk(uint64(reg), uint64(imm>>16)&0xFFFF, 16)
 		}
 	}
 }
 
 func (g *ARMMachineCodeGenerator) emitMovz(rd, imm uint64, shift int) {
 	opcode := uint32(0x52800000)
-	opcode |= (rd & 0x1F) << 0
-	opcode |= ((imm >> 10) & 0x1F) << 5
-	opcode |= (imm & 0x3FF) << 10
+	opcode |= uint32(rd&0x1F) << 0
+	opcode |= uint32((imm>>10)&0x1F) << 5
+	opcode |= uint32(imm&0x3FF) << 10
 	opcode |= (uint32(shift) / 16) << 21
 	g.emitUint32(opcode)
 }
 
 func (g *ARMMachineCodeGenerator) emitMovk(rd, imm uint64, shift int) {
 	opcode := uint32(0x52A00000)
-	opcode |= (rd & 0x1F) << 0
-	opcode |= ((imm >> 10) & 0x1F) << 5
-	opcode |= (imm & 0x3FF) << 10
+	opcode |= uint32(rd&0x1F) << 0
+	opcode |= uint32((imm>>10)&0x1F) << 5
+	opcode |= uint32(imm&0x3FF) << 10
 	opcode |= (uint32(shift) / 16) << 21
 	g.emitUint32(opcode)
 }
 
 func (g *ARMMachineCodeGenerator) emitMovn(rd uint64, imm uint64, shift int) {
 	opcode := uint32(0x53000000)
-	opcode |= (rd & 0x1F) << 0
-	opcode |= ((imm >> 10) & 0x1F) << 5
-	opcode |= (imm & 0x3FF) << 10
+	opcode |= uint32(rd&0x1F) << 0
+	opcode |= uint32((imm>>10)&0x1F) << 5
+	opcode |= uint32(imm&0x3FF) << 10
 	opcode |= (uint32(shift) / 16) << 21
 	g.emitUint32(opcode)
 }

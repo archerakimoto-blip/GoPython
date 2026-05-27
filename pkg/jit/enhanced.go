@@ -3,11 +3,19 @@ package jit
 import (
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/objects"
+)
+
+type PlatformType string
+
+const (
+	PlatformX86_64 PlatformType = "x86_64"
+	PlatformARM64  PlatformType = "arm64"
 )
 
 type VMInterface interface {
@@ -18,13 +26,28 @@ type VMInterface interface {
 	CurrentFrame() interface{}
 }
 
+type MachineCodeGeneratorInterface interface {
+	Generate(code *compiler.CompiledFunction) (*JITFunction, error)
+	GetGeneratedCode() []byte
+	GetCodeSize() int
+}
+
 type EnhancedJIT struct {
 	*JIT
-	generator      *MachineCodeGenerator
-	vm             interface{}
-	mu             sync.RWMutex
-	compiledFuncs  map[string]*JITFunction
-	executionStats *JITStats
+	generator          MachineCodeGeneratorInterface
+	vm                 interface{}
+	mu                 sync.RWMutex
+	compiledFuncs      map[string]*JITFunction
+	executionStats     *JITStats
+	platform           PlatformType
+	profileData        map[string]*ProfileInfo
+}
+
+type ProfileInfo struct {
+	CallCount         int64
+	TotalCycles       int64
+	CacheMissRate     float64
+	HotPathIndicators []string
 }
 
 type JITStats struct {
@@ -36,6 +59,8 @@ type JITStats struct {
 	CacheMisses         int64
 	OptimizationLevel   int
 	EnableMC2Generation bool
+	ProfileEnabled      bool
+	AggressiveOptimize  bool
 }
 
 type JITConfig struct {
@@ -43,19 +68,35 @@ type JITConfig struct {
 	OptimizationLevel int
 	HotThreshold      int64
 	MaxCacheSize      int
+	Platform          PlatformType
+	EnableProfiling   bool
+	AggressiveOptimize bool
 }
 
 func NewEnhancedJIT(config *JITConfig) *EnhancedJIT {
+	var platform PlatformType
+
+	if config != nil && config.Platform != "" {
+		platform = config.Platform
+	} else {
+		platform = detectPlatform()
+	}
+
 	jit := &EnhancedJIT{
 		JIT:             New(),
-		generator:       NewMachineCodeGenerator(),
+		platform:        platform,
 		compiledFuncs:   make(map[string]*JITFunction),
+		profileData:     make(map[string]*ProfileInfo),
 		executionStats: &JITStats{
 			OptimizationLevel:   3,
 			EnableMC2Generation: true,
+			ProfileEnabled:      false,
+			AggressiveOptimize:  false,
 		},
 	}
-	
+
+	jit.generator = jit.createGenerator(platform)
+
 	if config != nil {
 		if config.HotThreshold > 0 {
 			jit.SetHotThreshold(config.HotThreshold)
@@ -69,9 +110,44 @@ func NewEnhancedJIT(config *JITConfig) *EnhancedJIT {
 		if config.OptimizationLevel > 0 {
 			jit.executionStats.OptimizationLevel = config.OptimizationLevel
 		}
+		if config.EnableProfiling {
+			jit.executionStats.ProfileEnabled = true
+			log.Println("JIT: Profiling enabled")
+		}
+		if config.AggressiveOptimize {
+			jit.executionStats.AggressiveOptimize = true
+			jit.executionStats.OptimizationLevel = 5
+			log.Println("JIT: Aggressive optimization enabled")
+		}
 	}
-	
+
 	return jit
+}
+
+func (j *EnhancedJIT) createGenerator(platform PlatformType) MachineCodeGeneratorInterface {
+	switch platform {
+	case PlatformARM64:
+		log.Printf("JIT: Using ARM64 machine code generator")
+		return createARMMachineCodeGenerator()
+	default:
+		log.Printf("JIT: Using x86-64 machine code generator")
+		return NewMachineCodeGenerator()
+	}
+}
+
+func createARMMachineCodeGenerator() MachineCodeGeneratorInterface {
+	return NewARMMachineCodeGenerator()
+}
+
+func detectPlatform() PlatformType {
+	switch runtime.GOARCH {
+	case "arm64", "aarch64":
+		return PlatformARM64
+	case "amd64", "x86_64":
+		return PlatformX86_64
+	default:
+		return PlatformX86_64
+	}
 }
 
 func (j *EnhancedJIT) SetVM(vm interface{}) {
@@ -393,4 +469,220 @@ func (j *EnhancedJIT) Profile() []*JITProfile {
 	}
 	
 	return profiles
+}
+
+func (j *EnhancedJIT) RecordProfileData(key string, cycles int64) {
+	if !j.executionStats.ProfileEnabled {
+		return
+	}
+	
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	
+	if _, ok := j.profileData[key]; !ok {
+		j.profileData[key] = &ProfileInfo{}
+	}
+	j.profileData[key].CallCount++
+	j.profileData[key].TotalCycles += cycles
+}
+
+func (j *EnhancedJIT) GetProfileData(key string) (*ProfileInfo, bool) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	
+	info, ok := j.profileData[key]
+	return info, ok
+}
+
+func (j *EnhancedJIT) AnalyzeHotPaths() []string {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	
+	var hotPaths []string
+	totalCycles := int64(0)
+	
+	for _, info := range j.profileData {
+		totalCycles += info.TotalCycles
+	}
+	
+	threshold := float64(totalCycles) * 0.1
+	
+	for key, info := range j.profileData {
+		if float64(info.TotalCycles) >= threshold {
+			hotPaths = append(hotPaths, key)
+			info.HotPathIndicators = append(info.HotPathIndicators, "hot")
+		}
+	}
+	
+	return hotPaths
+}
+
+func (j *EnhancedJIT) ApplyAggressiveOptimizations(fn *compiler.CompiledFunction) {
+	if !j.executionStats.AggressiveOptimize {
+		return
+	}
+	
+	j.loopUnrolling(fn)
+	j.inlineOptimization(fn)
+	j.branchPrediction(fn)
+	j.aggressiveDeadCodeElimination(fn)
+	j.peepholeOptimization(fn)
+}
+
+func (j *EnhancedJIT) loopUnrolling(fn *compiler.CompiledFunction) {
+	instructions := fn.Instructions
+	
+	for i := 0; i < len(instructions)-10; i++ {
+		if compiler.Opcode(instructions[i]) == compiler.OpJumpNotTruthy {
+			target := int(instructions[i+1])<<8 | int(instructions[i+2])
+			if target < i {
+				loopBody := instructions[target:i]
+				if len(loopBody) < 30 {
+					unrolled := make([]byte, 0, len(loopBody)*4)
+					for j := 0; j < 4; j++ {
+						unrolled = append(unrolled, loopBody...)
+					}
+					
+					copy(instructions[i+3:], unrolled)
+					instructions = append(instructions[:i+3], unrolled...)
+					fn.Instructions = instructions
+				}
+			}
+		}
+	}
+}
+
+func (j *EnhancedJIT) inlineOptimization(fn *compiler.CompiledFunction) {
+	instructions := fn.Instructions
+	
+	for i := 0; i < len(instructions)-2; i++ {
+		if compiler.Opcode(instructions[i]) == compiler.OpCall {
+			numArgs := int(instructions[i+1])
+			if numArgs == 0 && len(instructions) < 50 {
+				targetFn := j.findTargetFunction(i, fn)
+				if targetFn != nil && len(targetFn.Instructions) < 20 {
+					inlined := make([]byte, len(targetFn.Instructions)-1)
+					copy(inlined, targetFn.Instructions[:len(targetFn.Instructions)-1])
+					
+					copy(instructions[i+2:], inlined)
+					instructions = append(instructions[:i], inlined...)
+					fn.Instructions = instructions
+				}
+			}
+		}
+	}
+}
+
+func (j *EnhancedJIT) findTargetFunction(callIP int, fn *compiler.CompiledFunction) *compiler.CompiledFunction {
+	return nil
+}
+
+func (j *EnhancedJIT) branchPrediction(fn *compiler.CompiledFunction) {
+	instructions := fn.Instructions
+	
+	for i := 0; i < len(instructions)-3; i++ {
+		if compiler.Opcode(instructions[i]) == compiler.OpJumpNotTruthy {
+			target := int(instructions[i+1])<<8 | int(instructions[i+2])
+			if target > i+3 {
+				newTarget := i + 3
+				instructions[i+1] = byte(newTarget >> 8)
+				instructions[i+2] = byte(newTarget)
+				
+				jumpBack := make([]byte, 5)
+				jumpBack[0] = byte(compiler.OpJump)
+				jumpBack[1] = byte(target >> 8)
+				jumpBack[2] = byte(target)
+				jumpBack[3] = 0x00
+				jumpBack[4] = 0x00
+				
+				instructions = append(instructions[:target], jumpBack...)
+				instructions = append(instructions, instructions[target:]...)
+				fn.Instructions = instructions
+			}
+		}
+	}
+}
+
+func (j *EnhancedJIT) aggressiveDeadCodeElimination(fn *compiler.CompiledFunction) {
+	instructions := fn.Instructions
+	usedConstants := make(map[int]bool)
+	
+	for i := 0; i < len(instructions); {
+		op := compiler.Opcode(instructions[i])
+		
+		switch op {
+		case compiler.OpConstant:
+			if i+2 < len(instructions) {
+				constIndex := int(instructions[i+1])<<8 | int(instructions[i+2])
+				usedConstants[constIndex] = true
+			}
+			i += 3
+		case compiler.OpJump, compiler.OpJumpNotTruthy:
+			i += 3
+		case compiler.OpCall:
+			i += 2
+		case compiler.OpGetLocal, compiler.OpSetLocal:
+			i += 2
+		default:
+			i++
+		}
+	}
+	
+	newConstants := make([]objects.Object, 0, len(usedConstants))
+	constantMap := make(map[int]int)
+	
+	for i, constant := range fn.Constants {
+		if usedConstants[i] {
+			constantMap[i] = len(newConstants)
+			newConstants = append(newConstants, constant)
+		}
+	}
+	
+	fn.Constants = newConstants
+	
+	for i := 0; i < len(instructions); {
+		op := compiler.Opcode(instructions[i])
+		
+		if op == compiler.OpConstant && i+2 < len(instructions) {
+			oldIndex := int(instructions[i+1])<<8 | int(instructions[i+2])
+			if newIndex, ok := constantMap[oldIndex]; ok {
+				instructions[i+1] = byte(newIndex >> 8)
+				instructions[i+2] = byte(newIndex)
+			}
+			i += 3
+		} else {
+			i++
+		}
+	}
+}
+
+func (j *EnhancedJIT) peepholeOptimization(fn *compiler.CompiledFunction) {
+	instructions := fn.Instructions
+	
+	for i := 0; i < len(instructions)-4; i++ {
+		if compiler.Opcode(instructions[i]) == compiler.OpPop &&
+		   compiler.Opcode(instructions[i+1]) == compiler.OpPop &&
+		   compiler.Opcode(instructions[i+2]) == compiler.OpAdd &&
+		   compiler.Opcode(instructions[i+3]) == compiler.OpPop {
+			copy(instructions[i:], instructions[i+4:])
+			instructions = instructions[:len(instructions)-4]
+			fn.Instructions = instructions
+			i -= 4
+		}
+	}
+}
+
+func (j *EnhancedJIT) EnableProfiling(enable bool) {
+	j.executionStats.ProfileEnabled = enable
+}
+
+func (j *EnhancedJIT) EnableAggressiveOptimization(enable bool) {
+	j.executionStats.AggressiveOptimize = enable
+	if enable {
+		j.executionStats.OptimizationLevel = 5
+	}
+}
+
+func (j *EnhancedJIT) GetPlatform() PlatformType {
+	return j.platform
 }
