@@ -208,6 +208,10 @@ func (c *Compiler) Bytecode() *Bytecode {
 	}
 }
 
+func (c *Compiler) SymbolTable() *SymbolTable {
+	return c.symbolTable
+}
+
 func New() *Compiler {
 	c := &Compiler{
 		constants:   []objects.Object{},

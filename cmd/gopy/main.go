@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/desugar"
+	"github.com/go-py/go-python/pkg/jit"
 	"github.com/go-py/go-python/pkg/lexer"
 	"github.com/go-py/go-python/pkg/objects"
 	"github.com/go-py/go-python/pkg/parser"
@@ -21,6 +22,7 @@ var (
 	debugFlag   = flag.Bool("debug", false, "Enable debugger")
 	profileFlag = flag.Bool("profile", false, "Enable performance profiler")
 	breakpoints = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
+	jitFlag    = flag.Bool("jit", false, "Enable JIT compilation")
 )
 
 func main() {
@@ -28,7 +30,11 @@ func main() {
 
 	if len(os.Args) > 1 {
 		filename := flag.Arg(0)
-		runFile(filename)
+		if *jitFlag {
+			runFileWithJIT(filename)
+		} else {
+			runFile(filename)
+		}
 		return
 	}
 	runREPL()
@@ -37,8 +43,10 @@ func main() {
 func runREPL() {
 	scanner := bufio.NewScanner(os.Stdin)
 	globals := make([]objects.Object, vm.GlobalSize)
-	symbolTable := compiler.NewSymbolTable()
-	constants := []objects.Object{}
+	
+	comp := compiler.New()
+	symbolTable := comp.SymbolTable()
+	constants := comp.Bytecode().Constants
 
 	for {
 		fmt.Print(PROMPT)
@@ -164,6 +172,62 @@ func runWithProfiler(code *compiler.Bytecode) {
 
 	fmt.Printf("\n=== Performance Summary ===\n")
 	fmt.Printf("Total execution time: %v\n", elapsed)
+	
+	lastPopped := machine.LastPoppedStackElem()
+	if lastPopped != nil {
+		fmt.Println("Result:", lastPopped.Inspect())
+	}
+}
+
+func runFileWithJIT(filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("Error reading file: %s\n", err)
+		return
+	}
+
+	l := lexer.New(string(data))
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 0 {
+		printParserErrors(p.Errors())
+		return
+	}
+
+	program = desugar.Desugar(program)
+
+	comp := compiler.New()
+	err = comp.Compile(program)
+	if err != nil {
+		fmt.Printf("Compilation error: %s\n", err)
+		return
+	}
+
+	code := comp.Bytecode()
+
+	fmt.Println("=== JIT Compilation Enabled ===")
+	jitConfig := &jit.JITConfig{
+		EnableMachineCode: true,
+		OptimizationLevel: 3,
+		HotThreshold:      2,
+	}
+
+	machine := vm.NewVMWithJIT(code, jitConfig)
+	machine.EnableJIT(true)
+	
+	start := time.Now()
+	err = machine.RunWithJIT()
+	elapsed := time.Since(start)
+
+	if err != nil {
+		fmt.Printf("Execution error: %s\n", err)
+		return
+	}
+
+	fmt.Printf("\n=== JIT Execution Summary ===\n")
+	fmt.Printf("Total execution time: %v\n", elapsed)
+	machine.PrintJITStats()
 	
 	lastPopped := machine.LastPoppedStackElem()
 	if lastPopped != nil {

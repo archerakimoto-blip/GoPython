@@ -129,6 +129,7 @@ type CompiledFunction struct {
 	IsGenerator   bool
 	Free          []Symbol
 	Name          string
+	Constants     []objects.Object
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {
