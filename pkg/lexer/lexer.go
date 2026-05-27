@@ -64,6 +64,8 @@ const (
 	WITH     = "WITH"
 	YIELD    = "YIELD"
 	PASS     = "PASS"
+	IMPORT   = "IMPORT"
+	FROM     = "FROM"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -99,6 +101,8 @@ var keywords = map[string]TokenType{
 	"with":   WITH,
 	"yield":  YIELD,
 	"pass":   PASS,
+	"import": IMPORT,
+	"from":   FROM,
 }
 
 type Lexer struct {

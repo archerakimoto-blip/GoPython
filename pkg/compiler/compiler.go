@@ -219,6 +219,7 @@ func New() *Compiler {
 
 func (c *Compiler) registerBuiltins() {
 	mathModule := objects.CreateMathModule()
+	objects.RegisterModule("math", mathModule)
 	mathIndex := len(c.constants)
 	c.constants = append(c.constants, mathModule)
 	c.symbolTable.DefineBuiltin("math", mathIndex)
@@ -852,10 +853,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			} else {
 				c.emit(OpPop)
 			}
-		} else if _, ok := node.Expression.(*ast.CallExpression); !ok {
-			if _, ok := node.Expression.(*ast.MethodCall); !ok {
-				c.emit(OpPop)
-			}
+		} else {
+			c.emit(OpPop)
 		}
 
 	case *ast.InfixExpression:
@@ -1334,6 +1333,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return c.compileMemberAccess(node)
 	case *ast.MethodCall:
 		return c.compileMethodCall(node)
+	case *ast.ImportStatement:
+		return c.compileImportStatement(node)
+	case *ast.FromImportStatement:
+		return c.compileFromImportStatement(node)
 	}
 
 	return nil
@@ -1443,6 +1446,66 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 func (c *Compiler) addConstant(obj objects.Object) int {
 	c.constants = append(c.constants, obj)
 	return len(c.constants) - 1
+}
+
+func (c *Compiler) compileImportStatement(node *ast.ImportStatement) error {
+	moduleName := node.Module.Value
+	alias := moduleName
+	if node.Alias != nil {
+		alias = node.Alias.Value
+	}
+	
+	module := objects.GetModule(moduleName)
+	if module == nil {
+		return fmt.Errorf("module '%s' not found", moduleName)
+	}
+	
+	var symbol Symbol
+	if existingSymbol, ok := c.symbolTable.Resolve(alias); ok {
+		if existingSymbol.Scope == BuiltinScope {
+			symbol = c.symbolTable.Define(alias)
+		} else {
+			symbol = existingSymbol
+		}
+	} else {
+		symbol = c.symbolTable.Define(alias)
+	}
+	
+	c.addConstant(module)
+	c.emit(OpConstant, len(c.constants)-1)
+	c.emit(OpSetGlobal, symbol.Index)
+	
+	return nil
+}
+
+func (c *Compiler) compileFromImportStatement(node *ast.FromImportStatement) error {
+	moduleName := node.Module.Value
+	
+	module := objects.GetModule(moduleName)
+	if module == nil {
+		return fmt.Errorf("module '%s' not found", moduleName)
+	}
+	
+	if node.Alias != nil {
+		symbol := c.symbolTable.Define(node.Alias.Value)
+		c.addConstant(module)
+		c.emit(OpConstant, len(c.constants)-1)
+		c.emit(OpSetGlobal, symbol.Index)
+	} else {
+		for _, name := range node.Names {
+			value, ok := module.Fields[name.Value]
+			if !ok {
+				return fmt.Errorf("name '%s' not found in module '%s'", name.Value, moduleName)
+			}
+			
+			symbol := c.symbolTable.Define(name.Value)
+			c.addConstant(value)
+			c.emit(OpConstant, len(c.constants)-1)
+			c.emit(OpSetGlobal, symbol.Index)
+		}
+	}
+	
+	return nil
 }
 
 func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {

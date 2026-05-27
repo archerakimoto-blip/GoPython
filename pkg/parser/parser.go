@@ -219,6 +219,10 @@ func (p *Parser) parseStatement() ast.Statement {
 			Token:      p.curToken.Literal,
 			Expression: fn,
 		}
+	case lexer.IMPORT:
+		return p.parseImportStatement()
+	case lexer.FROM:
+		return p.parseFromImportStatement()
 	case lexer.IDENT:
 		// 检查是否是赋值语句或增强赋值语句
 		switch p.peekToken.Type {
@@ -284,6 +288,74 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 
 func (p *Parser) parsePassStatement() *ast.PassStatement {
 	return &ast.PassStatement{Token: p.curToken.Literal}
+}
+
+func (p *Parser) parseImportStatement() *ast.ImportStatement {
+	stmt := &ast.ImportStatement{Token: p.curToken.Literal}
+	
+	if !p.expectPeek(lexer.IDENT) {
+		p.errors = append(p.errors, "expected identifier after import")
+		return nil
+	}
+	
+	stmt.Module = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	
+	if p.peekTokenIs(lexer.AS) {
+		p.nextToken()
+		if !p.expectPeek(lexer.IDENT) {
+			p.errors = append(p.errors, "expected identifier after 'as'")
+			return nil
+		}
+		stmt.Alias = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	}
+	
+	return stmt
+}
+
+func (p *Parser) parseFromImportStatement() *ast.FromImportStatement {
+	stmt := &ast.FromImportStatement{Token: p.curToken.Literal}
+	
+	p.nextToken()
+	
+	if !p.curTokenIs(lexer.IDENT) {
+		p.errors = append(p.errors, "expected module name after 'from'")
+		return nil
+	}
+	
+	stmt.Module = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	
+	p.nextToken()
+	
+	if !p.curTokenIs(lexer.IMPORT) {
+		p.errors = append(p.errors, "expected 'import' after module name")
+		return nil
+	}
+	
+	p.nextToken()
+	
+	names := []*ast.Identifier{}
+	for p.curTokenIs(lexer.IDENT) {
+		names = append(names, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+		p.nextToken()
+		
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken()
+		} else if p.curTokenIs(lexer.AS) {
+			p.nextToken()
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected identifier after 'as'")
+				return nil
+			}
+			stmt.Alias = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+			break
+		} else {
+			break
+		}
+	}
+	
+	stmt.Names = names
+	return stmt
 }
 
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {

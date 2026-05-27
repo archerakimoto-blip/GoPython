@@ -545,6 +545,44 @@ func (as *AugAssignStatement) String() string {
 	return as.Name.String() + " " + as.Operator + "= " + as.Value.String()
 }
 
+type ImportStatement struct {
+	Token    string
+	Module   *Identifier
+	Alias    *Identifier
+}
+
+func (is *ImportStatement) statementNode()       {}
+func (is *ImportStatement) TokenLiteral() string { return is.Token }
+func (is *ImportStatement) String() string {
+	if is.Alias != nil {
+		return "import " + is.Module.String() + " as " + is.Alias.String()
+	}
+	return "import " + is.Module.String()
+}
+
+type FromImportStatement struct {
+	Token      string
+	Module     *Identifier
+	Names      []*Identifier
+	Alias      *Identifier
+}
+
+func (fis *FromImportStatement) statementNode()       {}
+func (fis *FromImportStatement) TokenLiteral() string { return fis.Token }
+func (fis *FromImportStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("from " + fis.Module.String() + " import ")
+	names := []string{}
+	for _, name := range fis.Names {
+		names = append(names, name.String())
+	}
+	out.WriteString(strings.Join(names, ", "))
+	if fis.Alias != nil {
+		out.WriteString(" as " + fis.Alias.String())
+	}
+	return out.String()
+}
+
 type PassStatement struct {
 	Token string
 }

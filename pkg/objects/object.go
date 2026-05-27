@@ -227,6 +227,16 @@ func (m *Module) GetAttr(name string) (Object, bool) {
 	return nil, false
 }
 
+var modules = make(map[string]*Module)
+
+func RegisterModule(name string, module *Module) {
+	modules[name] = module
+}
+
+func GetModule(name string) *Module {
+	return modules[name]
+}
+
 var (
 	True  = &Boolean{Value: true}
 	False = &Boolean{Value: false}

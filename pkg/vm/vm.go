@@ -771,11 +771,19 @@ func (vm *VM) Run() error {
 			}
 			
 			if module, ok := obj.(*objects.Module); ok {
-				if val, ok := module.GetAttr(attrName); ok {
-					return vm.push(val)
+			if val, ok := module.GetAttr(attrName); ok {
+				err := vm.push(val)
+				if err != nil {
+					return err
 				}
-				return vm.push(objects.None_)
+				continue
 			}
+			err := vm.push(objects.None_)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 			
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
