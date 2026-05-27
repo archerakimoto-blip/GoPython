@@ -1,0 +1,14 @@
+Test Name,GoPy (JIT) (ms),GoPy (NoJIT) (ms),CPython (ms),GoPyJIT vs CPython,GoPyJIT vs GoPyNoJIT
+000_function_test.py,412.00,421.86,1167.39,0.35x,0.98x
+000_test.py,380.89,399.37,1136.29,0.34x,0.95x
+001_arithmetic.py,378.49,422.00,78079.99,0.00x,0.90x
+001_arithmetic_simple.py,418.59,424.14,1170.28,0.36x,0.99x
+001_simple.py,432.10,438.73,1168.93,0.37x,0.98x
+002_loop.py,384.10,392.62,1421.79,0.27x,0.98x
+003_list.py,384.27,418.84,1108.99,0.35x,0.92x
+004_dict.py,402.90,409.40,1130.95,0.36x,0.98x
+005_function.py,FAILED,FAILED,1222.34,N/A,N/A
+006_string.py,385.19,422.88,1134.68,0.34x,0.91x
+007_factorial.py,FAILED,FAILED,1107.60,N/A,N/A
+008_matrix.py,409.50,467.78,1163.71,0.35x,0.88x
+009_recursive.py,385.63,347.84,FAILED,N/A,1.11x
