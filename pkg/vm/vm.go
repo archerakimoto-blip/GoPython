@@ -261,17 +261,15 @@ func (vm *VM) Run() error {
 		op := compiler.Opcode(ins[ip])
 
 		switch op {
-		// 高频指令优先
+		// === 最高频指令 ===
 		case compiler.OpGetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
-
 			vm.push(vm.stack[frame.basePointer+localIndex])
 
 		case compiler.OpSetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
-
 			vm.stack[frame.basePointer+localIndex] = vm.pop()
 
 		case compiler.OpConstant:
@@ -282,10 +280,6 @@ func (vm *VM) Run() error {
 		case compiler.OpPop:
 			vm.pop()
 
-		case compiler.OpJump:
-			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip = pos - 1
-
 		case compiler.OpJumpNotTruthy:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
@@ -295,13 +289,9 @@ func (vm *VM) Run() error {
 				frame.ip = pos - 1
 			}
 
-		case compiler.OpCall:
-			numArgs := int(ins[ip+1])
-			frame.ip += 1
-
-			if err := vm.executeCall(numArgs); err != nil {
-				return err
-			}
+		case compiler.OpJump:
+			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip = pos - 1
 
 		case compiler.OpGetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -313,7 +303,62 @@ func (vm *VM) Run() error {
 			frame.ip += 2
 			vm.globals[globalIndex] = vm.pop()
 
-		// 算术运算
+		// === 函数调用与返回 ===
+		case compiler.OpCall:
+			numArgs := int(ins[ip+1])
+			frame.ip += 1
+
+			if err := vm.executeCall(numArgs); err != nil {
+				return err
+			}
+
+		case compiler.OpReturnValue:
+			returnValue := vm.pop()
+
+			frame := vm.popFrame()
+			
+			if vm.framesIndex == 0 {
+				return nil
+			}
+			
+			if len(vm.frames) > 0 && vm.sp > 0 {
+				calleeIndex := vm.sp - 1
+				if calleeIndex >= 0 {
+					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
+						gen.Done = true
+					}
+				}
+			}
+			
+			vm.sp = frame.basePointer - 1
+			err := vm.push(returnValue)
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpReturn:
+			frame := vm.popFrame()
+			
+			if vm.framesIndex == 0 {
+				return nil
+			}
+			
+			if len(vm.frames) > 0 && vm.sp > 0 {
+				calleeIndex := vm.sp - 1
+				if calleeIndex >= 0 {
+					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
+						gen.Done = true
+					}
+				}
+			}
+			
+			vm.sp = frame.basePointer - 1
+			err := vm.push(objects.None_)
+			if err != nil {
+				return err
+			}
+
+		// === 算术运算指令 ===
 		case compiler.OpAdd:
 			right, left := vm.pop2()
 
@@ -529,7 +574,169 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		// 其他常见指令
+		// === 属性访问（高频）===
+		case compiler.OpGetAttribute:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			frame.ip += 2
+			attrName := vm.constants[idx].(*objects.String).Value
+
+			obj := vm.pop()
+			
+			if instance, ok := obj.(*objects.Instance); ok {
+				if vm.useFastPath && ip < len(vm.inlineCaches) {
+					cache := vm.inlineCaches[ip]
+					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class && cache.cachedResult != nil {
+						cache.hitCount++
+						if method, ok := cache.cachedResult.(*compiler.CompiledFunction); ok {
+							vm.push(instance)
+							vm.push(method)
+							continue
+						}
+						return vm.push(cache.cachedResult)
+					}
+				}
+				
+				if val, ok := instance.GetAttr(attrName); ok {
+					if vm.useFastPath && ip < len(vm.inlineCaches) {
+						cache := vm.inlineCaches[ip]
+						cache.cachedAttrName = attrName
+						cache.cachedClass = instance.Class
+						cache.cachedResult = val
+						cache.missCount++
+					}
+					
+					if method, ok := val.(*compiler.CompiledFunction); ok {
+						vm.push(instance)
+						vm.push(method)
+						continue
+					}
+					return vm.push(val)
+				}
+				if classMethod, ok := instance.Class.Methods[attrName]; ok {
+					if vm.useFastPath && ip < len(vm.inlineCaches) {
+						cache := vm.inlineCaches[ip]
+						cache.cachedAttrName = attrName
+						cache.cachedClass = instance.Class
+						cache.cachedResult = classMethod
+						cache.missCount++
+					}
+					
+					vm.push(instance)
+					vm.push(classMethod)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if module, ok := obj.(*objects.Module); ok {
+				if val, ok := module.GetAttr(attrName); ok {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			
+			if list, ok := obj.(*objects.List); ok {
+				if attrName == "append" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.append",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 1 {
+								return objects.NewTypeError("append() takes exactly 1 argument")
+							}
+							list.Append(args[0])
+							return objects.None_
+						},
+					})
+					continue
+				}
+				if attrName == "pop" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.pop",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) > 1 {
+								return objects.NewTypeError("pop() takes at most 1 argument")
+							}
+							if len(args) == 0 {
+								obj, err := list.Pop()
+								if err != nil {
+									return objects.NewIndexError("%s", err.Error())
+								}
+								return obj
+							}
+							idx, ok := args[0].(*objects.Integer)
+							if !ok {
+								return objects.NewTypeError("pop() argument must be an integer")
+							}
+							obj, err := list.Pop(int(idx.Value.Int64()))
+							if err != nil {
+								return objects.NewIndexError("%s", err.Error())
+							}
+							return obj
+						},
+					})
+					continue
+				}
+				if attrName == "extend" {
+					vm.push(list)
+					vm.push(&objects.Builtin{
+						Name: "list.extend",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 1 {
+								return objects.NewTypeError("extend() takes exactly 1 argument")
+							}
+							other, ok := args[0].(*objects.List)
+							if !ok {
+								return objects.NewTypeError("extend() argument must be a list")
+							}
+							list.Extend(other)
+							return objects.None_
+						},
+					})
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
+
+		case compiler.OpSetAttribute:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			attrName := vm.constants[idx].(*objects.String).Value
+			frame.ip += 2
+			
+			value := vm.pop()
+			obj := vm.pop()
+			
+			if instance, ok := obj.(*objects.Instance); ok {
+				if vm.useFastPath && ip < len(vm.inlineCaches) {
+					cache := vm.inlineCaches[ip]
+					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class {
+						cache.hitCount++
+						instance.SetAttr(attrName, value)
+						return vm.push(value)
+					}
+					cache.cachedAttrName = attrName
+					cache.cachedClass = instance.Class
+					cache.missCount++
+				}
+				
+				instance.SetAttr(attrName, value)
+				return vm.push(value)
+			}
+			
+			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+
+		// === 常量与布尔值 ===
 		case compiler.OpTrue:
 			vm.push(objects.True)
 
@@ -539,56 +746,7 @@ func (vm *VM) Run() error {
 		case compiler.OpNull:
 			vm.push(objects.None_)
 
-		case compiler.OpReturnValue:
-			returnValue := vm.pop()
-
-			frame := vm.popFrame()
-			
-			if vm.framesIndex == 0 {
-				return nil
-			}
-			
-			// 检查是否是从生成器返回
-			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
-					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
-						gen.Done = true
-					}
-				}
-			}
-			
-			vm.sp = frame.basePointer - 1
-
-			err := vm.push(returnValue)
-			if err != nil {
-				return err
-			}
-
-		case compiler.OpReturn:
-			frame := vm.popFrame()
-			
-			if vm.framesIndex == 0 {
-				return nil
-			}
-			
-			// 检查是否是从生成器返回
-			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
-					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
-						gen.Done = true
-					}
-				}
-			}
-			
-			vm.sp = frame.basePointer - 1
-
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
-			}
-
+		// === 闭包与自由变量 ===
 		case compiler.OpGetFree:
 			freeIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
@@ -986,173 +1144,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-		case compiler.OpGetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			frame.ip += 2
-			attrName := vm.constants[idx].(*objects.String).Value
-
-			obj := vm.pop()
-			
-			if instance, ok := obj.(*objects.Instance); ok {
-				// 尝试使用内联缓存
-				if vm.useFastPath && ip < len(vm.inlineCaches) {
-					cache := vm.inlineCaches[ip]
-					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class && cache.cachedResult != nil {
-						// 缓存命中
-						cache.hitCount++
-						if method, ok := cache.cachedResult.(*compiler.CompiledFunction); ok {
-							vm.push(instance)
-							vm.push(method)
-							continue
-						}
-						return vm.push(cache.cachedResult)
-					}
-				}
-				
-				// 缓存未命中，执行正常查找
-				if val, ok := instance.GetAttr(attrName); ok {
-					// 更新缓存
-					if vm.useFastPath && ip < len(vm.inlineCaches) {
-						cache := vm.inlineCaches[ip]
-						cache.cachedAttrName = attrName
-						cache.cachedClass = instance.Class
-						cache.cachedResult = val
-						cache.missCount++
-					}
-					
-					if method, ok := val.(*compiler.CompiledFunction); ok {
-						vm.push(instance)
-						vm.push(method)
-						continue
-					}
-					return vm.push(val)
-				}
-				if classMethod, ok := instance.Class.Methods[attrName]; ok {
-					// 更新缓存
-					if vm.useFastPath && ip < len(vm.inlineCaches) {
-						cache := vm.inlineCaches[ip]
-						cache.cachedAttrName = attrName
-						cache.cachedClass = instance.Class
-						cache.cachedResult = classMethod
-						cache.missCount++
-					}
-					
-					vm.push(instance)
-					vm.push(classMethod)
-					continue
-				}
-				return vm.push(objects.None_)
-			}
-			
-			if module, ok := obj.(*objects.Module); ok {
-				if val, ok := module.GetAttr(attrName); ok {
-					err := vm.push(val)
-					if err != nil {
-						return err
-					}
-					continue
-				}
-				err := vm.push(objects.None_)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			
-			if list, ok := obj.(*objects.List); ok {
-				if attrName == "append" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.append",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) != 1 {
-								return objects.NewTypeError("append() takes exactly 1 argument")
-							}
-							list.Append(args[0])
-							return objects.None_
-						},
-					})
-					continue
-				}
-				if attrName == "pop" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.pop",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) > 1 {
-								return objects.NewTypeError("pop() takes at most 1 argument")
-							}
-							if len(args) == 0 {
-								obj, err := list.Pop()
-								if err != nil {
-									return objects.NewIndexError("%s", err.Error())
-								}
-								return obj
-							}
-							idx, ok := args[0].(*objects.Integer)
-							if !ok {
-								return objects.NewTypeError("pop() argument must be an integer")
-							}
-							obj, err := list.Pop(int(idx.Value.Int64()))
-							if err != nil {
-								return objects.NewIndexError("%s", err.Error())
-							}
-							return obj
-						},
-					})
-					continue
-				}
-				if attrName == "extend" {
-					vm.push(list)
-					vm.push(&objects.Builtin{
-						Name: "list.extend",
-						Fn: func(args ...objects.Object) objects.Object {
-							if len(args) != 1 {
-								return objects.NewTypeError("extend() takes exactly 1 argument")
-							}
-							other, ok := args[0].(*objects.List)
-							if !ok {
-								return objects.NewTypeError("extend() argument must be a list")
-							}
-							list.Extend(other)
-							return objects.None_
-						},
-					})
-					continue
-				}
-				return vm.push(objects.None_)
-			}
-			
-			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
-		case compiler.OpSetAttribute:
-			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
-			attrName := vm.constants[idx].(*objects.String).Value
-			frame.ip += 2
-			
-			value := vm.pop()
-			obj := vm.pop()
-			
-			if instance, ok := obj.(*objects.Instance); ok {
-				// 尝试使用内联缓存验证类型
-				if vm.useFastPath && ip < len(vm.inlineCaches) {
-					cache := vm.inlineCaches[ip]
-					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class {
-						// 缓存命中，直接设置属性
-						cache.hitCount++
-						instance.SetAttr(attrName, value)
-						return vm.push(value)
-					}
-					// 更新缓存
-					cache.cachedAttrName = attrName
-					cache.cachedClass = instance.Class
-					cache.missCount++
-				}
-				
-				instance.SetAttr(attrName, value)
-				return vm.push(value)
-			}
-			
-			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+		// === 字符串格式化 ===
 		case compiler.OpFormatString:
 			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
