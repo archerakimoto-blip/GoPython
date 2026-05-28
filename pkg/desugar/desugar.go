@@ -713,6 +713,9 @@ func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statemen
 	// Fallback to original behavior for non-range loops
 	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
 	iterable := desugarExpression(forStmt.Iterable)
+	
+	// 创建一个临时变量来保存 iterable，避免每次迭代都重新计算
+	iterVar := &ast.Identifier{Token: "_iter", Value: "_iter"}
 
 	condition := &ast.InfixExpression{
 		Token:    "<",
@@ -721,7 +724,7 @@ func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statemen
 		Right: &ast.CallExpression{
 			Token:    "len",
 			Function: &ast.Identifier{Token: "len", Value: "len"},
-			Arguments: []ast.Expression{iterable},
+			Arguments: []ast.Expression{iterVar},
 		},
 	}
 
@@ -731,7 +734,7 @@ func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statemen
 			Left:  forStmt.Value,
 			Value: &ast.IndexExpression{
 				Token: "[",
-				Left:  iterable,
+				Left:  iterVar,
 				Index: indexVar,
 			},
 		},
@@ -770,6 +773,11 @@ func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statemen
 				Token: "=",
 				Left:  indexVar,
 				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+			},
+			&ast.AssignStatement{
+				Token: "=",
+				Left:  iterVar,
+				Value: iterable,
 			},
 			whileStmt,
 		},

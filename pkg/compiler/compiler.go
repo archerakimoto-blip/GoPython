@@ -1345,8 +1345,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.ListComprehension:
 		return c.compileListComprehension(node)
 
-	case *ast.GeneratorExpression:
-		return c.compileGeneratorExpression(node)
+	// GeneratorExpression is handled by desugar, converted to FunctionLiteral
 
 	case *ast.SetComprehension:
 		return c.compileSetComprehension(node)
@@ -1520,9 +1519,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			c.emit(OpConstant, constantIndex)
 		}
-		if compiledFn.IsGenerator {
-			c.emit(OpMakeGenerator)
-		}
+		// 生成器不再在函数定义时创建，而是在调用时创建
+		// if compiledFn.IsGenerator {
+		// 	c.emit(OpMakeGenerator)
+		// }
 
 		// 恢复之前的状态
 		c.currentFunctionName = previousFunctionName
@@ -1681,6 +1681,13 @@ func (c *Compiler) hasYieldInBody(node ast.Node) bool {
 		}
 	case *ast.FunctionLiteral:
 		return false
+	case *ast.AssignStatement:
+		// Check if the value expression contains a yield (e.g., yield in a subexpression)
+		if c.hasYieldInBody(node.Value) {
+			return true
+		}
+	case *ast.ExpressionStatement:
+		return c.hasYieldInBody(node.Expression)
 	}
 	return false
 }
@@ -1949,52 +1956,6 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	c.emit(OpGetGlobal, iterSymbol.Index)
 	c.emit1(OpCall, 0)
 	
-	loopStart := len(c.instructions)
-
-	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit1(OpCall, 0)
-	c.emit(OpMakeGenerator)
-
-	endPos := c.emit(OpJump, 0)
-
-	c.changeOperand(endPos, len(c.instructions))
-
-	c.exitScope()
-	compilationScope = append(compilationScope, c.instructions...)
-
-	c.enterScope()
-
-	if err := c.Compile(node.Element); err != nil {
-		return err
-	}
-
-	if node.Filter != nil {
-		if err := c.Compile(node.Filter); err != nil {
-			return err
-		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
-		c.changeOperand(jumpNotTruthyPos, loopStart)
-	}
-
-	c.emit(OpYieldValue)
-	c.emit(OpPop)
-
-	c.exitScope()
-
-	c.instructions = append(c.instructions, compilationScope...)
-
-	return nil
-}
-
-func (c *Compiler) compileGeneratorExpression(node *ast.GeneratorExpression) error {
-	compilationScope := c.instructions
-	c.instructions = []byte{}
-	c.enterScope()
-
-	iterSymbol := c.symbolTable.Define("__iter__")
-	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit1(OpCall, 0)
-
 	loopStart := len(c.instructions)
 
 	c.emit(OpGetGlobal, iterSymbol.Index)

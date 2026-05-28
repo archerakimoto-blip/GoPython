@@ -177,6 +177,12 @@ func NewFrameFromGenerator(gen *objects.Generator) *Frame {
 		Instructions: gen.Instructions,
 		NumLocals:    len(gen.Locals),
 	}
+	targetSize := gen.BasePointer + len(gen.Locals)
+	if targetSize > len(gen.Stack) {
+		newStack := make([]objects.Object, targetSize)
+		copy(newStack, gen.Stack)
+		gen.Stack = newStack
+	}
 	for i, val := range gen.Locals {
 		gen.Stack[gen.BasePointer+i] = val
 	}
@@ -785,6 +791,32 @@ func (vm *VM) Run() error {
 				return vm.push(objects.None_)
 			}
 			
+			if genObj, ok := obj.(*objects.Generator); ok {
+				if attrName == "__next__" {
+					// Push generator as self, then push a special marker
+					vm.push(genObj)
+					vm.push(&objects.Builtin{
+						Name: "generator.__next__",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 1 {
+								return objects.NewTypeError("__next__() takes exactly 1 argument")
+							}
+							gen, ok := args[0].(*objects.Generator)
+							if !ok {
+								return objects.NewTypeError("__next__() argument must be a generator")
+							}
+							if gen.Done {
+								return objects.NewError("StopIteration")
+							}
+							// Return the generator itself - executeCall will handle the rest
+							return gen
+						},
+					})
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 
 		case compiler.OpSetAttribute:
@@ -1320,17 +1352,18 @@ func (vm *VM) Run() error {
 			
 			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
 			frame.ip--
+			numParams := frame.fn.NumParameters
 			gen := &objects.Generator{
 				Instructions: frame.fn.Instructions,
 				Constants:    vm.constants,
-				Locals:     make([]objects.Object, len(vm.stack)-frame.basePointer),
+				Locals:     make([]objects.Object, numParams),
 				IP:         frame.ip + 1,
 				Stack:      make([]objects.Object, vm.sp),
 				StackPtr:  vm.sp,
 				BasePointer: frame.basePointer,
 				Done:       false,
 			}
-			copy(gen.Locals, vm.stack[frame.basePointer:])
+			copy(gen.Locals, vm.stack[frame.basePointer:frame.basePointer+numParams])
 			copy(gen.Stack, vm.stack[:vm.sp])
 			vm.sp = frame.basePointer - 1
 			vm.popFrame()
@@ -1375,13 +1408,31 @@ func (vm *VM) executeCall(numArgs int) error {
 	// We need to arrange stack as [..., prev, method, self, arg0, arg1, ...]
 	// where calleeIndex points to method and method will be called with self + numArgs arguments
 	if calleeIndex > 0 && numArgs == 0 {
-		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
+		isMethod := false
+		_, isCompiledFn := calleeObj.(*compiler.CompiledFunction)
+		_, isBuiltin := calleeObj.(*objects.Builtin)
+		if isCompiledFn || isBuiltin {
+			isMethod = true
+		}
+		
+		if isMethod {
+			// Check for Instance
 			if instance, isInstance := vm.stack[calleeIndex-1].(*objects.Instance); isInstance {
 				// This is a method call with no additional arguments
 				// Current stack: [..., prev, instance, method]
 				// Rearrange to: [..., prev, method, self]
 				vm.stack[calleeIndex-1] = calleeObj  // method
 				vm.stack[calleeIndex] = instance       // self
+				// vm.sp stays the same (method is already at calleeIndex)
+				numArgs = 1  // method needs self as its only argument
+			}
+			// Check for Generator
+			if gen, isGen := vm.stack[calleeIndex-1].(*objects.Generator); isGen {
+				// This is a generator method call with no additional arguments
+				// Current stack: [..., prev, generator, method]
+				// Rearrange to: [..., prev, method, self]
+				vm.stack[calleeIndex-1] = calleeObj  // method
+				vm.stack[calleeIndex] = gen           // self
 				// vm.sp stays the same (method is already at calleeIndex)
 				numArgs = 1  // method needs self as its only argument
 			}
@@ -1394,23 +1445,16 @@ func (vm *VM) executeCall(numArgs int) error {
 				return vm.push(objects.NewError("StopIteration: generator is exhausted"))
 			}
 		// 保存生成器对象引用，用于后续在栈上找到它
-		// 先移除生成器对象，后面在恢复栈后再放回去
 		genObj := vm.stack[calleeIndex]
-		vm.sp = calleeIndex
-		// For first call, set basePointer to calleeIndex + 1 so that genIndex = basePointer - 1 = calleeIndex
-		if gen.IP == -1 {
-			gen.BasePointer = calleeIndex + 1
-		}
 		// 恢复生成器状态
 		frame := NewFrameFromGenerator(gen)
 		vm.pushFrame(frame)
-		// 恢复 VM 的栈到生成器保存的状态
+		// 恢复 VM 的栈到生成器保存的状态（参数已经在 gen.Stack 中）
 		copy(vm.stack[:gen.StackPtr], gen.Stack[:gen.StackPtr])
 		vm.sp = gen.StackPtr
-		// 把生成器对象放回栈上，用于后续在 OpYieldValue 或返回时找到
-		// 我们把它放在 frame.basePointer - 1 的位置，就像普通函数调用那样
-		vm.stack[calleeIndex] = genObj
-		vm.sp = calleeIndex + 1
+		// 把生成器对象放在 frame.basePointer - 1 的位置
+		vm.stack[frame.basePointer - 1] = genObj
+		vm.sp = frame.basePointer
 		// 让 Run() 继续执行
 		return nil
 	}
@@ -1449,6 +1493,13 @@ func (vm *VM) executeCall(numArgs int) error {
 			args := vm.stack[vm.sp-numArgs : vm.sp]
 			result := builtin.Fn(args...)
 			vm.sp = vm.sp - numArgs - 1
+			// Check if the result is a Generator - if so, execute it
+			if gen, ok := result.(*objects.Generator); ok {
+				// Push the generator onto the stack and call it
+				vm.stack[vm.sp] = gen
+				vm.sp++
+				return vm.executeCall(0)
+			}
 			return vm.push(result)
 		}
 		return fmt.Errorf("calling non-function: type %T", calleeObj)
@@ -1461,12 +1512,13 @@ func (vm *VM) executeCall(numArgs int) error {
 			Locals:       make([]objects.Object, callee.NumLocals),
 			IP:           -1,
 			Stack:        make([]objects.Object, StackSize),
-			StackPtr:     0,
-			BasePointer:  vm.sp - numArgs,
+			StackPtr:     calleeIndex + 1 + callee.NumLocals,
+			BasePointer:  calleeIndex + 1,
 			Done:         false,
 		}
 		for i := 0; i < numArgs; i++ {
 			gen.Locals[i] = vm.stack[vm.sp-numArgs+i]
+			gen.Stack[gen.BasePointer+i] = vm.stack[vm.sp-numArgs+i]
 		}
 		vm.sp = vm.sp - numArgs - 1
 		return vm.push(gen)
@@ -1551,6 +1603,24 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 			return vm.push(nativeBoolToBooleanObject(objects.Equal(left, right)))
 		case compiler.OpNotEqual:
 			return vm.push(nativeBoolToBooleanObject(!objects.Equal(left, right)))
+		case compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
+			if leftStr, ok := left.(*objects.String); ok {
+				if rightStr, ok := right.(*objects.String); ok {
+					var res bool
+					switch op {
+					case compiler.OpGreaterThan:
+						res = leftStr.Value > rightStr.Value
+					case compiler.OpLessThan:
+						res = leftStr.Value < rightStr.Value
+					case compiler.OpGreaterThanEqual:
+						res = leftStr.Value >= rightStr.Value
+					case compiler.OpLessThanEqual:
+						res = leftStr.Value <= rightStr.Value
+					}
+					return vm.push(nativeBoolToBooleanObject(res))
+				}
+			}
+			return fmt.Errorf("TypeError: unsupported operand type(s) for %s: '%s' and '%s'", op, left.Type(), right.Type())
 		default:
 			return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
 		}
