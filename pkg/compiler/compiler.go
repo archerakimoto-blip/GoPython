@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"math/big"
 	"os"
 
 	"github.com/go-py/go-python/pkg/ast"
@@ -308,15 +309,15 @@ func (c *Compiler) registerBuiltins() {
 			}
 			switch arg := args[0].(type) {
 			case *objects.List:
-				return &objects.Integer{Value: int64(len(arg.Elements))}
+				return &objects.Integer{Value: *big.NewInt(int64(len(arg.Elements)))}
 			case *objects.Tuple:
-				return &objects.Integer{Value: int64(len(arg.Elements))}
+				return &objects.Integer{Value: *big.NewInt(int64(len(arg.Elements)))}
 			case *objects.String:
-				return &objects.Integer{Value: int64(len(arg.Value))}
+				return &objects.Integer{Value: *big.NewInt(int64(len(arg.Value)))}
 			case *objects.Dict:
-				return &objects.Integer{Value: int64(len(arg.Pairs))}
+				return &objects.Integer{Value: *big.NewInt(int64(len(arg.Pairs)))}
 			case *objects.Set:
-				return &objects.Integer{Value: int64(len(arg.Elements))}
+				return &objects.Integer{Value: *big.NewInt(int64(len(arg.Elements)))}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -483,19 +484,19 @@ func (c *Compiler) registerBuiltins() {
 			case *objects.Integer:
 				return arg
 			case *objects.Float:
-				return &objects.Integer{Value: int64(arg.Value)}
+				return &objects.Integer{Value: *big.NewInt(int64(arg.Value))}
 			case *objects.String:
 				var val int64
 				_, err := fmt.Sscanf(arg.Value, "%d", &val)
 				if err != nil {
 					return objects.NewValueError("cannot convert string '%s' to int", arg.Value)
 				}
-				return &objects.Integer{Value: val}
+				return &objects.Integer{Value: *big.NewInt(val)}
 			case *objects.Boolean:
 				if arg.Value {
-					return &objects.Integer{Value: 1}
+					return &objects.Integer{Value: *big.NewInt(1)}
 				}
-				return &objects.Integer{Value: 0}
+				return &objects.Integer{Value: *big.NewInt(0)}
 			default:
 				return objects.NewTypeError("cannot convert %s to int", arg.Type())
 			}
@@ -514,7 +515,7 @@ func (c *Compiler) registerBuiltins() {
 			case *objects.Float:
 				return arg
 			case *objects.Integer:
-				return &objects.Float{Value: float64(arg.Value)}
+				return &objects.Float{Value: float64(arg.Value.Int64())}
 			case *objects.String:
 				var val float64
 				_, err := fmt.Sscanf(arg.Value, "%f", &val)
@@ -545,7 +546,7 @@ func (c *Compiler) registerBuiltins() {
 			case *objects.Boolean:
 				return arg
 			case *objects.Integer:
-				if arg.Value != 0 {
+				if arg.Value.Sign() != 0 {
 					return objects.True
 				}
 				return objects.False
@@ -587,8 +588,9 @@ func (c *Compiler) registerBuiltins() {
 			}
 			switch arg := args[0].(type) {
 			case *objects.Integer:
-				if arg.Value < 0 {
-					return &objects.Integer{Value: -arg.Value}
+				if arg.Value.Sign() < 0 {
+					result := big.NewInt(0).Neg(&arg.Value)
+					return &objects.Integer{Value: *result}
 				}
 				return arg
 			case *objects.Float:
@@ -616,7 +618,7 @@ func (c *Compiler) registerBuiltins() {
 				if !ok {
 					return objects.NewTypeError("range() argument must be an integer")
 				}
-				stop = stopArg.Value
+				stop = stopArg.Value.Int64()
 			} else if len(args) == 2 {
 				startArg, ok := args[0].(*objects.Integer)
 				if !ok {
@@ -626,8 +628,8 @@ func (c *Compiler) registerBuiltins() {
 				if !ok {
 					return objects.NewTypeError("range() stop argument must be an integer")
 				}
-				start = startArg.Value
-				stop = stopArg.Value
+				start = startArg.Value.Int64()
+				stop = stopArg.Value.Int64()
 			} else {
 				startArg, ok := args[0].(*objects.Integer)
 				if !ok {
@@ -641,9 +643,9 @@ func (c *Compiler) registerBuiltins() {
 				if !ok {
 					return objects.NewTypeError("range() step argument must be an integer")
 				}
-				start = startArg.Value
-				stop = stopArg.Value
-				step = stepArg.Value
+				start = startArg.Value.Int64()
+				stop = stopArg.Value.Int64()
+				step = stepArg.Value.Int64()
 				if step == 0 {
 					return objects.NewValueError("range() step cannot be zero")
 				}
@@ -651,11 +653,11 @@ func (c *Compiler) registerBuiltins() {
 			elements := []objects.Object{}
 			if step > 0 {
 				for i := start; i < stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
+					elements = append(elements, &objects.Integer{Value: *big.NewInt(i)})
 				}
 			} else {
 				for i := start; i > stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
+					elements = append(elements, &objects.Integer{Value: *big.NewInt(i)})
 				}
 			}
 			return &objects.List{Elements: elements}
@@ -679,7 +681,7 @@ func (c *Compiler) registerBuiltins() {
 				case *objects.Integer:
 					if minInt == nil {
 						minInt = val
-					} else if val.Value < minInt.Value {
+					} else if val.Value.Cmp(&minInt.Value) < 0 {
 						minInt = val
 					}
 				case *objects.Float:
@@ -696,7 +698,7 @@ func (c *Compiler) registerBuiltins() {
 
 			if hasFloat {
 				if minInt != nil {
-					intAsFloat := float64(minInt.Value)
+					intAsFloat := float64(minInt.Value.Int64())
 					if minFloat == nil || intAsFloat < minFloat.Value {
 						return &objects.Float{Value: intAsFloat}
 					}
@@ -724,7 +726,7 @@ func (c *Compiler) registerBuiltins() {
 				case *objects.Integer:
 					if maxInt == nil {
 						maxInt = val
-					} else if val.Value > maxInt.Value {
+					} else if val.Value.Cmp(&maxInt.Value) > 0 {
 						maxInt = val
 					}
 				case *objects.Float:
@@ -741,7 +743,7 @@ func (c *Compiler) registerBuiltins() {
 
 			if hasFloat {
 				if maxInt != nil {
-					intAsFloat := float64(maxInt.Value)
+					intAsFloat := float64(maxInt.Value.Int64())
 					if maxFloat == nil || intAsFloat > maxFloat.Value {
 						return &objects.Float{Value: intAsFloat}
 					}
@@ -764,7 +766,7 @@ func (c *Compiler) registerBuiltins() {
 			if !ok {
 				return objects.NewError("sum() argument must be a list")
 			}
-			var totalInt int64 = 0
+			var totalInt big.Int
 			var totalFloat float64 = 0.0
 			hasFloat := false
 
@@ -772,14 +774,14 @@ func (c *Compiler) registerBuiltins() {
 				switch val := elem.(type) {
 				case *objects.Integer:
 					if hasFloat {
-						totalFloat += float64(val.Value)
+						totalFloat += float64(val.Value.Int64())
 					} else {
-						totalInt += val.Value
+						totalInt.Add(&totalInt, &val.Value)
 					}
 				case *objects.Float:
 					if !hasFloat {
 						hasFloat = true
-						totalFloat = float64(totalInt)
+						totalFloat = float64(totalInt.Int64())
 					}
 					totalFloat += val.Value
 				default:
@@ -835,7 +837,7 @@ func (c *Compiler) registerBuiltins() {
 				if !ok {
 					return objects.NewError("round() second argument must be an integer")
 				}
-				ndigits = nd.Value
+				ndigits = nd.Value.Int64()
 			}
 			
 			switch v := arg.(type) {
@@ -848,7 +850,7 @@ func (c *Compiler) registerBuiltins() {
 					rounded := float64(int64(v.Value*multiplier+0.5)) / multiplier
 					return &objects.Float{Value: rounded}
 				}
-				return &objects.Integer{Value: int64(v.Value + 0.5)}
+				return &objects.Integer{Value: *big.NewInt(int64(v.Value + 0.5))}
 			case *objects.Integer:
 				return arg
 			default:
@@ -1026,7 +1028,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.IntegerLiteral:
-		integer := &objects.Integer{Value: node.Value}
+		integer := &objects.Integer{Value: *big.NewInt(node.Value)}
 		c.emit(OpConstant, c.addConstant(integer))
 
 	case *ast.FloatLiteral:
@@ -1239,7 +1241,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 		if node.Start == nil {
-			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: *big.NewInt(0)}))
 		} else {
 			err = c.Compile(node.Start)
 			if err != nil {
@@ -1247,7 +1249,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 		if node.End == nil {
-			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: -1}))
+			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: *big.NewInt(-1)}))
 		} else {
 			err = c.Compile(node.End)
 			if err != nil {

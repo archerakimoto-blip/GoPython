@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -302,7 +303,8 @@ func (vm *VM) Run() error {
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
-					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value + rightInt.Value}
+					result := big.NewInt(0).Add(&leftInt.Value, &rightInt.Value)
+					vm.stack[vm.sp] = &objects.Integer{Value: *result}
 					vm.sp++
 					continue
 				}
@@ -342,7 +344,8 @@ func (vm *VM) Run() error {
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
-					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value - rightInt.Value}
+					result := big.NewInt(0).Sub(&leftInt.Value, &rightInt.Value)
+					vm.stack[vm.sp] = &objects.Integer{Value: *result}
 					vm.sp++
 					continue
 				}
@@ -375,7 +378,8 @@ func (vm *VM) Run() error {
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
-					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value * rightInt.Value}
+					result := big.NewInt(0).Mul(&leftInt.Value, &rightInt.Value)
+					vm.stack[vm.sp] = &objects.Integer{Value: *result}
 					vm.sp++
 					continue
 				}
@@ -408,7 +412,7 @@ func (vm *VM) Run() error {
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
-					if rightInt.Value == 0 {
+					if rightInt.Value.Sign() == 0 {
 						vm.stack[vm.sp] = objects.NewZeroDivisionError("division by zero")
 						vm.sp++
 						if !vm.raiseException(vm.stack[vm.sp-1]) {
@@ -416,7 +420,8 @@ func (vm *VM) Run() error {
 						}
 						continue
 					}
-					vm.stack[vm.sp] = &objects.Integer{Value: leftInt.Value / rightInt.Value}
+					result := big.NewInt(0).Div(&leftInt.Value, &rightInt.Value)
+					vm.stack[vm.sp] = &objects.Integer{Value: *result}
 					vm.sp++
 					continue
 				}
@@ -450,22 +455,21 @@ func (vm *VM) Run() error {
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
-					lv := leftInt.Value
-					rv := rightInt.Value
+					cmp := leftInt.Value.Cmp(&rightInt.Value)
 					var res bool
 					switch op {
 					case compiler.OpEqual:
-						res = lv == rv
+						res = cmp == 0
 					case compiler.OpNotEqual:
-						res = lv != rv
+						res = cmp != 0
 					case compiler.OpGreaterThan:
-						res = lv > rv
+						res = cmp > 0
 					case compiler.OpLessThan:
-						res = lv < rv
+						res = cmp < 0
 					case compiler.OpGreaterThanEqual:
-						res = lv >= rv
+						res = cmp >= 0
 					case compiler.OpLessThanEqual:
-						res = lv <= rv
+						res = cmp <= 0
 					}
 					if res {
 						vm.stack[vm.sp] = objects.True
@@ -1043,7 +1047,7 @@ func (vm *VM) Run() error {
 							if !ok {
 								return objects.NewTypeError("pop() argument must be an integer")
 							}
-							obj, err := list.Pop(int(idx.Value))
+							obj, err := list.Pop(int(idx.Value.Int64()))
 							if err != nil {
 								return objects.NewIndexError("%s", err.Error())
 							}
@@ -1122,7 +1126,7 @@ func (vm *VM) Run() error {
 				if !ok {
 					return fmt.Errorf("list index must be an integer, got %T", indexObj)
 				}
-				idx := int(indexInt.Value)
+				idx := int(indexInt.Value.Int64())
 				if idx < 0 || idx >= len(c.Elements) {
 					return fmt.Errorf("list index out of range: %d", idx)
 				}
@@ -1364,7 +1368,8 @@ func (vm *VM) executeMinusOperator() error {
 	}
 
 	value := operand.(*objects.Integer).Value
-	return vm.push(&objects.Integer{Value: -value})
+	result := big.NewInt(0).Neg(&value)
+	return vm.push(&objects.Integer{Value: *result})
 }
 
 func (vm *VM) executeBangOperator() error {
@@ -1420,19 +1425,21 @@ func (vm *VM) executeIntegerComparison(op compiler.Opcode, left, right objects.O
 	leftValue := left.(*objects.Integer).Value
 	rightValue := right.(*objects.Integer).Value
 
+	cmp := leftValue.Cmp(&rightValue)
+
 	switch op {
 	case compiler.OpEqual:
-		return vm.push(nativeBoolToBooleanObject(leftValue == rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp == 0))
 	case compiler.OpNotEqual:
-		return vm.push(nativeBoolToBooleanObject(leftValue != rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp != 0))
 	case compiler.OpGreaterThan:
-		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp > 0))
 	case compiler.OpLessThan:
-		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp < 0))
 	case compiler.OpGreaterThanEqual:
-		return vm.push(nativeBoolToBooleanObject(leftValue >= rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp >= 0))
 	case compiler.OpLessThanEqual:
-		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
+		return vm.push(nativeBoolToBooleanObject(cmp <= 0))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
 	}
@@ -1522,20 +1529,20 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 	leftValue := left.(*objects.Integer).Value
 	rightValue := right.(*objects.Integer).Value
 
-	var result int64
+	var result big.Int
 
 	switch op {
 	case compiler.OpAdd:
-		result = leftValue + rightValue
+		result.Add(&leftValue, &rightValue)
 	case compiler.OpSub:
-		result = leftValue - rightValue
+		result.Sub(&leftValue, &rightValue)
 	case compiler.OpMul:
-		result = leftValue * rightValue
+		result.Mul(&leftValue, &rightValue)
 	case compiler.OpDiv:
-		if rightValue == 0 {
+		if rightValue.Sign() == 0 {
 			return vm.push(objects.NewZeroDivisionError("division by zero"))
 		}
-		result = leftValue / rightValue
+		result.Div(&leftValue, &rightValue)
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
@@ -1736,7 +1743,7 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 	arrayObject := array.(*objects.List)
-	idx := index.(*objects.Integer).Value
+	idx := index.(*objects.Integer).Value.Int64()
 	max := int64(len(arrayObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
@@ -1748,7 +1755,7 @@ func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 
 func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
 	tupleObject := tuple.(*objects.Tuple)
-	idx := index.(*objects.Integer).Value
+	idx := index.(*objects.Integer).Value.Int64()
 	max := int64(len(tupleObject.Elements) - 1)
 
 	if idx < 0 || idx > max {
@@ -1787,7 +1794,7 @@ func (vm *VM) executeListSlice(left, start, end objects.Object) error {
 	var startIdx int64
 	switch s := start.(type) {
 	case *objects.Integer:
-		startIdx = s.Value
+		startIdx = s.Value.Int64()
 		if startIdx < 0 {
 			startIdx = int64(length) + startIdx
 		}
@@ -1804,10 +1811,11 @@ func (vm *VM) executeListSlice(left, start, end objects.Object) error {
 	var endIdx int64
 	switch e := end.(type) {
 	case *objects.Integer:
-		if e.Value == -1 { // 我们用 -1 表示未指定
+		eInt64 := e.Value.Int64()
+		if eInt64 == -1 { // 我们用 -1 表示未指定
 			endIdx = int64(length)
 		} else {
-			endIdx = e.Value
+			endIdx = eInt64
 			if endIdx < 0 {
 				endIdx = int64(length) + endIdx
 			}
@@ -1841,7 +1849,7 @@ func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
 	var startIdx int64
 	switch s := start.(type) {
 	case *objects.Integer:
-		startIdx = s.Value
+		startIdx = s.Value.Int64()
 		if startIdx < 0 {
 			startIdx = int64(length) + startIdx
 		}
@@ -1858,10 +1866,11 @@ func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
 	var endIdx int64
 	switch e := end.(type) {
 	case *objects.Integer:
-		if e.Value == -1 {
+		eInt64 := e.Value.Int64()
+		if eInt64 == -1 {
 			endIdx = int64(length)
 		} else {
-			endIdx = e.Value
+			endIdx = eInt64
 			if endIdx < 0 {
 				endIdx = int64(length) + endIdx
 			}

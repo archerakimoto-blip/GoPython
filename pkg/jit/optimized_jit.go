@@ -1,7 +1,7 @@
 package jit
 
 import (
-	"math"
+	"math/big"
 	"sync"
 	"time"
 
@@ -139,7 +139,8 @@ func (j *OptimizedJIT) compileFunction(fn *compiler.CompiledFunction) CompiledJI
 
 				if l, ok := left.(*objects.Integer); ok {
 					if r, ok := right.(*objects.Integer); ok {
-						stack[sp] = &objects.Integer{Value: l.Value + r.Value}
+						result := big.NewInt(0).Add(&l.Value, &r.Value)
+						stack[sp] = &objects.Integer{Value: *result}
 						sp++
 						continue
 					}
@@ -158,7 +159,8 @@ func (j *OptimizedJIT) compileFunction(fn *compiler.CompiledFunction) CompiledJI
 				right := stack[sp-1].(*objects.Integer)
 				left := stack[sp-2].(*objects.Integer)
 				sp -= 2
-				stack[sp] = &objects.Integer{Value: left.Value - right.Value}
+				result := big.NewInt(0).Sub(&left.Value, &right.Value)
+				stack[sp] = &objects.Integer{Value: *result}
 				sp++
 
 			case compiler.OpMul:
@@ -166,18 +168,20 @@ func (j *OptimizedJIT) compileFunction(fn *compiler.CompiledFunction) CompiledJI
 				right := stack[sp-1].(*objects.Integer)
 				left := stack[sp-2].(*objects.Integer)
 				sp -= 2
-				stack[sp] = &objects.Integer{Value: left.Value * right.Value}
+				result := big.NewInt(0).Mul(&left.Value, &right.Value)
+				stack[sp] = &objects.Integer{Value: *result}
 				sp++
 
 			case compiler.OpDiv:
 				ip++
-				right := stack[sp-1].(*objects.Integer).Value
-				left := stack[sp-2].(*objects.Integer).Value
+				right := stack[sp-1].(*objects.Integer)
+				left := stack[sp-2].(*objects.Integer)
 				sp -= 2
-				if right == 0 {
+				if right.Value.Sign() == 0 {
 					stack[sp] = objects.NewZeroDivisionError("division by zero")
 				} else {
-					stack[sp] = &objects.Integer{Value: left / right}
+					result := big.NewInt(0).Div(&left.Value, &right.Value)
+					stack[sp] = &objects.Integer{Value: *result}
 				}
 				sp++
 
@@ -209,7 +213,7 @@ func (j *OptimizedJIT) compileFunction(fn *compiler.CompiledFunction) CompiledJI
 				right := stack[sp-1].(*objects.Integer)
 				left := stack[sp-2].(*objects.Integer)
 				sp -= 2
-				if left.Value < right.Value {
+				if left.Value.Cmp(&right.Value) < 0 {
 					stack[sp] = objects.True
 				} else {
 					stack[sp] = objects.False
@@ -244,7 +248,7 @@ func isTruthyJIT(obj objects.Object) bool {
 	case *objects.None:
 		return false
 	case *objects.Integer:
-		return obj.Value != 0
+		return obj.Value.Sign() != 0
 	case *objects.String:
 		return len(obj.Value) > 0
 	case *objects.List:
@@ -283,16 +287,16 @@ func (j *OptimizedJIT) CompileLoopFunction(fn *compiler.CompiledFunction) Compil
 			return objects.None_
 		}
 
-		// 手动实现斐波那契的优化版本
-		if n.Value <= 1 {
+		nVal := n.Value.Int64()
+		if nVal <= 1 {
 			return n
 		}
 
 		a, b := int64(0), int64(1)
-		for i := int64(2); i <= n.Value; i++ {
+		for i := int64(2); i <= nVal; i++ {
 			a, b = b, a+b
 		}
-		return &objects.Integer{Value: b}
+		return &objects.Integer{Value: *big.NewInt(b)}
 	}
 }
 
@@ -308,20 +312,18 @@ func (j *OptimizedJIT) CompileMathFunction(fn *compiler.CompiledFunction) Compil
 			return objects.None_
 		}
 
-		// 阶乘优化
-		if n.Value < 0 {
-			return &objects.Integer{Value: 1}
+		nVal := n.Value.Int64()
+		if nVal < 0 {
+			return &objects.Integer{Value: *big.NewInt(1)}
 		}
-		if n.Value == 0 || n.Value == 1 {
-			return &objects.Integer{Value: 1}
+		if nVal == 0 || nVal == 1 {
+			return &objects.Integer{Value: *big.NewInt(1)}
 		}
 
-		result := int64(1)
-		for i := int64(2); i <= n.Value; i++ {
-			result *= i
-			if result > math.MaxInt64/2 {
-				break // 防止溢出
-			}
+		var result big.Int
+		result.SetInt64(1)
+		for i := int64(2); i <= nVal; i++ {
+			result.Mul(&result, big.NewInt(i))
 		}
 		return &objects.Integer{Value: result}
 	}

@@ -17,6 +17,7 @@ static inline PyObject* PyTuple_FromObjects(PyObject** objs, int n) {
 import "C"
 import (
 	"fmt"
+	"math/big"
 	"unsafe"
 
 	"github.com/go-py/go-python/pkg/objects"
@@ -68,7 +69,7 @@ func goToCPython(obj objects.Object) *C.PyObject {
 
 	switch v := obj.(type) {
 	case *objects.Integer:
-		return C.PyLong_FromLongLong(C.longlong(v.Value))
+		return C.PyLong_FromLongLong(C.longlong(v.Value.Int64()))
 	case *objects.Float:
 		return C.PyFloat_FromDouble(C.double(v.Value))
 	case *objects.Boolean:
@@ -137,7 +138,7 @@ func cpythonToGo(pyobj *C.PyObject) objects.Object {
 	if C.PyLong_AsLongLong(pyobj) != -1 || C.PyErr_Occurred() == nil {
 		val := C.PyLong_AsLongLong(pyobj)
 		C.PyErr_Clear()
-		return &objects.Integer{Value: int64(val)}
+		return &objects.Integer{Value: *big.NewInt(int64(val))}
 	}
 	C.PyErr_Clear()
 

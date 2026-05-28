@@ -3,6 +3,7 @@ package jit
 import (
 	"fmt"
 	"log"
+	"math/big"
 	"runtime"
 	"sync"
 	"time"
@@ -367,17 +368,17 @@ func (j *EnhancedJIT) constantFolding(fn *compiler.CompiledFunction) {
 								if nextConstObj, ok := fn.Constants[nextConstIndex].(*objects.Integer); ok {
 									if i+6 < len(instructions) {
 										arithOp := compiler.Opcode(instructions[i+6])
-										var result int64
+										var result big.Int
 										switch arithOp {
 										case compiler.OpAdd:
-											result = constObj.Value + nextConstObj.Value
+											result.Add(&constObj.Value, &nextConstObj.Value)
 										case compiler.OpSub:
-											result = constObj.Value - nextConstObj.Value
+											result.Sub(&constObj.Value, &nextConstObj.Value)
 										case compiler.OpMul:
-											result = constObj.Value * nextConstObj.Value
+											result.Mul(&constObj.Value, &nextConstObj.Value)
 										}
 										
-										if result != 0 || arithOp == compiler.OpMul {
+										if result.Sign() != 0 || arithOp == compiler.OpMul {
 											foldedConst := &objects.Integer{Value: result}
 											newConstIndex := len(fn.Constants)
 											fn.Constants = append(fn.Constants, foldedConst)

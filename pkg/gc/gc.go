@@ -3,6 +3,7 @@ package gc
 import (
 	"fmt"
 	"log"
+	"math/big"
 	"sync"
 	"time"
 
@@ -340,12 +341,12 @@ func (gc *GarbageCollector) GetStatsAsDict() *objects.Dict {
 	defer gc.mu.Unlock()
 
 	result := objects.NewDict()
-	result.Set(&objects.String{Value: "allocated_bytes"}, &objects.Integer{Value: gc.allocatedBytes})
-	result.Set(&objects.String{Value: "freed_bytes"}, &objects.Integer{Value: gc.freedBytes})
-	result.Set(&objects.String{Value: "collection_count"}, &objects.Integer{Value: gc.collectionCount})
-	result.Set(&objects.String{Value: "object_count"}, &objects.Integer{Value: int64(len(gc.objects))})
+	result.Set(&objects.String{Value: "allocated_bytes"}, &objects.Integer{Value: *big.NewInt(gc.allocatedBytes)})
+	result.Set(&objects.String{Value: "freed_bytes"}, &objects.Integer{Value: *big.NewInt(gc.freedBytes)})
+	result.Set(&objects.String{Value: "collection_count"}, &objects.Integer{Value: *big.NewInt(gc.collectionCount)})
+	result.Set(&objects.String{Value: "object_count"}, &objects.Integer{Value: *big.NewInt(int64(len(gc.objects)))})
 	result.Set(&objects.String{Value: "enabled"}, &objects.Boolean{Value: gc.enabled})
-	result.Set(&objects.String{Value: "threshold"}, &objects.Integer{Value: gc.threshold})
+	result.Set(&objects.String{Value: "threshold"}, &objects.Integer{Value: *big.NewInt(gc.threshold)})
 	result.Set(&objects.String{Value: "total_pause_time"}, &objects.Float{Value: float64(gc.pauseTime.Seconds())})
 
 	return result
@@ -375,9 +376,9 @@ func (m *GCModule) GetStats() objects.Object {
 		var valObj objects.Object
 		switch val := v.(type) {
 		case int64:
-			valObj = &objects.Integer{Value: val}
+			valObj = &objects.Integer{Value: *big.NewInt(val)}
 		case int:
-			valObj = &objects.Integer{Value: int64(val)}
+			valObj = &objects.Integer{Value: *big.NewInt(int64(val))}
 		case bool:
 			valObj = &objects.Boolean{Value: val}
 		case time.Duration:
@@ -397,7 +398,7 @@ func (m *GCModule) PrintStats() objects.Object {
 
 func (m *GCModule) SetThreshold(threshold objects.Object) objects.Object {
 	if t, ok := threshold.(*objects.Integer); ok {
-		GetGC().SetThreshold(t.Value)
+		GetGC().SetThreshold(t.Value.Int64())
 	}
 	return objects.None_
 }
@@ -436,7 +437,7 @@ func CreateGCModule() *objects.Module {
 	module.Fields["set_threshold"] = &objects.Builtin{Fn: func(args ...objects.Object) objects.Object {
 		if len(args) > 0 {
 			if t, ok := args[0].(*objects.Integer); ok {
-				GetGC().SetThreshold(t.Value)
+				GetGC().SetThreshold(t.Value.Int64())
 			}
 		}
 		return objects.None_

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"math/rand"
 	"os"
 	"runtime"
@@ -40,11 +41,11 @@ type Object interface {
 }
 
 type Integer struct {
-	Value int64
+	Value big.Int
 }
 
 func (i *Integer) Type() ObjectType { return INTEGER_OBJ }
-func (i *Integer) Inspect() string  { return fmt.Sprintf("%d", i.Value) }
+func (i *Integer) Inspect() string  { return i.Value.String() }
 
 type Float struct {
 	Value float64
@@ -557,7 +558,7 @@ func Equal(a, b Object) bool {
 	switch a := a.(type) {
 	case *Integer:
 		b := b.(*Integer)
-		return a.Value == b.Value
+		return a.Value.Cmp(&b.Value) == 0
 	case *Float:
 		b := b.(*Float)
 		return a.Value == b.Value
@@ -618,12 +619,12 @@ func FormatString(template string, args ...Object) string {
 						replacement = fmt.Sprintf("%g", floatObj.Value)
 					}
 				} else if intObj, ok := arg.(*Integer); ok {
-					if formatChar == 'f' {
-						replacement = fmt.Sprintf("%f", float64(intObj.Value))
-					} else {
-						replacement = fmt.Sprintf("%g", float64(intObj.Value))
-					}
+				if formatChar == 'f' {
+					replacement = fmt.Sprintf("%f", float64(intObj.Value.Int64()))
 				} else {
+					replacement = fmt.Sprintf("%g", float64(intObj.Value.Int64()))
+				}
+			} else {
 					replacement = arg.Inspect()
 				}
 			}
@@ -656,7 +657,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Sin(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Sin(float64(v.Value))}
+				return &Float{Value: math.Sin(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("sin() argument must be a number")
 			}
@@ -674,7 +675,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Cos(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Cos(float64(v.Value))}
+				return &Float{Value: math.Cos(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("cos() argument must be a number")
 			}
@@ -692,7 +693,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Tan(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Tan(float64(v.Value))}
+				return &Float{Value: math.Tan(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("tan() argument must be a number")
 			}
@@ -710,7 +711,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Asin(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Asin(float64(v.Value))}
+				return &Float{Value: math.Asin(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("asin() argument must be a number")
 			}
@@ -728,7 +729,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Acos(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Acos(float64(v.Value))}
+				return &Float{Value: math.Acos(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("acos() argument must be a number")
 			}
@@ -746,7 +747,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Atan(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Atan(float64(v.Value))}
+				return &Float{Value: math.Atan(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("atan() argument must be a number")
 			}
@@ -764,7 +765,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Sqrt(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Sqrt(float64(v.Value))}
+				return &Float{Value: math.Sqrt(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("sqrt() argument must be a number")
 			}
@@ -780,7 +781,7 @@ func CreateMathModule() *Module {
 			arg := args[0]
 			switch v := arg.(type) {
 			case *Float:
-				return &Integer{Value: int64(math.Floor(v.Value))}
+				return &Integer{Value: *big.NewInt(int64(math.Floor(v.Value)))}
 			case *Integer:
 				return v
 			default:
@@ -798,7 +799,7 @@ func CreateMathModule() *Module {
 			arg := args[0]
 			switch v := arg.(type) {
 			case *Float:
-				return &Integer{Value: int64(math.Ceil(v.Value))}
+				return &Integer{Value: *big.NewInt(int64(math.Ceil(v.Value)))}
 			case *Integer:
 				return v
 			default:
@@ -816,7 +817,7 @@ func CreateMathModule() *Module {
 			arg := args[0]
 			switch v := arg.(type) {
 			case *Float:
-				return &Integer{Value: int64(math.Trunc(v.Value))}
+				return &Integer{Value: *big.NewInt(int64(math.Trunc(v.Value)))}
 			case *Integer:
 				return v
 			default:
@@ -836,8 +837,9 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Abs(v.Value)}
 			case *Integer:
-				if v.Value < 0 {
-					return &Integer{Value: -v.Value}
+				if v.Value.Sign() < 0 {
+					result := big.NewInt(0).Neg(&v.Value)
+					return &Integer{Value: *result}
 				}
 				return v
 			default:
@@ -887,7 +889,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Log(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Log(float64(v.Value))}
+				return &Float{Value: math.Log(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("log() argument must be a number")
 			}
@@ -905,7 +907,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Log10(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Log10(float64(v.Value))}
+				return &Float{Value: math.Log10(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("log10() argument must be a number")
 			}
@@ -923,7 +925,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Log2(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Log2(float64(v.Value))}
+				return &Float{Value: math.Log2(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("log2() argument must be a number")
 			}
@@ -941,7 +943,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: math.Exp(v.Value)}
 			case *Integer:
-				return &Float{Value: math.Exp(float64(v.Value))}
+				return &Float{Value: math.Exp(float64(v.Value.Int64()))}
 			default:
 				return NewTypeError("exp() argument must be a number")
 			}
@@ -959,7 +961,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: v.Value * 180 / math.Pi}
 			case *Integer:
-				return &Float{Value: float64(v.Value) * 180 / math.Pi}
+				return &Float{Value: float64(v.Value.Int64()) * 180 / math.Pi}
 			default:
 				return NewTypeError("degrees() argument must be a number")
 			}
@@ -977,7 +979,7 @@ func CreateMathModule() *Module {
 			case *Float:
 				return &Float{Value: v.Value * math.Pi / 180}
 			case *Integer:
-				return &Float{Value: float64(v.Value) * math.Pi / 180}
+				return &Float{Value: float64(v.Value.Int64()) * math.Pi / 180}
 			default:
 				return NewTypeError("radians() argument must be a number")
 			}
@@ -1007,11 +1009,11 @@ func CreateSysModule() *Module {
 	// sys.version_info
 	sysModule.Fields["version_info"] = &Tuple{
 		Elements: []Object{
-			&Integer{Value: 0},
-			&Integer{Value: 1},
-			&Integer{Value: 0},
+			&Integer{Value: *big.NewInt(0)},
+			&Integer{Value: *big.NewInt(1)},
+			&Integer{Value: *big.NewInt(0)},
 			&String{Value: "final"},
-			&Integer{Value: 0},
+			&Integer{Value: *big.NewInt(0)},
 		},
 	}
 
@@ -1032,7 +1034,7 @@ func CreateSysModule() *Module {
 			code := 0
 			if len(args) >= 1 {
 				if i, ok := args[0].(*Integer); ok {
-					code = int(i.Value)
+					code = int(i.Value.Int64())
 				}
 			}
 			os.Exit(code)
@@ -1048,7 +1050,7 @@ func CreateSysModule() *Module {
 				return NewTypeError("getsizeof() takes exactly 1 argument")
 			}
 			// 简单实现，返回固定大小
-			return &Integer{Value: 24}
+			return &Integer{Value: *big.NewInt(24)}
 		},
 	}
 
@@ -1138,7 +1140,7 @@ func CreateOsModule() *Module {
 			mode := 0755
 			if len(args) >= 2 {
 				if i, ok := args[1].(*Integer); ok {
-					mode = int(i.Value)
+					mode = int(i.Value.Int64())
 				}
 			}
 			err := os.Mkdir(path.Value, os.FileMode(mode))
@@ -1310,9 +1312,9 @@ func convertToGoValue(obj Object) interface{} {
 func convertToObject(value interface{}) Object {
 	switch v := value.(type) {
 	case int:
-		return &Integer{Value: int64(v)}
+		return &Integer{Value: *big.NewInt(int64(v))}
 	case int64:
-		return &Integer{Value: v}
+		return &Integer{Value: *big.NewInt(v)}
 	case float64:
 		return &Float{Value: v}
 	case bool:
@@ -1359,7 +1361,7 @@ func CreateRandomModule() *Module {
 			}
 			switch v := args[0].(type) {
 			case *Integer:
-				rand.Seed(v.Value)
+				rand.Seed(v.Value.Int64())
 			case *Float:
 				rand.Seed(int64(v.Value))
 			default:
@@ -1388,11 +1390,11 @@ func CreateRandomModule() *Module {
 			b, ok2 := args[1].(*Float)
 			if !ok1 || !ok2 {
 				if i1, ok := args[0].(*Integer); ok {
-					a = &Float{Value: float64(i1.Value)}
+					a = &Float{Value: float64(i1.Value.Int64())}
 					ok1 = true
 				}
 				if i2, ok := args[1].(*Integer); ok {
-					b = &Float{Value: float64(i2.Value)}
+					b = &Float{Value: float64(i2.Value.Int64())}
 					ok2 = true
 				}
 				if !ok1 || !ok2 {
@@ -1416,8 +1418,10 @@ func CreateRandomModule() *Module {
 			if !ok1 || !ok2 {
 				return NewTypeError("randint() arguments must be integers")
 			}
-			result := a.Value + rand.Int63n(b.Value - a.Value + 1)
-			return &Integer{Value: result}
+			aInt64 := a.Value.Int64()
+			bInt64 := b.Value.Int64()
+			result := aInt64 + rand.Int63n(bInt64 - aInt64 + 1)
+			return &Integer{Value: *big.NewInt(result)}
 		},
 	}
 	
@@ -1544,7 +1548,7 @@ func CreateTimeModule() *Module {
 			case *Float:
 				secs = v.Value
 			case *Integer:
-				secs = float64(v.Value)
+				secs = float64(v.Value.Int64())
 			default:
 				return NewTypeError("sleep() argument must be a number")
 			}
@@ -1565,7 +1569,7 @@ func CreateTimeModule() *Module {
 				case *Float:
 					t = time.Unix(0, int64(v.Value*1e9))
 				case *Integer:
-					t = time.Unix(v.Value, 0)
+					t = time.Unix(v.Value.Int64(), 0)
 				default:
 					return NewTypeError("ctime() argument must be a number")
 				}
@@ -1584,14 +1588,14 @@ func CreateTimeModule() *Module {
 			// 返回一个简单的 tuple：(year, month, day, hour, minute, second, weekday, yearday)
 			return &Tuple{
 				Elements: []Object{
-					&Integer{Value: int64(t.Year())},
-					&Integer{Value: int64(t.Month())},
-					&Integer{Value: int64(t.Day())},
-					&Integer{Value: int64(t.Hour())},
-					&Integer{Value: int64(t.Minute())},
-					&Integer{Value: int64(t.Second())},
-					&Integer{Value: int64(t.Weekday())},
-					&Integer{Value: int64(t.YearDay())},
+					&Integer{Value: *big.NewInt(int64(t.Year()))},
+					&Integer{Value: *big.NewInt(int64(t.Month()))},
+					&Integer{Value: *big.NewInt(int64(t.Day()))},
+					&Integer{Value: *big.NewInt(int64(t.Hour()))},
+					&Integer{Value: *big.NewInt(int64(t.Minute()))},
+					&Integer{Value: *big.NewInt(int64(t.Second()))},
+					&Integer{Value: *big.NewInt(int64(t.Weekday()))},
+					&Integer{Value: *big.NewInt(int64(t.YearDay()))},
 				},
 			}
 		},
