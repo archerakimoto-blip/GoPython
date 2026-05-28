@@ -21,6 +21,13 @@ type InlineCache struct {
 	lastType         objects.ObjectType
 	monomorphic      bool
 	polymorphic      []objects.ObjectType
+	
+	// 属性访问缓存
+	cachedAttrName string
+	cachedResult   objects.Object
+	cachedClass    *objects.Class
+	hitCount       int
+	missCount      int
 }
 
 // NewInlineCache 创建一个新的内联缓存
@@ -93,6 +100,13 @@ func New(bytecode *compiler.Bytecode) *VM {
 	frames := make([]*Frame, MaxFrames)
 	frames[0] = mainFrame
 
+	// 为每条指令分配内联缓存
+	numInstructions := len(bytecode.Instructions)
+	inlineCaches := make([]*InlineCache, numInstructions)
+	for i := range inlineCaches {
+		inlineCaches[i] = NewInlineCache()
+	}
+
 	return &VM{
 		constants:    bytecode.Constants,
 		instructions: bytecode.Instructions,
@@ -110,6 +124,9 @@ func New(bytecode *compiler.Bytecode) *VM {
 
 		timeout:         5 * time.Minute,
 		maxInstructions: 1000000000,
+
+		inlineCaches: inlineCaches,
+		useFastPath:  true,
 	}
 }
 
@@ -982,7 +999,32 @@ func (vm *VM) Run() error {
 			obj := vm.pop()
 			
 			if instance, ok := obj.(*objects.Instance); ok {
+				// 尝试使用内联缓存
+				if vm.useFastPath && ip < len(vm.inlineCaches) {
+					cache := vm.inlineCaches[ip]
+					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class && cache.cachedResult != nil {
+						// 缓存命中
+						cache.hitCount++
+						if method, ok := cache.cachedResult.(*compiler.CompiledFunction); ok {
+							vm.push(instance)
+							vm.push(method)
+							continue
+						}
+						return vm.push(cache.cachedResult)
+					}
+				}
+				
+				// 缓存未命中，执行正常查找
 				if val, ok := instance.GetAttr(attrName); ok {
+					// 更新缓存
+					if vm.useFastPath && ip < len(vm.inlineCaches) {
+						cache := vm.inlineCaches[ip]
+						cache.cachedAttrName = attrName
+						cache.cachedClass = instance.Class
+						cache.cachedResult = val
+						cache.missCount++
+					}
+					
 					if method, ok := val.(*compiler.CompiledFunction); ok {
 						vm.push(instance)
 						vm.push(method)
@@ -991,6 +1033,15 @@ func (vm *VM) Run() error {
 					return vm.push(val)
 				}
 				if classMethod, ok := instance.Class.Methods[attrName]; ok {
+					// 更新缓存
+					if vm.useFastPath && ip < len(vm.inlineCaches) {
+						cache := vm.inlineCaches[ip]
+						cache.cachedAttrName = attrName
+						cache.cachedClass = instance.Class
+						cache.cachedResult = classMethod
+						cache.missCount++
+					}
+					
 					vm.push(instance)
 					vm.push(classMethod)
 					continue
@@ -1087,6 +1138,21 @@ func (vm *VM) Run() error {
 			obj := vm.pop()
 			
 			if instance, ok := obj.(*objects.Instance); ok {
+				// 尝试使用内联缓存验证类型
+				if vm.useFastPath && ip < len(vm.inlineCaches) {
+					cache := vm.inlineCaches[ip]
+					if cache.cachedAttrName == attrName && cache.cachedClass == instance.Class {
+						// 缓存命中，直接设置属性
+						cache.hitCount++
+						instance.SetAttr(attrName, value)
+						return vm.push(value)
+					}
+					// 更新缓存
+					cache.cachedAttrName = attrName
+					cache.cachedClass = instance.Class
+					cache.missCount++
+				}
+				
 				instance.SetAttr(attrName, value)
 				return vm.push(value)
 			}
