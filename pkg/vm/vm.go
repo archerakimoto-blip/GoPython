@@ -704,6 +704,75 @@ func (vm *VM) Run() error {
 					})
 					continue
 				}
+				if attrName == "__contains__" {
+					vm.push(&objects.Builtin{
+						Name: "list.__contains__",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 2 {
+								return objects.NewTypeError("__contains__() takes exactly 1 argument")
+							}
+							lst, ok := args[0].(*objects.List)
+							if !ok {
+								return objects.NewTypeError("__contains__() called on non-list")
+							}
+							if lst.Contains(args[1]) {
+								return objects.True
+							}
+							return objects.False
+						},
+					})
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if _, ok := obj.(*objects.String); ok {
+				if attrName == "__contains__" {
+					vm.push(&objects.Builtin{
+						Name: "str.__contains__",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 2 {
+								return objects.NewTypeError("__contains__() takes exactly 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("__contains__() called on non-string")
+							}
+							subStr, ok := args[1].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("__contains__() argument must be a string")
+							}
+							if strings.Contains(s.Value, subStr.Value) {
+								return objects.True
+							}
+							return objects.False
+						},
+					})
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if _, ok := obj.(*objects.Dict); ok {
+				if attrName == "__contains__" {
+					vm.push(&objects.Builtin{
+						Name: "dict.__contains__",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) != 2 {
+								return objects.NewTypeError("__contains__() takes exactly 1 argument")
+							}
+							d, ok := args[0].(*objects.Dict)
+							if !ok {
+								return objects.NewTypeError("__contains__() called on non-dict")
+							}
+							if d.Has(args[1]) {
+								return objects.True
+							}
+							return objects.False
+						},
+					})
+					continue
+				}
 				return vm.push(objects.None_)
 			}
 			

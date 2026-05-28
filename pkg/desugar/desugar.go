@@ -279,7 +279,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			left := desugarExpression(e.Left)
 			right := desugarExpression(e.Right)
 			
-			// 构建 id(left) 和 id(right) 调用
 			leftId := &ast.CallExpression{
 				Token: "id",
 				Function: &ast.Identifier{Token: "id", Value: "id"},
@@ -291,7 +290,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 				Arguments: []ast.Expression{right},
 			}
 			
-			// 根据运算符选择比较方式
 			op := "=="
 			if e.Operator == "is not" {
 				op = "!="
@@ -303,6 +301,30 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 				Operator: op,
 				Right:    rightId,
 			}
+		}
+
+		// 检查是否是成员运算符，转换为 __contains__ 调用
+		if isMembershipOp(e.Operator) {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			
+			// 构建 __contains__(right, left) 调用
+			containsCall := &ast.CallExpression{
+				Token: "__contains__",
+				Function: &ast.Identifier{Token: "__contains__", Value: "__contains__"},
+				Arguments: []ast.Expression{right, left},
+			}
+			
+			// 如果是 "not in"，添加 not 前缀
+			if e.Operator == "not in" {
+				return &ast.PrefixExpression{
+					Token:    "not",
+					Operator: "not",
+					Right:    containsCall,
+				}
+			}
+			
+			return containsCall
 		}
 
 		// 检查是否是 AND 或 OR，特殊处理
@@ -511,6 +533,10 @@ func isBitNotOp(op string) bool {
 
 func isIdentityOp(op string) bool {
 	return op == "is" || op == "is not"
+}
+
+func isMembershipOp(op string) bool {
+	return op == "in" || op == "not in"
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {

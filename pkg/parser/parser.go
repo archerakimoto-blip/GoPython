@@ -58,6 +58,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.AS:       LOWEST + 1,
 	lexer.DOT:      CALL,
 	lexer.IS:       IS,
+	lexer.IN:       IS,
+	lexer.NOT:      IS,
 }
 
 type Parser struct {
@@ -86,6 +88,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
 	p.registerPrefix(lexer.BITNOT, p.parsePrefixExpression)
+	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.TRUE, p.parseBoolean)
 	p.registerPrefix(lexer.FALSE, p.parseBoolean)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
@@ -127,6 +130,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.BITXOR, p.parseInfixExpression)
 	p.registerInfix(lexer.BITOR, p.parseInfixExpression)
 	p.registerInfix(lexer.IS, p.parseIsExpression)
+	p.registerInfix(lexer.IN, p.parseInExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
@@ -187,6 +191,10 @@ func (p *Parser) curTokenIs(t lexer.TokenType) bool {
 
 func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 	return p.peekToken.Type == t
+}
+
+func (p *Parser) peekTokenIs2(t lexer.TokenType) bool {
+	return p.l.Peek2Token().Type == t
 }
 
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
@@ -528,19 +536,58 @@ func (p *Parser) parseLambdaExpression() ast.Expression {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
+	if p.curTokenIs(lexer.NOT) && p.peekTokenIs(lexer.IN) {
+		p.nextToken() // NOT
+		p.nextToken() // IN
+		leftExp := p.parseExpression(LOWEST)
+		
+		for !p.curTokenIs(lexer.IN) && !p.curTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
+		if p.curTokenIs(lexer.IN) {
+			p.nextToken() // IN
+			rightExp := p.parseExpression(LOWEST)
+			return &ast.InfixExpression{
+				Token:    "not in",
+				Operator: "not in",
+				Left:     leftExp,
+				Right:    rightExp,
+			}
+		}
+	}
+	
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
 		return nil
 	}
+	
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
+		
+		
+		
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
+			if p.peekTokenIs(lexer.NOT) {
+				if p.peekTokenIs2(lexer.IN) {
+					p.nextToken() // NOT
+					p.nextToken() // IN
+					p.nextToken() // 移动到右侧表达式的第一个 token
+					rightExp := p.parseExpression(LOWEST)
+					leftExp = &ast.InfixExpression{
+						Token:    "not in",
+						Operator: "not in",
+						Left:     leftExp,
+						Right:    rightExp,
+					}
+					continue
+				}
+			}
 			return leftExp
 		}
 
@@ -719,7 +766,6 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 	}
 
 	p.nextToken()
-
 	expression.Right = p.parseExpression(PREFIX)
 
 	return expression
@@ -944,7 +990,7 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	// Now, check if it's a list comprehension or a normal list
 	// Let's try to parse an expression and see if next token is FOR
 	p.nextToken()
-	firstExpr := p.parseExpression(EQUALS)
+	firstExpr := p.parseExpression(IS)
 	if firstExpr == nil {
 		return nil
 	}
@@ -1315,12 +1361,12 @@ func (p *Parser) parseNormalDictLiteral() ast.Expression {
 		if p.curTokenIs(lexer.RBRACE) {
 			break
 		}
-		key := p.parseExpression(LOWEST)
+		key := p.parseExpression(IS)
 		if !p.expectPeek(lexer.COLON) {
 			return nil
 		}
 		p.nextToken()
-		value := p.parseExpression(LOWEST)
+		value := p.parseExpression(IS)
 		dict.Pairs[key] = value
 		if !p.peekTokenIs(lexer.RBRACE) && !p.expectPeek(lexer.COMMA) {
 			return nil
@@ -1366,18 +1412,15 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 }
 
 func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
-	// 检查是否是 "is not"
 	isNot := false
 	if p.peekTokenIs(lexer.NOT) {
 		p.nextToken()
 		isNot = true
 	}
 	
-	// 解析右侧表达式
 	p.nextToken()
 	right := p.parseExpression(LOWEST)
 	
-	// 创建 InfixExpression，使用 "is" 或 "is not" 作为运算符
 	operator := "is"
 	if isNot {
 		operator = "is not"
@@ -1387,6 +1430,18 @@ func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
 		Token:    p.curToken.Literal,
 		Left:     left,
 		Operator: operator,
+		Right:    right,
+	}
+}
+
+func (p *Parser) parseInExpression(left ast.Expression) ast.Expression {
+	p.nextToken()
+	right := p.parseExpression(LOWEST)
+	
+	return &ast.InfixExpression{
+		Token:    "in",
+		Operator: "in",
+		Left:     left,
 		Right:    right,
 	}
 }

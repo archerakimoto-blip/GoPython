@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/gc"
@@ -766,6 +767,41 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, idBuiltin)
 	c.symbolTable.DefineBuiltin("id", idIndex)
 
+	containsBuiltin := &objects.Builtin{
+		Name: "__contains__",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__contains__() takes exactly 2 arguments")
+			}
+			switch container := args[0].(type) {
+			case *objects.List:
+				if container.Contains(args[1]) {
+					return objects.True
+				}
+				return objects.False
+			case *objects.String:
+				subStr, ok := args[1].(*objects.String)
+				if !ok {
+					return objects.NewTypeError("__contains__() argument must be a string")
+				}
+				if strings.Contains(container.Value, subStr.Value) {
+					return objects.True
+				}
+				return objects.False
+			case *objects.Dict:
+				if container.Has(args[1]) {
+					return objects.True
+				}
+				return objects.False
+			default:
+				return objects.NewTypeError("__contains__() called on unsupported type")
+			}
+		},
+	}
+	containsIndex := len(c.constants)
+	c.constants = append(c.constants, containsBuiltin)
+	c.symbolTable.DefineBuiltin("__contains__", containsIndex)
+
 	minBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) < 1 {
@@ -1122,6 +1158,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpBang)
 		case "-":
 			c.emit(OpMinus)
+		case "not":
+			c.emit(OpBang)
 		default:
 			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
