@@ -70,10 +70,6 @@ type Parser struct {
 	curToken  lexer.Token
 	peekToken lexer.Token
 
-	// For trial parsing: collect tokens read so we can push back if needed!
-	trialMode      bool
-	trialTokens    []lexer.Token
-
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
 }
@@ -149,41 +145,7 @@ func New(l *lexer.Lexer) *Parser {
 	return p
 }
 
-func (p *Parser) startTrial() {
-	p.trialMode = true
-	p.trialTokens = []lexer.Token{}
-	// Also save the initial curToken and peekToken!
-	p.trialTokens = append(p.trialTokens, p.curToken)
-}
-
-func (p *Parser) rollbackTrial() {
-	// Push all collected tokens back into the lexer's pending tokens!
-	// We need to push them in reverse order because we collected them in the order they were read!
-	for i := len(p.trialTokens) - 1; i >= 0; i-- {
-		p.l.PushToken(p.trialTokens[i])
-	}
-	// Also push back the current peekToken? Wait, let's restore curToken and peekToken to original state!
-	// Original curToken is p.trialTokens[0], and original peekToken is p.trialTokens[1] (if len>1)!
-	if len(p.trialTokens) > 0 {
-		p.curToken = p.trialTokens[0]
-	}
-	if len(p.trialTokens) > 1 {
-		p.peekToken = p.trialTokens[1]
-	} else {
-		// If there are no trial tokens beyond curToken, re-call NextToken to get peekToken!
-		p.peekToken = p.l.NextToken()
-	}
-
-	// Reset trial mode!
-	p.trialMode = false
-	p.trialTokens = nil
-}
-
 func (p *Parser) nextToken() {
-	// If in trial mode, save the current curToken before replacing it!
-	if p.trialMode {
-		p.trialTokens = append(p.trialTokens, p.curToken)
-	}
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
 }
@@ -299,28 +261,21 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.FROM:
 		return p.parseFromImportStatement()
 	default:
-		// Try parseAssignStatement() first! Use trial mode to roll back if needed!
-		savedErrorsLen := len(p.errors)
-		p.startTrial()
-		stmt := p.parseAssignStatement()
-		// Check if it succeeded: stmt not nil and no new errors!
-		if stmt != nil && len(p.errors) == savedErrorsLen {
-			// Success! Turn off trial mode without rolling back!
-			p.trialMode = false
-			p.trialTokens = nil
-			return stmt
-		}
-
-		// Failed! Roll back trial!
-		p.rollbackTrial()
-		p.errors = p.errors[:savedErrorsLen] // truncate errors!
-
-		// Now check for immediate assign (original condition)!
-		if p.peekTokenIs(lexer.ASSIGN) || p.peekTokenIs(lexer.PLUS_EQ) || p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ) {
-			if p.peekTokenIs(lexer.ASSIGN) {
+		// Check for tuple unpacking: identifier followed by comma
+		isTupleUnpack := p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.COMMA)
+		
+		// Check for assignment operators
+		hasAssignOp := p.peekTokenIs(lexer.ASSIGN) || p.peekTokenIs(lexer.PLUS_EQ) || 
+			p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ)
+		
+		if isTupleUnpack || hasAssignOp {
+			if hasAssignOp && p.peekTokenIs(lexer.ASSIGN) {
 				return p.parseAssignStatement()
-			} else {
+			} else if hasAssignOp {
 				return p.parseAugAssignStatement()
+			} else if isTupleUnpack {
+				// Try tuple unpacking assignment
+				return p.parseAssignStatement()
 			}
 		}
 
@@ -457,77 +412,37 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 }
 
 func (p *Parser) parseCommaSeparatedExpressions(endTokens ...lexer.TokenType) []ast.Expression {
-	println("parseCommaSeparatedExpressions called, end tokens:", endTokens)
 	elements := []ast.Expression{}
 
-	for i := 0; i < 10; i++ { // limit iterations to prevent infinite loops!
-		println("iteration", i)
-		println("  curToken:", p.curToken.Type, p.curToken.Literal)
-		println("  peekToken:", p.peekToken.Type, p.peekToken.Literal)
-		// Check if we should stop before parsing: only if curToken is an end token!
-		stopNow := false
+	for {
+		// Check if we should stop: curToken is an end token
+		stop := false
 		for _, t := range endTokens {
 			if p.curTokenIs(t) {
-				println("  stopNow due to token", t)
-				stopNow = true
+				stop = true
 				break
 			}
 		}
-		if stopNow {
+		if stop {
 			break
 		}
 
-		// Parse expression
+		// Parse the expression
 		exp := p.parseExpression(LOWEST)
-		println("  parsed exp:", exp)
-		if exp != nil {
-			elements = append(elements, exp)
-		}
-
-		// Advance past this expression! Because parseExpression doesn't advance the token!
-		println("  calling nextToken()")
-		p.nextToken()
-		println("  after nextToken, curToken:", p.curToken.Type, p.curToken.Literal)
-
-		// Check if we should stop after parsing (check cur and peek)!
-		stopAfter := false
-		for _, t := range endTokens {
-			if p.curTokenIs(t) || p.peekTokenIs(t) {
-				println("  stopAfter due to token", t)
-				stopAfter = true
-				break
-			}
-		}
-
-		// Check if we have a comma next: if yes, continue even if stopAfter would be true!
-		// Because if there's a comma after this element, we need to parse another element!
-		if p.curTokenIs(lexer.COMMA) || p.peekTokenIs(lexer.COMMA) {
-			println("  have comma, will continue")
-			stopAfter = false
-		}
-
-		if stopAfter {
-			println("  stopAfter is true, break")
+		if exp == nil {
 			break
 		}
+		elements = append(elements, exp)
 
-		// If current token is comma or next is comma, eat and advance!
-		println("  checking comma: cur is comma?", p.curTokenIs(lexer.COMMA), "peek is comma?", p.peekTokenIs(lexer.COMMA))
-		if p.curTokenIs(lexer.COMMA) || p.peekTokenIs(lexer.COMMA) {
-			if p.curTokenIs(lexer.COMMA) {
-				println("  cur is comma, nextToken()")
-				p.nextToken() // move past comma
-			} else if p.peekTokenIs(lexer.COMMA) {
-				println("  peek is comma, two nextTokens()")
-				p.nextToken() // eat comma
-				p.nextToken() // move to next token
-			}
+		// Check if next token is comma
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // consume comma
+			p.nextToken() // move to next expression
 		} else {
-			println("  no comma, break")
 			break
 		}
 	}
-	println("parseCommaSeparatedExpressions returning elements count:", len(elements))
+
 	return elements
 }
 
