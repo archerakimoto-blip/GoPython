@@ -505,6 +505,11 @@ func lookupIdent(ident string) TokenType {
 	return IDENT
 }
 
+func (l *Lexer) PushToken(tok Token) {
+	// Push token to front of pending tokens so that NextToken() returns it next!
+	l.pendingTokens = append([]Token{tok}, l.pendingTokens...)
+}
+
 func newToken(tokenType TokenType, ch byte) Token {
 	return Token{Type: tokenType, Literal: string(ch)}
 }

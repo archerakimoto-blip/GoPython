@@ -1,17 +1,20 @@
 package desugar
 
 import (
+	"fmt"
 	"github.com/go-py/go-python/pkg/ast"
 )
 
 // Desugar 对整个程序进行脱糖转换
 func Desugar(program *ast.Program) *ast.Program {
+	tempCounter := 0
 	desugared := &ast.Program{
 		Statements: make([]ast.Statement, 0, len(program.Statements)),
 	}
 
 	for _, stmt := range program.Statements {
-		desugaredStmt := desugarStatement(stmt)
+		desugaredStmt, newCounter := desugarStatement(stmt, tempCounter)
+		tempCounter = newCounter
 		if desugaredStmt != nil {
 			desugared.Statements = append(desugared.Statements, desugaredStmt)
 		}
@@ -21,140 +24,206 @@ func Desugar(program *ast.Program) *ast.Program {
 }
 
 // desugarStatement 脱糖单个语句
-func desugarStatement(stmt ast.Statement) ast.Statement {
+func desugarStatement(stmt ast.Statement, tempCounter int) (ast.Statement, int) {
 	if stmt == nil {
-		return nil
+		return nil, tempCounter
 	}
 	switch s := stmt.(type) {
 	case *ast.ExpressionStatement:
 		if s.Expression == nil {
-			return nil
+			return nil, tempCounter
 		}
 		desugaredExpr := desugarExpression(s.Expression)
 		if desugaredExpr == nil {
-			return nil
+			return nil, tempCounter
 		}
 		return &ast.ExpressionStatement{
 			Token:      s.Token,
 			Expression: desugaredExpr,
-		}
+		}, tempCounter
 	case *ast.LetStatement:
 		return &ast.LetStatement{
 			Token: s.Token,
 			Name:  s.Name,
 			Value: desugarExpression(s.Value),
-		}
+		}, tempCounter
 	case *ast.AssignStatement:
-		// 保持赋值语句不变，编译器会专门处理它
+		// Check for tuple unpacking (left side is a list literal)
+		if listLit, ok := s.Left.(*ast.ListLiteral); ok && len(listLit.Elements) > 1 {
+			// Generate unique temp variable name
+			tempName := fmt.Sprintf("_unpack_temp_%d", tempCounter)
+			tempCounter++
+			tempVar := &ast.Identifier{Token: tempName, Value: tempName}
+			
+			// Create statements: _unpack_temp = value
+			tempAssign := &ast.AssignStatement{
+				Token: "=",
+				Left:  tempVar,
+				Value: desugarExpression(s.Value),
+			}
+			
+			// Create statements for each element: a = _unpack_temp[0], b = _unpack_temp[1], etc.
+			stmts := []ast.Statement{tempAssign}
+			
+			for i, elem := range listLit.Elements {
+				stmts = append(stmts, &ast.AssignStatement{
+					Token: "=",
+					Left:  desugarExpression(elem),
+					Value: &ast.IndexExpression{
+						Token: "[",
+						Left:  tempVar,
+						Index: &ast.IntegerLiteral{Token: fmt.Sprintf("%d", i), Value: int64(i)},
+					},
+				})
+			}
+			
+			// Now desugar the statements inside this block!
+			desugaredStmts := make([]ast.Statement, 0, len(stmts))
+			for _, subStmt := range stmts {
+				desugaredSubStmt, newCounter := desugarStatement(subStmt, tempCounter)
+				tempCounter = newCounter
+				if desugaredSubStmt != nil {
+					desugaredStmts = append(desugaredStmts, desugaredSubStmt)
+				}
+			}
+			
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: desugaredStmts,
+			}, tempCounter
+		}
+		
+		// Regular assignment
 		return &ast.AssignStatement{
 			Token: s.Token,
 			Left:  desugarExpression(s.Left),
 			Value: desugarExpression(s.Value),
-		}
+		}, tempCounter
 	case *ast.AugAssignStatement:
 		// 将增强赋值转换为: temp = left; left = temp op value
 		// 这样可以避免在编译右侧表达式时找不到左侧变量的问题
 		origLeft := s.Left
-		tempVar := &ast.Identifier{Token: "_aug", Value: "_aug_" + origLeft.String()}
+		tempName := fmt.Sprintf("_aug_%d", tempCounter)
+		tempCounter++
+		tempVar := &ast.Identifier{Token: tempName, Value: tempName}
 		infixExpr := &ast.InfixExpression{
 			Token:    s.Token,
 			Left:     tempVar,
 			Operator: s.Operator,
 			Right:    desugarExpression(s.Value),
 		}
-		return &ast.BlockStatement{
-			Token: s.Token,
-			Statements: []ast.Statement{
-				&ast.AssignStatement{
-					Token: "=",
-					Left:  tempVar,
-					Value: desugarExpression(origLeft),
-				},
-				&ast.AssignStatement{
-					Token: s.Token,
-					Left:  desugarExpression(origLeft),
-					Value: infixExpr,
-				},
+		stmts := []ast.Statement{
+			&ast.AssignStatement{
+				Token: "=",
+				Left:  tempVar,
+				Value: desugarExpression(origLeft),
+			},
+			&ast.AssignStatement{
+				Token: s.Token,
+				Left:  desugarExpression(origLeft),
+				Value: infixExpr,
 			},
 		}
+		// Desugar these statements
+		desugaredStmts := make([]ast.Statement, 0, len(stmts))
+		for _, subStmt := range stmts {
+			desugaredSubStmt, newCounter := desugarStatement(subStmt, tempCounter)
+			tempCounter = newCounter
+			if desugaredSubStmt != nil {
+				desugaredStmts = append(desugaredStmts, desugaredSubStmt)
+			}
+		}
+		return &ast.BlockStatement{
+			Token: s.Token,
+			Statements: desugaredStmts,
+		}, tempCounter
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{
 			Token:       s.Token,
 			ReturnValue: desugarExpression(s.ReturnValue),
-		}
+		}, tempCounter
 	case *ast.BlockStatement:
-		return desugarBlockStatement(s)
+		desugaredBlock, newCounter := desugarBlockStatement(s, tempCounter)
+		return desugaredBlock, newCounter
 	case *ast.WhileStatement:
+		desugaredBody, newCounter := desugarBlockStatement(s.Body, tempCounter)
 		return &ast.WhileStatement{
 			Token:     s.Token,
 			Condition: desugarExpression(s.Condition),
-			Body:      desugarBlockStatement(s.Body),
-		}
+			Body:      desugaredBody,
+		}, newCounter
 	case *ast.ForStatement:
-		return desugarForToWhile(s)
+		desugaredFor, newCounter := desugarForToWhile(s, tempCounter)
+		return desugaredFor, newCounter
 	case *ast.BreakStatement:
-		return nil
+		return nil, tempCounter
 	case *ast.ContinueStatement:
-		return nil
+		return nil, tempCounter
 	case *ast.TryStatement:
 		// 对 try 语句进行脱糖处理：脱糖 body、excepts 和 finally
+		desugaredBody, newCounter := desugarBlockStatement(s.Body, tempCounter)
+		tempCounter = newCounter
 		desugaredTry := &ast.TryStatement{
 			Token: s.Token,
-			Body:  desugarBlockStatement(s.Body),
+			Body:  desugaredBody,
 		}
 		desugaredTry.Excepts = make([]*ast.ExceptClause, 0, len(s.Excepts))
 		for _, ex := range s.Excepts {
+			desugaredExceptBody, newCounter2 := desugarBlockStatement(ex.Body, tempCounter)
+			tempCounter = newCounter2
 			desugaredExcept := &ast.ExceptClause{
 				Token: ex.Token,
 				Type:  desugarExpression(ex.Type),
 				Name:  ex.Name,
-				Body:  desugarBlockStatement(ex.Body),
+				Body:  desugaredExceptBody,
 			}
 			desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
 		}
 		if s.Finally != nil {
-			desugaredTry.Finally = desugarBlockStatement(s.Finally)
+			desugaredFinally, newCounter3 := desugarBlockStatement(s.Finally, tempCounter)
+			tempCounter = newCounter3
+			desugaredTry.Finally = desugaredFinally
 		}
-		return desugaredTry
+		return desugaredTry, tempCounter
 	case *ast.RaiseStatement:
 		// 对 raise 语句进行脱糖处理：脱糖表达式
 		return &ast.RaiseStatement{
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
-		}
+		}, tempCounter
 	case *ast.WithStatement:
 		// 对 with 语句进行脱糖处理：脱糖表达式和 body
-		desugaredWith := &ast.WithStatement{
+		desugaredBody, newCounter := desugarBlockStatement(s.Body, tempCounter)
+		return &ast.WithStatement{
 			Token: s.Token,
 			Expr:  desugarExpression(s.Expr),
 			Name:  s.Name,
-			Body:  desugarBlockStatement(s.Body),
-		}
-		return desugaredWith
+			Body:  desugaredBody,
+		}, newCounter
 	case *ast.YieldStatement:
 		// 对 yield 语句进行脱糖处理：脱糖表达式
 		return &ast.YieldStatement{
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
-		}
+		}, tempCounter
 	case *ast.ClassStatement:
-		desugaredClass := &ast.ClassStatement{
+		desugaredBody, newCounter := desugarBlockStatement(s.Body, tempCounter)
+		return &ast.ClassStatement{
 			Token:       s.Token,
 			Name:        s.Name,
 			SuperClass:  s.SuperClass,
-			Body:        desugarBlockStatement(s.Body),
+			Body:        desugaredBody,
 			Methods:     s.Methods,
-		}
-		return desugaredClass
+		}, newCounter
 	default:
-		return stmt
+		return stmt, tempCounter
 	}
 }
 
 // desugarBlockStatement 脱糖块语句
-func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
+func desugarBlockStatement(block *ast.BlockStatement, tempCounter int) (*ast.BlockStatement, int) {
 	if block == nil {
-		return nil
+		return nil, tempCounter
 	}
 	desugared := &ast.BlockStatement{
 		Token:      block.Token,
@@ -162,13 +231,14 @@ func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
 	}
 
 	for _, stmt := range block.Statements {
-		desugaredStmt := desugarStatement(stmt)
+		desugaredStmt, newCounter := desugarStatement(stmt, tempCounter)
+		tempCounter = newCounter
 		if desugaredStmt != nil {
 			desugared.Statements = append(desugared.Statements, desugaredStmt)
 		}
 	}
 
-	return desugared
+	return desugared, tempCounter
 }
 
 // desugarExpression 脱糖单个表达式
@@ -394,13 +464,15 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Right:    desugarExpression(e.Right),
 		}
 	case *ast.IfExpression:
+		desugaredConsequence, _ := desugarBlockStatement(e.Consequence, 0)
 		desugared := &ast.IfExpression{
 			Token:       e.Token,
 			Condition:   desugarExpression(e.Condition),
-			Consequence: desugarBlockStatement(e.Consequence),
+			Consequence: desugaredConsequence,
 		}
 		if e.Alternative != nil {
-			desugared.Alternative = desugarBlockStatement(e.Alternative)
+			desugaredAlternative, _ := desugarBlockStatement(e.Alternative, 0)
+			desugared.Alternative = desugaredAlternative
 		}
 		return desugared
 	case *ast.TernaryExpression:
@@ -436,11 +508,12 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
+		desugaredBody, _ := desugarBlockStatement(e.Body, 0)
 		return &ast.FunctionLiteral{
 			Token:      e.Token,
 			Name:       e.Name,
 			Parameters: e.Parameters,
-			Body:       desugarBlockStatement(e.Body),
+			Body:       desugaredBody,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
@@ -550,7 +623,7 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	return lc
 }
 
-func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
+func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statement, int) {
 	// First check if iterable is a call to range
 	if callExpr, ok := forStmt.Iterable.(*ast.CallExpression); ok {
 		if ident, ok := callExpr.Function.(*ast.Identifier); ok && ident.Value == "range" {
@@ -594,7 +667,9 @@ func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
 					},
 				}
 
-				bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
+				desugaredBody, newCounter1 := desugarBlockStatement(forStmt.Body, tempCounter)
+				tempCounter = newCounter1
+				bodyStmts = append(bodyStmts, desugaredBody.Statements...)
 
 				bodyStmts = append(bodyStmts, &ast.AssignStatement{
 					Token: "=",
@@ -628,7 +703,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
 						},
 						whileStmt,
 					},
-				}
+				}, tempCounter
 			}
 		}
 	}
@@ -660,7 +735,9 @@ func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
 		},
 	}
 
-	bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
+	desugaredBody, newCounter2 := desugarBlockStatement(forStmt.Body, tempCounter)
+	tempCounter = newCounter2
+	bodyStmts = append(bodyStmts, desugaredBody.Statements...)
 
 	bodyStmts = append(bodyStmts, &ast.AssignStatement{
 		Token: "=",
@@ -694,5 +771,5 @@ func desugarForToWhile(forStmt *ast.ForStatement) ast.Statement {
 			},
 			whileStmt,
 		},
-	}
+	}, tempCounter
 }
