@@ -276,7 +276,7 @@ func (vm *VM) Run() error {
 		case compiler.OpGetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
-			vm.push(vm.stack[frame.basePointer+localIndex])
+			vm.push(vm.stack[frame.basePointer + localIndex])
 
 		case compiler.OpSetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -1331,7 +1331,9 @@ func (vm *VM) Run() error {
 			genIndex := frame.basePointer - 1
 			if gen, ok := vm.stack[genIndex].(*objects.Generator); ok {
 				// 保存当前状态到生成器对象
-				gen.IP = frame.ip + 1
+				// 注意：直接保存 frame.ip，不是 frame.ip + 1！
+				// 因为 Run 循环下一次会先执行 frame.ip++，所以这样正好
+				gen.IP = frame.ip
 				gen.StackPtr = vm.sp
 				gen.BasePointer = frame.basePointer
 				
@@ -1347,7 +1349,10 @@ func (vm *VM) Run() error {
 				vm.popFrame()
 				
 				// 把产出值压到调用者栈上
-				return vm.push(yieldValue)
+				if err := vm.push(yieldValue); err != nil {
+					return err
+				}
+				return nil
 			}
 			
 			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
@@ -1357,7 +1362,7 @@ func (vm *VM) Run() error {
 				Instructions: frame.fn.Instructions,
 				Constants:    vm.constants,
 				Locals:     make([]objects.Object, numParams),
-				IP:         frame.ip + 1,
+				IP:         frame.ip, // 同样保存 frame.ip，而不是 +1
 				Stack:      make([]objects.Object, vm.sp),
 				StackPtr:  vm.sp,
 				BasePointer: frame.basePointer,
@@ -1444,17 +1449,27 @@ func (vm *VM) executeCall(numArgs int) error {
 				vm.sp = vm.sp - numArgs - 1
 				return vm.push(objects.NewError("StopIteration: generator is exhausted"))
 			}
-		// 保存生成器对象引用，用于后续在栈上找到它
+		// 保存生成器对象引用
 		genObj := vm.stack[calleeIndex]
 		// 恢复生成器状态
 		frame := NewFrameFromGenerator(gen)
 		vm.pushFrame(frame)
-		// 恢复 VM 的栈到生成器保存的状态（参数已经在 gen.Stack 中）
+		// 恢复栈
 		copy(vm.stack[:gen.StackPtr], gen.Stack[:gen.StackPtr])
-		vm.sp = gen.StackPtr
-		// 把生成器对象放在 frame.basePointer - 1 的位置
+		// 如果是第一次调用，修复栈布局
+		if gen.IP == -1 {
+			// 把参数从 gen.Locals 复制到正确的位置
+			for i, val := range gen.Locals {
+				vm.stack[frame.basePointer + i] = val
+			}
+			// 第一次调用时，栈指针应该设置为 basePointer + numLocals
+			vm.sp = frame.basePointer + len(gen.Locals)
+		} else {
+			// 不是第一次调用，直接使用保存的栈指针
+			vm.sp = gen.StackPtr
+		}
+		// 把生成器对象放在正确的位置
 		vm.stack[frame.basePointer - 1] = genObj
-		vm.sp = frame.basePointer
 		// 让 Run() 继续执行
 		return nil
 	}
@@ -1530,10 +1545,9 @@ func (vm *VM) executeCall(numArgs int) error {
 	}
 
 	frame := NewFrame(callee, vm.sp-numArgs)
-	vm.pushFrame(frame)
-	vm.sp = frame.basePointer + callee.NumLocals
-
-	return nil
+		vm.pushFrame(frame)
+		vm.sp = frame.basePointer + callee.NumLocals
+		return nil
 }
 
 func isTruthy(obj objects.Object) bool {
