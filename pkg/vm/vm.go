@@ -1853,12 +1853,9 @@ func (vm *VM) executeSliceExpression(left, start, end objects.Object) error {
 	}
 }
 
-func (vm *VM) executeListSlice(left, start, end objects.Object) error {
-	list := left.(*objects.List)
-	length := len(list.Elements)
-
+func (vm *VM) calculateSliceIndices(length int, startObj, endObj objects.Object) (int64, int64) {
 	var startIdx int64
-	switch s := start.(type) {
+	switch s := startObj.(type) {
 	case *objects.Integer:
 		startIdx = s.Value.Int64()
 		if startIdx < 0 {
@@ -1875,7 +1872,7 @@ func (vm *VM) executeListSlice(left, start, end objects.Object) error {
 	}
 
 	var endIdx int64
-	switch e := end.(type) {
+	switch e := endObj.(type) {
 	case *objects.Integer:
 		eInt64 := e.Value.Int64()
 		if eInt64 == -1 { // 我们用 -1 表示未指定
@@ -1896,6 +1893,13 @@ func (vm *VM) executeListSlice(left, start, end objects.Object) error {
 		endIdx = int64(length)
 	}
 
+	return startIdx, endIdx
+}
+
+func (vm *VM) executeListSlice(left, start, end objects.Object) error {
+	list := left.(*objects.List)
+	startIdx, endIdx := vm.calculateSliceIndices(len(list.Elements), start, end)
+
 	if startIdx > endIdx {
 		return vm.push(&objects.List{Elements: []objects.Object{}})
 	}
@@ -1910,46 +1914,7 @@ func (vm *VM) executeListSlice(left, start, end objects.Object) error {
 
 func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
 	str := left.(*objects.String)
-	length := len(str.Value)
-
-	var startIdx int64
-	switch s := start.(type) {
-	case *objects.Integer:
-		startIdx = s.Value.Int64()
-		if startIdx < 0 {
-			startIdx = int64(length) + startIdx
-		}
-		if startIdx < 0 {
-			startIdx = 0
-		}
-		if startIdx > int64(length) {
-			startIdx = int64(length)
-		}
-	default:
-		startIdx = 0
-	}
-
-	var endIdx int64
-	switch e := end.(type) {
-	case *objects.Integer:
-		eInt64 := e.Value.Int64()
-		if eInt64 == -1 {
-			endIdx = int64(length)
-		} else {
-			endIdx = eInt64
-			if endIdx < 0 {
-				endIdx = int64(length) + endIdx
-			}
-			if endIdx < 0 {
-				endIdx = 0
-			}
-			if endIdx > int64(length) {
-				endIdx = int64(length)
-			}
-		}
-	default:
-		endIdx = int64(length)
-	}
+	startIdx, endIdx := vm.calculateSliceIndices(len(str.Value), start, end)
 
 	if startIdx > endIdx {
 		return vm.push(&objects.String{Value: ""})
