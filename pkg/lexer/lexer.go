@@ -342,25 +342,28 @@ func (l *Lexer) NextToken() Token {
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()
 			tok.Type = lookupIdent(tok.Literal)
-			if tok.Type == NOT {
-				pos := l.position
-				readPos := l.readPosition
-				ch := l.ch
+			
+			if tok.Type == NOT && len(l.pendingTokens) == 0 {
+				// Try to see if next is "in"
+				startPos := l.position
+				startReadPos := l.readPosition
+				startCh := l.ch
 				
+				// Read next token
 				l.skipWhitespace()
-				if l.ch == 'i' {
-					l.readChar()
-					if l.ch == 'n' {
-						l.readChar()
-						if !isIdentifierChar(l.ch) && l.ch != ' ' && l.ch != '\t' && l.ch != '\n' && l.ch != '\r' && l.ch != ')' && l.ch != ']' && l.ch != '}' && l.ch != ',' && l.ch != ';' && l.ch != ':' && l.ch != 0 {
-							return Token{Type: NOT_IN, Literal: "not in"}
-						}
+				if isLetter(l.ch) {
+					nextIdent := l.readIdentifier()
+					if nextIdent == "in" && (l.ch == 0 || l.ch == ')' || l.ch == ']' || l.ch == '}' || l.ch == ',' || l.ch == ';' || l.ch == ':' || l.ch == '\n' || l.ch == '\r' || l.ch == ' ' || l.ch == '\t') {
+						return Token{Type: NOT_IN, Literal: "not in"}
 					}
 				}
-				l.position = pos
-				l.readPosition = readPos
-				l.ch = ch
+				
+				// If not, reset to original state
+				l.position = startPos
+				l.readPosition = startReadPos
+				l.ch = startCh
 			}
+			
 			return tok
 		} else if isDigit(l.ch) {
 			tok.Type, tok.Literal = l.readNumber()
@@ -500,38 +503,6 @@ func lookupIdent(ident string) TokenType {
 		return tok
 	}
 	return IDENT
-}
-
-func (l *Lexer) tryMatchNotIn() bool {
-	if len(l.pendingTokens) > 0 {
-		return false
-	}
-	pos := l.position
-	readPos := l.readPosition
-	ch := l.ch
-	
-	l.readChar()
-	if l.ch != 'i' {
-		l.position = pos
-		l.readPosition = readPos
-		l.ch = ch
-		return false
-	}
-	l.readChar()
-	if l.ch != 'n' {
-		l.position = pos
-		l.readPosition = readPos
-		l.ch = ch
-		return false
-	}
-	l.readChar()
-	if !isIdentifierChar(l.ch) && l.ch != ' ' && l.ch != '\t' && l.ch != '\n' && l.ch != '\r' && l.ch != ')' && l.ch != ']' && l.ch != '}' && l.ch != ',' && l.ch != ';' && l.ch != ':' && l.ch != 0 {
-		l.position = pos
-		l.readPosition = readPos
-		l.ch = ch
-		return false
-	}
-	return true
 }
 
 func newToken(tokenType TokenType, ch byte) Token {

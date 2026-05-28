@@ -60,6 +60,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.IS:       IS,
 	lexer.IN:       IS,
 	lexer.NOT:      IS,
+	lexer.NOT_IN:   IS,
 }
 
 type Parser struct {
@@ -131,6 +132,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.BITOR, p.parseInfixExpression)
 	p.registerInfix(lexer.IS, p.parseIsExpression)
 	p.registerInfix(lexer.IN, p.parseInExpression)
+	p.registerInfix(lexer.NOT_IN, p.parseNotInExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
@@ -536,26 +538,6 @@ func (p *Parser) parseLambdaExpression() ast.Expression {
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
-	if p.curTokenIs(lexer.NOT) && p.peekTokenIs(lexer.IN) {
-		p.nextToken() // NOT
-		p.nextToken() // IN
-		leftExp := p.parseExpression(LOWEST)
-		
-		for !p.curTokenIs(lexer.IN) && !p.curTokenIs(lexer.EOF) {
-			p.nextToken()
-		}
-		if p.curTokenIs(lexer.IN) {
-			p.nextToken() // IN
-			rightExp := p.parseExpression(LOWEST)
-			return &ast.InfixExpression{
-				Token:    "not in",
-				Operator: "not in",
-				Left:     leftExp,
-				Right:    rightExp,
-			}
-		}
-	}
-	
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -1441,6 +1423,18 @@ func (p *Parser) parseInExpression(left ast.Expression) ast.Expression {
 	return &ast.InfixExpression{
 		Token:    "in",
 		Operator: "in",
+		Left:     left,
+		Right:    right,
+	}
+}
+
+func (p *Parser) parseNotInExpression(left ast.Expression) ast.Expression {
+	p.nextToken()
+	right := p.parseExpression(LOWEST)
+	
+	return &ast.InfixExpression{
+		Token:    "not in",
+		Operator: "not in",
 		Left:     left,
 		Right:    right,
 	}
