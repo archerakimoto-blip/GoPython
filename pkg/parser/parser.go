@@ -256,6 +256,15 @@ func (p *Parser) parseStatement() ast.Statement {
 			Token:      p.curToken.Literal,
 			Expression: fn,
 		}
+	case lexer.AT:
+		decoratedFn := p.parseDecoratedFunction()
+		if decoratedFn == nil {
+			return nil
+		}
+		return &ast.ExpressionStatement{
+			Token:      decoratedFn.Token,
+			Expression: decoratedFn,
+		}
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -963,9 +972,11 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
-	// 检查是大括号语法还是缩进语法
+	for p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.INDENT) || p.curTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
 	if p.curTokenIs(lexer.LBRACE) {
-		// 大括号语法（向后兼容）
 		p.nextToken()
 
 		for {
@@ -1000,14 +1011,11 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				p.nextToken()
 			}
 		}
-		
+
 		if p.curTokenIs(lexer.RBRACE) {
 			p.nextToken()
 		}
-	} else if p.curTokenIs(lexer.INDENT) {
-		// 缩进语法（标准 Python）
-		p.nextToken()
-
+	} else {
 		for {
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
@@ -1030,16 +1038,11 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				block.Statements = append(block.Statements, stmt)
 			}
 
-			// Check: is current token DEDENT but peek token is not an end marker?
-			// That means this DEDENT is from an inner block! Skip it and continue!
 			if p.curTokenIs(lexer.DEDENT) {
-				// Check if next token is something that's not ending our block
 				if !(p.peekTokenIs(lexer.EOF) || p.peekTokenIs(lexer.EXCEPT) ||
 					p.peekTokenIs(lexer.FINALLY) || p.peekTokenIs(lexer.ELSE) ||
 					p.peekTokenIs(lexer.COLON)) {
-					// Skip this inner DEDENT and keep going!
 					p.nextToken()
-					// Don't break, continue loop!
 					continue
 				}
 			}
@@ -1834,5 +1837,52 @@ func (p *Parser) parseClassStatement() ast.Statement {
 		Body:        body,
 		Methods:     methods,
 	}
+}
+
+func (p *Parser) parseDecoratedFunction() *ast.DecoratedFunction {
+	decoratedFn := &ast.DecoratedFunction{
+		Token:      p.curToken.Literal,
+		Decorators: []ast.Expression{},
+	}
+
+	for p.curTokenIs(lexer.AT) {
+		p.nextToken()
+		for p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.INDENT) || p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		decorator := p.parseExpression(LOWEST)
+		if decorator == nil {
+			p.errors = append(p.errors, "expected decorator expression after @")
+			return nil
+		}
+		if !p.curTokenIs(lexer.FUNCTION) {
+			p.nextToken()
+		}
+		for p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+		decoratedFn.Decorators = append(decoratedFn.Decorators, decorator)
+	}
+
+	for p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.INDENT) {
+		p.nextToken()
+	}
+	if !p.curTokenIs(lexer.FUNCTION) {
+		p.errors = append(p.errors, fmt.Sprintf("expected 'def' after decorator, got %s", p.curToken.Type))
+		return nil
+	}
+
+	fn := p.parseFunctionLiteral()
+	if fn == nil {
+		return nil
+	}
+	fnLit, ok := fn.(*ast.FunctionLiteral)
+	if !ok {
+		p.errors = append(p.errors, "expected function literal after decorator")
+		return nil
+	}
+	decoratedFn.Function = fnLit
+
+	return decoratedFn
 }
 

@@ -32,6 +32,8 @@ var (
 	timeout              = flag.Duration("timeout", 5*time.Minute, "Execution timeout (e.g., 30s, 1m)")
 	maxInstructions      = flag.Int64("max-instructions", 1000000000, "Maximum number of instructions to execute")
 	benchmarkFlag        = flag.Bool("bench", false, "Run benchmark comparison")
+	astFlag              = flag.Bool("ast", false, "Print AST")
+	desugarFlag          = flag.Bool("desugar", false, "Print desugared AST")
 )
 
 func main() {
@@ -121,7 +123,19 @@ func runFile(filename string) {
 		return
 	}
 
+	if *astFlag {
+		fmt.Printf("Original AST (len=%d):\n", len(program.Statements))
+		for i, stmt := range program.Statements {
+			fmt.Printf("Statement %d: %s\n", i, stmt.String())
+		}
+	}
+
 	program = desugar.Desugar(program)
+
+	if *desugarFlag {
+		fmt.Printf("Desugared AST:\n%s\n", program.String())
+		return
+	}
 
 	comp := compiler.New()
 	err = comp.Compile(program)

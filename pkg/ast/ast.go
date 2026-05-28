@@ -783,3 +783,23 @@ func (ws *WithStatement) String() string {
 }
 
 type Map map[string]Expression
+
+type DecoratedFunction struct {
+	Token       string
+	Decorators  []Expression
+	Function    *FunctionLiteral
+}
+
+func (df *DecoratedFunction) statementNode()       {}
+func (df *DecoratedFunction) expressionNode()      {}
+func (df *DecoratedFunction) TokenLiteral() string { return df.Token }
+func (df *DecoratedFunction) String() string {
+	var out bytes.Buffer
+	for _, dec := range df.Decorators {
+		out.WriteString("@")
+		out.WriteString(dec.String())
+		out.WriteString("\n")
+	}
+	out.WriteString(df.Function.String())
+	return out.String()
+}

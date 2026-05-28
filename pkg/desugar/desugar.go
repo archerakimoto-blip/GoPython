@@ -215,6 +215,8 @@ func desugarStatement(stmt ast.Statement, tempCounter int) (ast.Statement, int) 
 			Body:        desugaredBody,
 			Methods:     s.Methods,
 		}, newCounter
+	case *ast.DecoratedFunction:
+		return desugarDecoratedFunction(s, tempCounter)
 	default:
 		return stmt, tempCounter
 	}
@@ -829,6 +831,48 @@ func desugarGeneratorExpression(gen *ast.GeneratorExpression) ast.Expression {
 		Function: funcLit,
 		Arguments: []ast.Expression{iterable},
 	}
+}
+
+func desugarDecoratedFunction(df *ast.DecoratedFunction, tempCounter int) (ast.Statement, int) {
+	fn := df.Function
+
+	desugaredFn, newCounter := desugarStatement(&ast.ExpressionStatement{
+		Token:      fn.Token,
+		Expression: &ast.FunctionLiteral{
+			Token:      fn.Token,
+			Name:       fn.Name,
+			Parameters: fn.Parameters,
+			Body:       fn.Body,
+		},
+	}, tempCounter)
+	tempCounter = newCounter
+
+	if len(df.Decorators) == 0 {
+		return desugaredFn, tempCounter
+	}
+
+	stmts := []ast.Statement{desugaredFn}
+
+	currentFunc := &ast.Identifier{Token: fn.Name, Value: fn.Name}
+	for i := len(df.Decorators) - 1; i >= 0; i-- {
+		decorator := desugarExpression(df.Decorators[i])
+		callExpr := &ast.CallExpression{
+			Token:     "(",
+			Function:  decorator,
+			Arguments: []ast.Expression{currentFunc},
+		}
+		assignStmt := &ast.AssignStatement{
+			Token: "=",
+			Left:  currentFunc,
+			Value: callExpr,
+		}
+		stmts = append(stmts, assignStmt)
+	}
+
+	return &ast.BlockStatement{
+		Token:      df.Token,
+		Statements: stmts,
+	}, tempCounter
 }
 
 var tempGenCounter int = 0

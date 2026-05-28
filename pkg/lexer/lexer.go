@@ -83,6 +83,7 @@ const (
 	FROM     = "FROM"
 	IS       = "IS"
 	IS_NOT   = "IS_NOT"
+	AT       = "@"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -132,6 +133,7 @@ type Lexer struct {
 	justSkippedNewline bool
 	indentStack       []int
 	currentIndent     int
+	previousIndent    int
 	pendingTokens     []Token
 	expectIndent      bool
 }
@@ -152,10 +154,20 @@ func (l *Lexer) NextToken() Token {
 	if len(l.pendingTokens) > 0 {
 		tok := l.pendingTokens[0]
 		l.pendingTokens = l.pendingTokens[1:]
+		l.justSkippedNewline = false
+		l.prevNonWhiteCh = 0
 		return tok
 	}
 
 	l.skipWhitespace()
+
+	if len(l.pendingTokens) > 0 {
+		tok := l.pendingTokens[0]
+		l.pendingTokens = l.pendingTokens[1:]
+		l.justSkippedNewline = false
+		l.prevNonWhiteCh = 0
+		return tok
+	}
 
 	// Skip comments (# to end of line)
 	for l.ch == '#' {
@@ -163,6 +175,13 @@ func (l *Lexer) NextToken() Token {
 			l.readChar()
 		}
 		l.skipWhitespace()
+		if len(l.pendingTokens) > 0 {
+			tok := l.pendingTokens[0]
+			l.pendingTokens = l.pendingTokens[1:]
+			l.justSkippedNewline = false
+			l.prevNonWhiteCh = 0
+			return tok
+		}
 	}
 
 	var tok Token
@@ -175,10 +194,12 @@ func (l *Lexer) NextToken() Token {
 		}
 	}
 
-	if l.justSkippedNewline && l.prevNonWhiteCh != ':' {
+	if l.justSkippedNewline && l.prevNonWhiteCh != ':' && l.prevNonWhiteCh != '@' && l.prevNonWhiteCh != 0 {
 		if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || (l.prevNonWhiteCh >= '0' && l.prevNonWhiteCh <= '9') {
-			l.justSkippedNewline = false
-			return Token{Type: SEMICOLON, Literal: ";"}
+			if l.ch != '@' {
+				l.justSkippedNewline = false
+				return Token{Type: SEMICOLON, Literal: ";"}
+			}
 		}
 	}
 
@@ -310,6 +331,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COLON, l.ch)
 	case '.':
 		tok = newToken(DOT, l.ch)
+	case '@':
+		tok = newToken(AT, l.ch)
 	case ',':
 		tok = newToken(COMMA, l.ch)
 	case '(':
@@ -545,7 +568,7 @@ func (l *Lexer) readTripleQuotedSingleQuoteString() string {
 }
 
 func (l *Lexer) skipWhitespace() {
-	l.justSkippedNewline = false
+	l.previousIndent = l.currentIndent
 	l.currentIndent = 0
 
 	if l.ch != '\n' && l.ch != '\r' {
@@ -574,9 +597,14 @@ func (l *Lexer) skipWhitespace() {
 
 	if l.justSkippedNewline && l.currentIndent < l.indentStack[len(l.indentStack)-1] {
 		for len(l.indentStack) > 1 && l.indentStack[len(l.indentStack)-1] > l.currentIndent {
+			if l.ch == '@' && l.previousIndent == l.indentStack[len(l.indentStack)-1] {
+				break
+			}
 			l.pendingTokens = append(l.pendingTokens, Token{Type: DEDENT, Literal: "DEDENT"})
 			l.indentStack = l.indentStack[:len(l.indentStack)-1]
 		}
+		l.justSkippedNewline = false
+		l.prevNonWhiteCh = 0
 	}
 }
 
