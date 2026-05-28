@@ -80,6 +80,8 @@ const (
 	PASS     = "PASS"
 	IMPORT   = "IMPORT"
 	FROM     = "FROM"
+	IS       = "IS"
+	IS_NOT   = "IS_NOT"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -91,32 +93,33 @@ type Token struct {
 }
 
 var keywords = map[string]TokenType{
-	"def":    FUNCTION,
-	"let":    LET,
-	"true":   TRUE,
-	"false":  FALSE,
-	"if":     IF,
-	"else":   ELSE,
-	"return": RETURN,
-	"while":  WHILE,
-	"for":    FOR,
-	"in":     IN,
-	"and":    AND,
-	"or":     OR,
-	"not":    NOT,
-	"None":   NONE,
-	"class":  CLASS,
-	"lambda": LAMBDA,
-	"try":    TRY,
-	"except": EXCEPT,
+	"def":     FUNCTION,
+	"let":     LET,
+	"true":    TRUE,
+	"false":   FALSE,
+	"if":      IF,
+	"else":    ELSE,
+	"return":  RETURN,
+	"while":   WHILE,
+	"for":     FOR,
+	"in":      IN,
+	"and":     AND,
+	"or":      OR,
+	"not":     NOT,
+	"None":    NONE,
+	"class":   CLASS,
+	"lambda":  LAMBDA,
+	"try":     TRY,
+	"except":  EXCEPT,
 	"finally": FINALLY,
-	"raise": RAISE,
-	"as": AS,
-	"with":   WITH,
-	"yield":  YIELD,
-	"pass":   PASS,
-	"import": IMPORT,
-	"from":   FROM,
+	"raise":   RAISE,
+	"as":      AS,
+	"with":    WITH,
+	"yield":   YIELD,
+	"pass":    PASS,
+	"import":  IMPORT,
+	"from":    FROM,
+	"is":      IS,
 }
 
 type Lexer struct {

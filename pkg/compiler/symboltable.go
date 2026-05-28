@@ -130,6 +130,7 @@ type CompiledFunction struct {
 	Free          []Symbol
 	Name          string
 	Constants     []objects.Object
+	ID            int64
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {
@@ -138,4 +139,8 @@ func (cf *CompiledFunction) Type() objects.ObjectType {
 
 func (cf *CompiledFunction) Inspect() string {
 	return "compiled function"
+}
+
+func (cf *CompiledFunction) GetID() int64 {
+	return cf.ID
 }

@@ -9,8 +9,21 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	objectIDCounter int64
+	idMutex         sync.Mutex
+)
+
+func nextObjectID() int64 {
+	idMutex.Lock()
+	defer idMutex.Unlock()
+	objectIDCounter++
+	return objectIDCounter
+}
 
 type ObjectType string
 
@@ -38,56 +51,72 @@ const (
 type Object interface {
 	Type() ObjectType
 	Inspect() string
+	GetID() int64
 }
 
 type Integer struct {
 	Value big.Int
+	ID    int64
 }
 
 func (i *Integer) Type() ObjectType { return INTEGER_OBJ }
 func (i *Integer) Inspect() string  { return i.Value.String() }
+func (i *Integer) GetID() int64     { return i.ID }
 
 type Float struct {
 	Value float64
+	ID    int64
 }
 
 func (f *Float) Type() ObjectType { return FLOAT_OBJ }
 func (f *Float) Inspect() string  { return fmt.Sprintf("%g", f.Value) }
+func (f *Float) GetID() int64     { return f.ID }
 
 type Boolean struct {
 	Value bool
+	ID    int64
 }
 
 func (b *Boolean) Type() ObjectType { return BOOLEAN_OBJ }
 func (b *Boolean) Inspect() string  { return fmt.Sprintf("%t", b.Value) }
+func (b *Boolean) GetID() int64     { return b.ID }
 
 type String struct {
 	Value string
+	ID    int64
 }
 
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
+func (s *String) GetID() int64     { return s.ID }
 
 type None struct{}
 
 func (n *None) Type() ObjectType { return NONE_OBJ }
 func (n *None) Inspect() string  { return "None" }
+func (n *None) GetID() int64     { return 0 }
 
 type List struct {
 	Elements []Object
+	ID       int64
 }
 
 func NewList(elements []Object) *List {
-	return &List{Elements: elements}
+	return &List{Elements: elements, ID: nextObjectID()}
 }
+
+func (l *List) GetID() int64 { return l.ID }
 
 type Tuple struct {
 	Elements []Object
+	ID       int64
 }
 
 func NewTuple(elements []Object) *Tuple {
-	return &Tuple{Elements: elements}
+	return &Tuple{Elements: elements, ID: nextObjectID()}
 }
+
+func (t *Tuple) GetID() int64 { return t.ID }
 
 func (t *Tuple) Type() ObjectType { return TUPLE_OBJ }
 func (t *Tuple) Inspect() string {
@@ -194,16 +223,19 @@ func (l *List) Clear() {
 type Set struct {
 	Elements map[string]Object
 	Keys     map[string]Object
+	ID       int64
 }
 
 func NewSet() *Set {
 	return &Set{
 		Elements: make(map[string]Object),
 		Keys:     make(map[string]Object),
+		ID:       nextObjectID(),
 	}
 }
 
 func (s *Set) Type() ObjectType { return SET_OBJ }
+func (s *Set) GetID() int64     { return s.ID }
 func (s *Set) Inspect() string {
 	result := "{"
 	first := true
@@ -266,16 +298,19 @@ func (s *Set) ToSlice() []Object {
 type Dict struct {
 	Pairs map[string]Object
 	Keys  map[string]Object
+	ID    int64
 }
 
 func NewDict() *Dict {
 	return &Dict{
 		Pairs: make(map[string]Object),
 		Keys:  make(map[string]Object),
+		ID:    nextObjectID(),
 	}
 }
 
 func (d *Dict) Type() ObjectType { return DICT_OBJ }
+func (d *Dict) GetID() int64     { return d.ID }
 func (d *Dict) Inspect() string {
 	result := "{"
 	first := true
@@ -357,12 +392,14 @@ type Error struct {
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
 func (e *Error) Inspect() string { return e.ErrorType + ": " + e.Message }
+func (e *Error) GetID() int64     { return 0 }
 
 type BuiltinFunction func(args ...Object) Object
 
 type Builtin struct {
 	Name string
 	Fn   BuiltinFunction
+	ID   int64
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }
@@ -372,14 +409,17 @@ func (b *Builtin) Inspect() string  {
 	}
 	return "builtin function" 
 }
+func (b *Builtin) GetID() int64     { return b.ID }
 
 type ContextManager struct {
 	EnterFunc func() Object
 	ExitFunc  func(exc Object) Object
+	ID        int64
 }
 
 func (cm *ContextManager) Type() ObjectType { return CONTEXT_OBJ }
 func (cm *ContextManager) Inspect() string  { return "context manager" }
+func (cm *ContextManager) GetID() int64     { return cm.ID }
 
 type Generator struct {
 	Instructions  []byte
@@ -390,10 +430,12 @@ type Generator struct {
 	StackPtr      int
 	BasePointer   int
 	Done          bool
+	ID            int64
 }
 
 func (g *Generator) Type() ObjectType { return GENERATOR_OBJ }
 func (g *Generator) Inspect() string  { return fmt.Sprintf("generator[%p]", g) }
+func (g *Generator) GetID() int64     { return g.ID }
 
 type Closure struct {
 	Instructions  []byte
@@ -401,28 +443,34 @@ type Closure struct {
 	NumParameters int
 	IsGenerator   bool
 	Free          []Object
+	ID            int64
 }
 
 func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
 func (c *Closure) Inspect() string  { return "closure" }
+func (c *Closure) GetID() int64     { return c.ID }
 
 type Class struct {
 	Name       string
 	Methods    map[string]Object
 	Fields     map[string]Object
 	SuperClass *Class
+	ID         int64
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }
 func (c *Class) Inspect() string  { return fmt.Sprintf("<class %s>", c.Name) }
+func (c *Class) GetID() int64     { return c.ID }
 
 type Instance struct {
 	Class  *Class
 	Fields map[string]Object
+	ID     int64
 }
 
 func (i *Instance) Type() ObjectType { return INSTANCE_OBJ }
 func (i *Instance) Inspect() string  { return fmt.Sprintf("<%s instance>", i.Class.Name) }
+func (i *Instance) GetID() int64     { return i.ID }
 
 func (i *Instance) GetAttr(name string) (Object, bool) {
 	if val, ok := i.Fields[name]; ok {
@@ -449,6 +497,7 @@ type Range struct {
 	Start int64
 	Stop  int64
 	Step  int64
+	ID    int64
 }
 
 func (r *Range) Type() ObjectType { return RANGE_OBJ }
@@ -461,14 +510,17 @@ func (r *Range) Inspect() string  {
 	}
 	return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step)
 }
+func (r *Range) GetID() int64     { return r.ID }
 
 type Module struct {
 	Name    string
 	Fields  map[string]Object
+	ID      int64
 }
 
 func (m *Module) Type() ObjectType { return MODULE_OBJ }
 func (m *Module) Inspect() string  { return fmt.Sprintf("<module '%s'>", m.Name) }
+func (m *Module) GetID() int64     { return m.ID }
 
 func (m *Module) GetAttr(name string) (Object, bool) {
 	if val, ok := m.Fields[name]; ok {

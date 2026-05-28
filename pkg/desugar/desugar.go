@@ -274,6 +274,37 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			}
 		}
 
+		// 检查是否是身份运算符，转换为 id() 比较
+		if isIdentityOp(e.Operator) {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			
+			// 构建 id(left) 和 id(right) 调用
+			leftId := &ast.CallExpression{
+				Token: "id",
+				Function: &ast.Identifier{Token: "id", Value: "id"},
+				Arguments: []ast.Expression{left},
+			}
+			rightId := &ast.CallExpression{
+				Token: "id",
+				Function: &ast.Identifier{Token: "id", Value: "id"},
+				Arguments: []ast.Expression{right},
+			}
+			
+			// 根据运算符选择比较方式
+			op := "=="
+			if e.Operator == "is not" {
+				op = "!="
+			}
+			
+			return &ast.InfixExpression{
+				Token:    op,
+				Left:     leftId,
+				Operator: op,
+				Right:    rightId,
+			}
+		}
+
 		// 检查是否是 AND 或 OR，特殊处理
 		if e.Operator == "and" {
 			// a AND b -> if a then b else a
@@ -476,6 +507,10 @@ func isBitOp(op string) bool {
 
 func isBitNotOp(op string) bool {
 	return op == "~"
+}
+
+func isIdentityOp(op string) bool {
+	return op == "is" || op == "is not"
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {

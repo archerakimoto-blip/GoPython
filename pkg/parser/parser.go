@@ -30,6 +30,7 @@ const (
 	PREFIX
 	CALL
 	INDEX
+	IS        // is, is not
 )
 
 var precedences = map[lexer.TokenType]int{
@@ -55,7 +56,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.IF:       TERNARY,
 	lexer.COLON:    0,
 	lexer.AS:       LOWEST + 1,
-	lexer.DOT:     CALL,
+	lexer.DOT:      CALL,
+	lexer.IS:       IS,
 }
 
 type Parser struct {
@@ -124,6 +126,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.BITAND, p.parseInfixExpression)
 	p.registerInfix(lexer.BITXOR, p.parseInfixExpression)
 	p.registerInfix(lexer.BITOR, p.parseInfixExpression)
+	p.registerInfix(lexer.IS, p.parseIsExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
@@ -1360,6 +1363,32 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	}
 
 	return list
+}
+
+func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
+	// 检查是否是 "is not"
+	isNot := false
+	if p.peekTokenIs(lexer.NOT) {
+		p.nextToken()
+		isNot = true
+	}
+	
+	// 解析右侧表达式
+	p.nextToken()
+	right := p.parseExpression(LOWEST)
+	
+	// 创建 InfixExpression，使用 "is" 或 "is not" 作为运算符
+	operator := "is"
+	if isNot {
+		operator = "is not"
+	}
+	
+	return &ast.InfixExpression{
+		Token:    p.curToken.Literal,
+		Left:     left,
+		Operator: operator,
+		Right:    right,
+	}
 }
 
 func (p *Parser) parseTernaryExpression(consequence ast.Expression) ast.Expression {

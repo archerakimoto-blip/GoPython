@@ -753,6 +753,19 @@ func (c *Compiler) registerBuiltins() {
 		c.symbolTable.DefineBuiltin(bb.name, idx)
 	}
 
+	idBuiltin := &objects.Builtin{
+		Name: "id",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("id() takes exactly 1 argument")
+			}
+			return &objects.Integer{Value: *big.NewInt(int64(args[0].GetID()))}
+		},
+	}
+	idIndex := len(c.constants)
+	c.constants = append(c.constants, idBuiltin)
+	c.symbolTable.DefineBuiltin("id", idIndex)
+
 	minBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) < 1 {
@@ -1247,6 +1260,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.Identifier:
+		if node.Value == "None" {
+			idx := c.addConstant(objects.None_)
+			c.emit(OpConstant, idx)
+			return nil
+		}
+		
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Value)
