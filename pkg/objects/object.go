@@ -1604,6 +1604,114 @@ func CreateTimeModule() *Module {
 	return timeModule
 }
 
+// CreateBuiltinsModule 创建内置函数模块
+func CreateBuiltinsModule() *Module {
+	builtinsModule := &Module{
+		Name:    "__builtins__",
+		Fields: make(map[string]Object),
+	}
+
+	// 位运算函数
+	builtinsModule.Fields["__bitor__"] = &Builtin{
+		Name: "__bitor__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("__bitor__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("__bitor__() arguments must be integers")
+			}
+			result := big.NewInt(0).Or(&a.Value, &b.Value)
+			return &Integer{Value: *result}
+		},
+	}
+
+	builtinsModule.Fields["__bitand__"] = &Builtin{
+		Name: "__bitand__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("__bitand__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("__bitand__() arguments must be integers")
+			}
+			result := big.NewInt(0).And(&a.Value, &b.Value)
+			return &Integer{Value: *result}
+		},
+	}
+
+	builtinsModule.Fields["__bitxor__"] = &Builtin{
+		Name: "__bitxor__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("__bitxor__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("__bitxor__() arguments must be integers")
+			}
+			result := big.NewInt(0).Xor(&a.Value, &b.Value)
+			return &Integer{Value: *result}
+		},
+	}
+
+	builtinsModule.Fields["__bitnot__"] = &Builtin{
+		Name: "__bitnot__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("__bitnot__() takes exactly 1 argument")
+			}
+			a, ok := args[0].(*Integer)
+			if !ok {
+				return NewTypeError("__bitnot__() argument must be an integer")
+			}
+			// ~x = -x - 1
+			result := big.NewInt(0).Neg(&a.Value)
+			result.Sub(result, big.NewInt(1))
+			return &Integer{Value: *result}
+		},
+	}
+
+	builtinsModule.Fields["__lshift__"] = &Builtin{
+		Name: "__lshift__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("__lshift__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("__lshift__() arguments must be integers")
+			}
+			result := big.NewInt(0).Lsh(&a.Value, uint(b.Value.Uint64()))
+			return &Integer{Value: *result}
+		},
+	}
+
+	builtinsModule.Fields["__rshift__"] = &Builtin{
+		Name: "__rshift__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("__rshift__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*Integer)
+			b, ok2 := args[1].(*Integer)
+			if !ok1 || !ok2 {
+				return NewTypeError("__rshift__() arguments must be integers")
+			}
+			result := big.NewInt(0).Rsh(&a.Value, uint(b.Value.Uint64()))
+			return &Integer{Value: *result}
+		},
+	}
+
+	return builtinsModule
+}
+
 // CreateDatetimeModule 创建 datetime 模块
 func CreateDatetimeModule() *Module {
 	datetimeModule := &Module{

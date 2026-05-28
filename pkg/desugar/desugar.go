@@ -179,6 +179,15 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 
 	switch e := expr.(type) {
 	case *ast.PrefixExpression:
+		// 检查是否是位取反，转换为内置函数调用
+		if isBitNotOp(e.Operator) {
+			right := desugarExpression(e.Right)
+			return &ast.CallExpression{
+				Token: "__bitnot__",
+				Function: &ast.Identifier{Token: "__bitnot__", Value: "__bitnot__"},
+				Arguments: []ast.Expression{right},
+			}
+		}
 		return &ast.PrefixExpression{
 			Token:    e.Token,
 			Operator: e.Operator,
@@ -239,6 +248,30 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			}
 			// 递归地脱糖
 			return desugarExpression(andExpr)
+		}
+
+		// 检查是否是位运算，转换为内置函数调用
+		if isBitOp(e.Operator) {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			var builtinName string
+			switch e.Operator {
+			case "|":
+				builtinName = "__bitor__"
+			case "&":
+				builtinName = "__bitand__"
+			case "^":
+				builtinName = "__bitxor__"
+			case "<<":
+				builtinName = "__lshift__"
+			case ">>":
+				builtinName = "__rshift__"
+			}
+			return &ast.CallExpression{
+				Token: builtinName,
+				Function: &ast.Identifier{Token: builtinName, Value: builtinName},
+				Arguments: []ast.Expression{left, right},
+			}
 		}
 
 		// 检查是否是 AND 或 OR，特殊处理
@@ -435,6 +468,14 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 
 func isComparisonOp(op string) bool {
 	return op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
+}
+
+func isBitOp(op string) bool {
+	return op == "|" || op == "&" || op == "^" || op == "<<" || op == ">>"
+}
+
+func isBitNotOp(op string) bool {
+	return op == "~"
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {

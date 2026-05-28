@@ -26,6 +26,13 @@ const (
 	MINUS_EQ = "-="
 	MUL_EQ   = "*="
 	DIV_EQ   = "/="
+	OR_EQ    = "|="
+	AND_EQ   = "&="
+	XOR_EQ   = "^="
+	LT_LT    = "<<"
+	GT_GT    = ">>"
+	LT_LT_EQ = "<<="
+	GT_GT_EQ = ">>="
 
 	EQ     = "=="
 	NOT_EQ = "!="
@@ -41,6 +48,11 @@ const (
 	RBRACE = "}"
 	LBRACKET = "["
 	RBRACKET = "]"
+
+	BITOR    = "|"
+	BITAND   = "&"
+	BITXOR   = "^"
+	BITNOT   = "~"
 
 	FUNCTION = "DEF"
 	LET      = "LET"
@@ -220,16 +232,43 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok = newToken(SLASH, l.ch)
 		}
-	case '!':
+	case '|':
 		if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
-			tok = Token{Type: NOT_EQ, Literal: string(ch) + string(l.ch)}
+			tok = Token{Type: OR_EQ, Literal: string(ch) + string(l.ch)}
 		} else {
-			tok = newToken(BANG, l.ch)
+			tok = newToken(BITOR, l.ch)
 		}
-	case '<':
+	case '&':
 		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: AND_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(BITAND, l.ch)
+		}
+	case '^':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: XOR_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(BITXOR, l.ch)
+		}
+	case '~':
+		tok = newToken(BITNOT, l.ch)
+	case '<':
+		if l.peekChar() == '<' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: LT_LT_EQ, Literal: string(ch) + "<="}
+			} else {
+				tok = Token{Type: LT_LT, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: LT_EQ, Literal: string(ch) + string(l.ch)}
@@ -237,12 +276,29 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(LT, l.ch)
 		}
 	case '>':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: GT_GT_EQ, Literal: string(ch) + ">="}
+			} else {
+				tok = Token{Type: GT_GT, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: GT_EQ, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(GT, l.ch)
+		}
+	case '!':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: NOT_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(BANG, l.ch)
 		}
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)

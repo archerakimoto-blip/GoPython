@@ -21,6 +21,10 @@ const (
 	AND
 	EQUALS
 	LESSGREATER
+	BITSHIFT  // <<, >>
+	BITAND    // &
+	BITXOR    // ^
+	BITOR     // |
 	SUM
 	PRODUCT
 	PREFIX
@@ -35,6 +39,11 @@ var precedences = map[lexer.TokenType]int{
 	lexer.GT:       LESSGREATER,
 	lexer.LT_EQ:    LESSGREATER,
 	lexer.GT_EQ:    LESSGREATER,
+	lexer.LT_LT:    BITSHIFT,
+	lexer.GT_GT:    BITSHIFT,
+	lexer.BITAND:   BITAND,
+	lexer.BITXOR:   BITXOR,
+	lexer.BITOR:    BITOR,
 	lexer.PLUS:     SUM,
 	lexer.MINUS:    SUM,
 	lexer.SLASH:    PRODUCT,
@@ -74,6 +83,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
+	p.registerPrefix(lexer.BITNOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.TRUE, p.parseBoolean)
 	p.registerPrefix(lexer.FALSE, p.parseBoolean)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
@@ -109,6 +119,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
 	p.registerInfix(lexer.LT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.GT_EQ, p.parseInfixExpression)
+	p.registerInfix(lexer.LT_LT, p.parseInfixExpression)
+	p.registerInfix(lexer.GT_GT, p.parseInfixExpression)
+	p.registerInfix(lexer.BITAND, p.parseInfixExpression)
+	p.registerInfix(lexer.BITXOR, p.parseInfixExpression)
+	p.registerInfix(lexer.BITOR, p.parseInfixExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)

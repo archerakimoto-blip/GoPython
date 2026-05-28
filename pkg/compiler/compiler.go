@@ -667,6 +667,92 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, rangeBuiltin)
 	c.symbolTable.DefineBuiltin("range", rangeIndex)
 
+	// 注册位运算内置函数
+	bitBuiltins := []struct {
+		name string
+		fn   objects.BuiltinFunction
+	}{
+		{"__bitor__", func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__bitor__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*objects.Integer)
+			b, ok2 := args[1].(*objects.Integer)
+			if !ok1 || !ok2 {
+				return objects.NewTypeError("__bitor__() arguments must be integers")
+			}
+			result := big.NewInt(0).Or(&a.Value, &b.Value)
+			return &objects.Integer{Value: *result}
+		}},
+		{"__bitand__", func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__bitand__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*objects.Integer)
+			b, ok2 := args[1].(*objects.Integer)
+			if !ok1 || !ok2 {
+				return objects.NewTypeError("__bitand__() arguments must be integers")
+			}
+			result := big.NewInt(0).And(&a.Value, &b.Value)
+			return &objects.Integer{Value: *result}
+		}},
+		{"__bitxor__", func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__bitxor__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*objects.Integer)
+			b, ok2 := args[1].(*objects.Integer)
+			if !ok1 || !ok2 {
+				return objects.NewTypeError("__bitxor__() arguments must be integers")
+			}
+			result := big.NewInt(0).Xor(&a.Value, &b.Value)
+			return &objects.Integer{Value: *result}
+		}},
+		{"__bitnot__", func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("__bitnot__() takes exactly 1 argument")
+			}
+			a, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("__bitnot__() argument must be an integer")
+			}
+			result := big.NewInt(0).Neg(&a.Value)
+			result.Sub(result, big.NewInt(1))
+			return &objects.Integer{Value: *result}
+		}},
+		{"__lshift__", func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__lshift__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*objects.Integer)
+			b, ok2 := args[1].(*objects.Integer)
+			if !ok1 || !ok2 {
+				return objects.NewTypeError("__lshift__() arguments must be integers")
+			}
+			result := big.NewInt(0).Lsh(&a.Value, uint(b.Value.Uint64()))
+			return &objects.Integer{Value: *result}
+		}},
+		{"__rshift__", func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__rshift__() takes exactly 2 arguments")
+			}
+			a, ok1 := args[0].(*objects.Integer)
+			b, ok2 := args[1].(*objects.Integer)
+			if !ok1 || !ok2 {
+				return objects.NewTypeError("__rshift__() arguments must be integers")
+			}
+			result := big.NewInt(0).Rsh(&a.Value, uint(b.Value.Uint64()))
+			return &objects.Integer{Value: *result}
+		}},
+	}
+
+	for _, bb := range bitBuiltins {
+		builtin := &objects.Builtin{Name: bb.name, Fn: bb.fn}
+		idx := len(c.constants)
+		c.constants = append(c.constants, builtin)
+		c.symbolTable.DefineBuiltin(bb.name, idx)
+	}
+
 	minBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) < 1 {
