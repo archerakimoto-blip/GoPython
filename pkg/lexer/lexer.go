@@ -325,15 +325,64 @@ func (l *Lexer) NextToken() Token {
 	case ']':
 		tok = newToken(RBRACKET, l.ch)
 	case '"':
-		tok.Type = STRING
-		tok.Literal = l.readString()
+		// Check if this is a triple-quoted string
+		if l.peekChar() == '"' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '"' {
+			// It's a triple-quoted string!
+			l.readChar() // consume second "
+			l.readChar() // consume third "
+			tok.Type = STRING
+			tok.Literal = l.readTripleQuotedString()
+		} else {
+			// Regular double-quoted string
+			tok.Type = STRING
+			tok.Literal = l.readString()
+		}
+	case '\'':
+		// Check if this is a triple-quoted single quote string
+		if l.peekChar() == '\'' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '\'' {
+			// It's a triple-quoted single quote string!
+			l.readChar() // consume second '
+			l.readChar() // consume third '
+			tok.Type = STRING
+			tok.Literal = l.readTripleQuotedSingleQuoteString()
+		} else {
+			// Regular single-quoted string
+			tok.Type = STRING
+			tok.Literal = l.readSingleQuotedString()
+		}
 	case 'f':
 		if l.peekChar() == '"' {
 			l.readChar()
-			tok.Type = FSTRING
-			tok.Literal = l.readString()
+			// Check if this is a triple-quoted f-string
+			if l.peekChar() == '"' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '"' {
+				l.readChar() // second quote
+				l.readChar() // third quote
+				tok.Type = FSTRING
+				tok.Literal = l.readTripleQuotedString()
+				return tok
+			} else {
+				// Regular double-quoted f-string
+				tok.Type = FSTRING
+				tok.Literal = l.readString()
+				l.readChar()
+				return tok
+			}
+		} else if l.peekChar() == '\'' {
 			l.readChar()
-			return tok
+			// Check if this is a triple-quoted single quote f-string
+			if l.peekChar() == '\'' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '\'' {
+				l.readChar() // second '
+				l.readChar() // third '
+				tok.Type = FSTRING
+				tok.Literal = l.readTripleQuotedSingleQuoteString()
+				return tok
+			} else {
+				// Regular single-quoted f-string
+				tok.Type = FSTRING
+				tok.Literal = l.readSingleQuotedString()
+				l.readChar()
+				return tok
+			}
 		}
 		tok.Literal = l.readIdentifier()
 		tok.Type = lookupIdent(tok.Literal)
@@ -448,6 +497,51 @@ func (l *Lexer) readString() string {
 		}
 	}
 	return l.input[position:l.position]
+}
+
+func (l *Lexer) readTripleQuotedString() string {
+	position := l.position // since we already consumed 3 quotes
+	for {
+		l.readChar()
+		if l.ch == '"' && l.peekChar() == '"' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '"' {
+			// Found closing triple quote
+			l.readChar()
+			l.readChar()
+			break
+		}
+		if l.ch == 0 {
+			break // end of input
+		}
+	}
+	return l.input[position:l.position-2] // subtract 2 because we read 2 extra characters
+}
+
+func (l *Lexer) readSingleQuotedString() string {
+	position := l.position + 1
+	for {
+		l.readChar()
+		if l.ch == '\'' || l.ch == 0 {
+			break
+		}
+	}
+	return l.input[position:l.position]
+}
+
+func (l *Lexer) readTripleQuotedSingleQuoteString() string {
+	position := l.position // since we already consumed 3 quotes
+	for {
+		l.readChar()
+		if l.ch == '\'' && l.peekChar() == '\'' && len(l.input) > l.readPosition+1 && l.input[l.readPosition+1] == '\'' {
+			// Found closing triple single quote
+			l.readChar()
+			l.readChar()
+			break
+		}
+		if l.ch == 0 {
+			break // end of input
+		}
+	}
+	return l.input[position:l.position-2] // subtract 2 because we read 2 extra characters
 }
 
 func (l *Lexer) skipWhitespace() {
