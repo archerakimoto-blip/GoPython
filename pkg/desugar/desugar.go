@@ -521,6 +521,8 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Parameters: e.Parameters,
 			Body:      desugarExpression(e.Body),
 		}
+	case *ast.GeneratorExpression:
+		return desugarGeneratorExpression(e)
 	case *ast.CallExpression:
 		desugaredArgs := make([]ast.Expression, 0, len(e.Arguments))
 		for _, arg := range e.Arguments {
@@ -773,3 +775,52 @@ func desugarForToWhile(forStmt *ast.ForStatement, tempCounter int) (ast.Statemen
 		},
 	}, tempCounter
 }
+
+func desugarGeneratorExpression(gen *ast.GeneratorExpression) ast.Expression {
+	iterable := desugarExpression(gen.Iterable)
+	element := desugarExpression(gen.Element)
+
+	paramName := fmt.Sprintf("_gen_iter_%d", tempGenCounter)
+	tempGenCounter++
+
+	yieldStmt := &ast.YieldStatement{
+		Token:      "yield",
+		Expression: element,
+	}
+
+	forBody := &ast.BlockStatement{
+		Token: "for",
+		Statements: []ast.Statement{
+			yieldStmt,
+		},
+	}
+
+	forStmt := &ast.ForStatement{
+		Token:    "for",
+		Value:    gen.Variable,
+		Iterable: &ast.Identifier{Token: paramName, Value: paramName},
+		Body:     forBody,
+	}
+
+	desugaredForStmt, _ := desugarForToWhile(forStmt, tempGenCounter)
+
+	funcLit := &ast.FunctionLiteral{
+		Token: "def",
+		Name:  "__gen__",
+		Parameters: []*ast.Identifier{
+			{Token: paramName, Value: paramName},
+		},
+		Body: &ast.BlockStatement{
+			Token:      "def",
+			Statements: []ast.Statement{desugaredForStmt},
+		},
+	}
+
+	return &ast.CallExpression{
+		Token:    "call",
+		Function: funcLit,
+		Arguments: []ast.Expression{iterable},
+	}
+}
+
+var tempGenCounter int = 0

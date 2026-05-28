@@ -258,6 +258,11 @@ func (vm *VM) Run() error {
 		frame.ip++
 		ip := frame.ip
 		ins := frame.fn.Instructions
+		
+		if ip >= len(ins)-1 {
+			break
+		}
+		vm.instructionCount++
 		op := compiler.Opcode(ins[ip])
 
 		switch op {
@@ -321,12 +326,16 @@ func (vm *VM) Run() error {
 				return nil
 			}
 			
-			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
-					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
-						gen.Done = true
-					}
+			// 检查是否是从生成器返回
+			calleeIndex := vm.sp - 1
+			if calleeIndex >= 0 {
+				if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
+					gen.Done = true
+					// 生成器返回时，栈顶应该是生成器对象（calleeIndex）
+					// 不需要额外推送任何值，因为生成器已经在栈上了
+					// 只需要设置 vm.sp 为 calleeIndex + 1
+					vm.sp = calleeIndex + 1
+					return nil
 				}
 			}
 			
@@ -1388,6 +1397,10 @@ func (vm *VM) executeCall(numArgs int) error {
 		// 先移除生成器对象，后面在恢复栈后再放回去
 		genObj := vm.stack[calleeIndex]
 		vm.sp = calleeIndex
+		// For first call, set basePointer to calleeIndex + 1 so that genIndex = basePointer - 1 = calleeIndex
+		if gen.IP == -1 {
+			gen.BasePointer = calleeIndex + 1
+		}
 		// 恢复生成器状态
 		frame := NewFrameFromGenerator(gen)
 		vm.pushFrame(frame)

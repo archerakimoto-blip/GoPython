@@ -863,13 +863,73 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 func (p *Parser) parseGroupedExpression() ast.Expression {
 	p.nextToken()
 
-	exp := p.parseExpression(LOWEST)
+	// Try to parse the first expression
+	firstExpr := p.parseExpression(LOWEST)
+	if firstExpr == nil {
+		return nil
+	}
 
+	// Check if this is a generator expression (expression followed by FOR)
+	// e.g., (x for x in iter)
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		gen := &ast.GeneratorExpression{Token: p.curToken.Literal}
+		gen.Element = firstExpr
+
+		// Handle FOR token
+		if !p.curTokenIs(lexer.FOR) {
+			p.nextToken()
+		}
+		// Now curToken should be FOR
+		if !p.curTokenIs(lexer.FOR) {
+			p.errors = append(p.errors, "expected FOR in generator expression")
+			return nil
+		}
+		p.nextToken()
+
+		// Parse variable
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, "expected IDENT after FOR")
+			return nil
+		}
+		gen.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken()
+
+		// Expect IN
+		if !p.curTokenIs(lexer.IN) {
+			p.errors = append(p.errors, "expected IN after variable")
+			return nil
+		}
+		p.nextToken()
+
+		// Parse iterable
+		gen.Iterable = p.parseExpression(LOWEST)
+		if gen.Iterable == nil {
+			return nil
+		}
+
+		// Check for optional filter (if)
+		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+			if !p.curTokenIs(lexer.IF) {
+				p.nextToken()
+			}
+			p.nextToken()
+			gen.Filter = p.parseExpression(LOWEST)
+		}
+
+		// Expect RPAREN
+		if !p.expectPeek(lexer.RPAREN) {
+			return nil
+		}
+
+		return gen
+	}
+
+	// Regular grouped expression - just return the parsed expression
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
 	}
 
-	return exp
+	return firstExpr
 }
 
 func (p *Parser) parseIfExpression() ast.Expression {

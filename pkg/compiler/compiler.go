@@ -1345,6 +1345,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.ListComprehension:
 		return c.compileListComprehension(node)
 
+	case *ast.GeneratorExpression:
+		return c.compileGeneratorExpression(node)
+
 	case *ast.SetComprehension:
 		return c.compileSetComprehension(node)
 
@@ -1983,13 +1986,59 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	return nil
 }
 
+func (c *Compiler) compileGeneratorExpression(node *ast.GeneratorExpression) error {
+	compilationScope := c.instructions
+	c.instructions = []byte{}
+	c.enterScope()
+
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
+
+	loopStart := len(c.instructions)
+
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+
+	c.changeOperand(endPos, len(c.instructions))
+
+	c.exitScope()
+	compilationScope = append(compilationScope, c.instructions...)
+
+	c.enterScope()
+
+	if err := c.Compile(node.Element); err != nil {
+		return err
+	}
+
+	if node.Filter != nil {
+		if err := c.Compile(node.Filter); err != nil {
+			return err
+		}
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
+	}
+
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
+
+	c.exitScope()
+
+	c.instructions = append(c.instructions, compilationScope...)
+
+	return nil
+}
+
 func (c *Compiler) compileSetComprehension(node *ast.SetComprehension) error {
 	if err := c.compileListComprehension(&ast.ListComprehension{
 		Token:    node.Token,
 		Element:  node.Element,
 		Variable: node.Variable,
 		Iterable: node.Iterable,
-		Filter:  node.Filter,
+		Filter:   node.Filter,
 	}); err != nil {
 		return err
 	}
