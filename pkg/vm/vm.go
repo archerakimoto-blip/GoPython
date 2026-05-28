@@ -315,8 +315,7 @@ func (vm *VM) Run() error {
 
 		// 算术运算
 		case compiler.OpAdd:
-			right := vm.pop()
-			left := vm.pop()
+			right, left := vm.pop2()
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
@@ -356,8 +355,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpSub:
-			right := vm.pop()
-			left := vm.pop()
+			right, left := vm.pop2()
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
@@ -390,8 +388,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpMul:
-			right := vm.pop()
-			left := vm.pop()
+			right, left := vm.pop2()
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
@@ -424,8 +421,7 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpDiv:
-			right := vm.pop()
-			left := vm.pop()
+			right, left := vm.pop2()
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
@@ -467,8 +463,7 @@ func (vm *VM) Run() error {
 
 		// 比较运算
 		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
-			right := vm.pop()
-			left := vm.pop()
+			right, left := vm.pop2()
 
 			if leftInt, ok := left.(*objects.Integer); ok {
 				if rightInt, ok := right.(*objects.Integer); ok {
@@ -1659,6 +1654,24 @@ func (vm *VM) push(o objects.Object) error {
 	vm.sp++
 
 	return nil
+}
+
+// 批量 push，只检查一次边界
+func (vm *VM) pushBatch(count int) bool {
+	return vm.sp+count <= StackSize
+}
+
+// 批量 pop，只检查一次边界
+func (vm *VM) popBatch(count int) bool {
+	return vm.sp >= count
+}
+
+// 优化版：pop 两个元素，用于二元操作（注意顺序：right, left
+func (vm *VM) pop2() (right objects.Object, left objects.Object) {
+	vm.sp -= 2
+	right = vm.stack[vm.sp+1]
+	left = vm.stack[vm.sp]
+	return
 }
 
 func (vm *VM) pop() objects.Object {
