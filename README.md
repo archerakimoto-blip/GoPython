@@ -884,14 +884,13 @@ go test ./...
 
 ## 性能优化计划
 
-### 阶段一：立即优化（已启动）
+### 阶段一：立即优化（已完成）
 
-| 优先级 | 优化项 | 预期收益 | 状态 |
-|-------|-------|---------|------|
-| P0 | 激活 Inline Cache（属性访问缓存） | 属性访问加速 2-3x | 已完成 |
-| P0 | 消除重复代码，统一切片操作实现 | 可维护性提升 | 已完成 |
-| P1 | 优化栈操作，减少边界检查 | 中 | 已完成 |
-| P1 | 按执行频率重排序 Switch 分支 | 中 | 已完成 |
+所有阶段一优化已完成并记录在 [CHANGELOG.md](./CHANGELOG.md) 中：
+- Inline Cache（属性访问缓存）✅
+- 切片操作统一实现 ✅
+- 栈操作优化 ✅
+- Switch 分支重排序 ✅
 
 ### 阶段二：中期优化（1-2周）
 
@@ -912,39 +911,17 @@ go test ./...
 
 ### 优化详情
 
-#### 1. Inline Cache 优化
-- 为属性访问（`OpGetAttribute`、`OpSetAttribute`）添加类型反馈缓存
-- 缓存最近访问的类型和结果，避免重复查找
-
-#### 2. 切片操作统一实现
-- 提取通用的 `calculateSliceIndices()` 函数
-- 消除 `executeListSlice` 和 `executeStringSlice` 中的重复代码
-- 提升代码可维护性和一致性
-
-#### 3. 栈操作优化
-- 添加 `pop2()` 函数，一次 pop 两个元素，减少边界检查
-- 添加 `pushBatch()` 和 `popBatch()` 辅助函数用于批量操作
-- 在所有算术和比较操作（OpAdd、OpSub、OpMul、OpDiv、OpEqual 等）中应用优化
-- 减少函数调用开销和边界检查次数
-
-#### 4. Switch 分支重排序优化
-- 按照指令执行频率从高到低重排序 switch 分支
-- 最高频指令：OpGetLocal、OpSetLocal、OpConstant、OpPop、OpJumpNotTruthy、OpJump
-- 高频指令：OpCall、OpReturnValue、OpReturn、算术运算、比较运算、属性访问
-- 低频指令：异常处理、生成器操作、类创建
-- 利用 CPU 分支预测机制，提高分支预测命中率，减少分支误预测开销
-
-#### 5. 大整数性能优化
+#### 1. 大整数性能优化
 - 添加 `sync.Pool` 对象池，复用频繁创建的大整数对象
 - 预缓存常用小整数值（-256 到 256）
 - 检测小整数范围，使用原生 `int64` 快速路径
 
-#### 5. Bytecode Peephole 优化
+#### 2. Bytecode Peephole 优化
 - 消除冗余的 pop/push 对
 - 常量折叠优化
 - 简单指令序列复合化
 
-#### 6. 内存管理优化
+#### 3. 内存管理优化
 - 栈上分配短期对象
 - 对象池复用 Integer、Float、String 等常用类型
 - 内存分配逃逸分析
