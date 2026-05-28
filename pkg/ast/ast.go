@@ -803,3 +803,41 @@ func (df *DecoratedFunction) String() string {
 	out.WriteString(df.Function.String())
 	return out.String()
 }
+
+type AsyncFunction struct {
+	Token   string
+	Name    string
+	Parameters []*Identifier
+	Body    *BlockStatement
+}
+
+func (af *AsyncFunction) expressionNode()      {}
+func (af *AsyncFunction) statementNode()       {}
+func (af *AsyncFunction) TokenLiteral() string { return af.Token }
+func (af *AsyncFunction) String() string {
+	var out bytes.Buffer
+	out.WriteString("async ")
+	out.WriteString("def ")
+	out.WriteString(af.Name)
+	out.WriteString("(")
+	for i, param := range af.Parameters {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(param.String())
+	}
+	out.WriteString(") ")
+	out.WriteString(af.Body.String())
+	return out.String()
+}
+
+type AwaitExpression struct {
+	Token string
+	Expression Expression
+}
+
+func (ae *AwaitExpression) expressionNode()      {}
+func (ae *AwaitExpression) TokenLiteral() string { return ae.Token }
+func (ae *AwaitExpression) String() string {
+	return "await " + ae.Expression.String()
+}

@@ -33,6 +33,9 @@ func desugarStatement(stmt ast.Statement, tempCounter int) (ast.Statement, int) 
 		if s.Expression == nil {
 			return nil, tempCounter
 		}
+		if af, ok := s.Expression.(*ast.AsyncFunction); ok {
+			return desugarAsyncFunction(af, tempCounter)
+		}
 		desugaredExpr := desugarExpression(s.Expression)
 		if desugaredExpr == nil {
 			return nil, tempCounter
@@ -217,6 +220,8 @@ func desugarStatement(stmt ast.Statement, tempCounter int) (ast.Statement, int) 
 		}, newCounter
 	case *ast.DecoratedFunction:
 		return desugarDecoratedFunction(s, tempCounter)
+	case *ast.AsyncFunction:
+		return desugarAsyncFunction(s, tempCounter)
 	default:
 		return stmt, tempCounter
 	}
@@ -591,6 +596,14 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			return &ast.StringLiteral{Value: ""}
 		}
 		return result
+	case *ast.AwaitExpression:
+		expr := desugarExpression(e.Expression)
+		joinIdent := &ast.Identifier{Token: "concurrency.Join", Value: "concurrency.Join"}
+		return &ast.CallExpression{
+			Token:     "(",
+			Function:  joinIdent,
+			Arguments: []ast.Expression{expr},
+		}
 	default:
 		return expr
 	}
@@ -873,6 +886,22 @@ func desugarDecoratedFunction(df *ast.DecoratedFunction, tempCounter int) (ast.S
 		Token:      df.Token,
 		Statements: stmts,
 	}, tempCounter
+}
+
+func desugarAsyncFunction(af *ast.AsyncFunction, tempCounter int) (ast.Statement, int) {
+	desugaredBody, newCounter := desugarBlockStatement(af.Body, tempCounter)
+
+	fn := &ast.FunctionLiteral{
+		Token:      "def",
+		Name:       af.Name,
+		Parameters: af.Parameters,
+		Body:       desugaredBody,
+	}
+
+	return &ast.ExpressionStatement{
+		Token:      fn.Token,
+		Expression: fn,
+	}, newCounter
 }
 
 var tempGenCounter int = 0

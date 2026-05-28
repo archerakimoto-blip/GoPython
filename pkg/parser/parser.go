@@ -99,6 +99,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
+	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
 	// Register an empty prefix function for colon, semicolon, ], RBRACE, DOT, RETURN, INDENT, and DEDENT to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.SEMICOLON, func() ast.Expression { return nil })
@@ -265,6 +266,8 @@ func (p *Parser) parseStatement() ast.Statement {
 			Token:      decoratedFn.Token,
 			Expression: decoratedFn,
 		}
+	case lexer.ASYNC:
+		return p.parseAsyncFunction()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -609,33 +612,66 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 }
 
 func (p *Parser) parseLambdaExpression() ast.Expression {
-	lambda := &ast.LambdaExpression{Token: p.curToken.Literal}
-
+	startToken := p.curToken
 	p.nextToken()
 
-	if !p.curTokenIs(lexer.COLON) {
-		if p.curTokenIs(lexer.IDENT) {
-			param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			lambda.Parameters = append(lambda.Parameters, param)
+	idents, _ := p.parseLambdaParameters()
+	if idents == nil {
+		return nil
+	}
 
-			for p.peekTokenIs(lexer.COMMA) {
-				p.nextToken()
-				p.nextToken()
-				param := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				lambda.Parameters = append(lambda.Parameters, param)
-			}
-		}
+	p.expectPeek(lexer.COLON)
+	p.nextToken()
 
-		if !p.expectPeek(lexer.COLON) {
-			return nil
+	body := p.parseExpression(LOWEST)
+	if body == nil {
+		p.errors = append(p.errors, "Could not parse lambda body")
+		return nil
+	}
+
+	return &ast.LambdaExpression{
+		Token:     startToken.Literal,
+		Parameters: idents,
+		Body:      body,
+	}
+}
+
+func (p *Parser) parseLambdaParameters() ([]*ast.Identifier, error) {
+	idents := []*ast.Identifier{}
+
+	if p.curTokenIs(lexer.COLON) {
+		return idents, nil
+	}
+
+	if p.curTokenIs(lexer.IDENT) {
+		ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		idents = append(idents, ident)
+
+		for p.peekTokenIs(lexer.COMMA) {
+			p.nextToken()
+			p.nextToken()
+			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			idents = append(idents, ident)
 		}
 	}
 
+	return idents, nil
+}
+
+func (p *Parser) parseAwaitExpression() ast.Expression {
+	token := p.curToken
 	p.nextToken()
 
-	lambda.Body = p.parseExpression(LOWEST)
+	expression := p.parseExpression(LOWEST)
+	if expression == nil {
+		p.errors = append(p.errors, "Expected expression after 'await'")
+		return nil
+	}
 
-	return lambda
+	return &ast.AwaitExpression{
+		Token:      token.Literal,
+		Expression: expression,
+	}
 }
 
 func (p *Parser) parseExpression(precedence int) ast.Expression {
@@ -1058,6 +1094,73 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	}
 
 	return block
+}
+
+func (p *Parser) parseAsyncFunction() ast.Statement {
+	token := p.curToken.Literal
+
+	if !p.expectPeek(lexer.FUNCTION) {
+		return nil
+	}
+
+	name := ""
+	if !p.expectPeek(lexer.IDENT) {
+		p.errors = append(p.errors, "expected function name after 'async def'")
+		return nil
+	}
+	name = p.curToken.Literal
+
+	if !p.peekTokenIs(lexer.LPAREN) {
+		p.errors = append(p.errors, "expected '(' after function name")
+		return nil
+	}
+	p.nextToken()
+
+	params := []*ast.Identifier{}
+	for !p.curTokenIs(lexer.RPAREN) {
+		if p.curTokenIs(lexer.IDENT) {
+			params = append(params, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+		}
+		p.nextToken()
+		if !p.curTokenIs(lexer.RPAREN) {
+			if !p.expectPeek(lexer.COMMA) {
+				break
+			}
+			p.nextToken()
+		}
+	}
+
+	if !p.curTokenIs(lexer.RPAREN) {
+		if !p.expectPeek(lexer.RPAREN) {
+			return nil
+		}
+	} else {
+		p.nextToken()
+	}
+
+	if !p.curTokenIs(lexer.COLON) {
+		if !p.expectPeek(lexer.COLON) {
+			return nil
+		}
+	} else {
+		p.nextToken()
+	}
+
+	p.nextToken()
+
+	body := p.parseBlockStatement()
+
+	asyncFn := &ast.AsyncFunction{
+		Token:      token,
+		Name:       name,
+		Parameters: params,
+		Body:       body,
+	}
+
+	return &ast.ExpressionStatement{
+		Token:      token,
+		Expression: asyncFn,
+	}
 }
 
 func (p *Parser) parseFunctionLiteral() ast.Expression {

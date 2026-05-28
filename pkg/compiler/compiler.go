@@ -1033,6 +1033,23 @@ func (c *Compiler) registerBuiltins() {
 	zipIndex := len(c.constants)
 	c.constants = append(c.constants, zipBuiltin)
 	c.symbolTable.DefineBuiltin("zip", zipIndex)
+
+	joinBuiltin := &objects.Builtin{
+		Name: "concurrency.Join",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("concurrency.Join() takes at least 1 argument")
+			}
+			if coroutine, ok := args[0].(*objects.Coroutine); ok {
+				coroutine.Join()
+				return coroutine.Result
+			}
+			return args[0]
+		},
+	}
+	joinIndex := len(c.constants)
+	c.constants = append(c.constants, joinBuiltin)
+	c.symbolTable.DefineBuiltin("concurrency.Join", joinIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {

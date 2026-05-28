@@ -46,6 +46,7 @@ const (
 	INSTANCE_OBJ     ObjectType = "INSTANCE"
 	MODULE_OBJ       ObjectType = "MODULE"
 	RANGE_OBJ        ObjectType = "RANGE"
+	COROUTINE_OBJ    ObjectType = "COROUTINE"
 )
 
 type Object interface {
@@ -449,6 +450,17 @@ type Closure struct {
 func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
 func (c *Closure) Inspect() string  { return "closure" }
 func (c *Closure) GetID() int64     { return c.ID }
+
+type Coroutine struct {
+	ID         int64
+	Done       chan struct{}
+	Result     Object
+}
+
+func (c *Coroutine) Type() ObjectType { return COROUTINE_OBJ }
+func (c *Coroutine) Inspect() string  { return fmt.Sprintf("coroutine[%p]", c) }
+func (c *Coroutine) GetID() int64     { return c.ID }
+func (c *Coroutine) Join()            { <-c.Done }
 
 type Class struct {
 	Name       string
