@@ -26,7 +26,6 @@ var (
 	profileFlag          = flag.Bool("profile", false, "Enable performance profiler")
 	breakpoints          = flag.String("break", "", "Comma-separated list of breakpoints (IPs)")
 	jitFlag              = flag.Bool("jit", false, "Enable JIT compilation")
-	fastFlag             = flag.Bool("fast", false, "Enable optimized fast VM")
 	jitPlatform          = flag.String("jit-platform", "", "Target platform for JIT (x86_64, arm64)")
 	jitAggressive        = flag.Bool("jit-aggressive", false, "Enable aggressive optimizations")
 	jitProfiling         = flag.Bool("jit-profiling", false, "Enable JIT profiling")
@@ -47,8 +46,6 @@ func main() {
 		filename := flag.Arg(0)
 		if *jitFlag {
 			runFileWithJIT(filename)
-		} else if *fastFlag {
-			runFileWithFastVM(filename)
 		} else {
 			runFile(filename)
 		}
@@ -274,45 +271,7 @@ func runFileWithJIT(filename string) {
 	}
 }
 
-func runFileWithFastVM(filename string) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		fmt.Printf("Error reading file: %s\n", err)
-		return
-	}
 
-	l := lexer.New(string(data))
-	p := parser.New(l)
-	program := p.ParseProgram()
-
-	if len(p.Errors()) != 0 {
-		printParserErrors(p.Errors())
-		return
-	}
-
-	program = desugar.Desugar(program)
-
-	comp := compiler.New()
-	err = comp.Compile(program)
-	if err != nil {
-		fmt.Printf("Compilation error: %s\n", err)
-		return
-	}
-
-	code := comp.Bytecode()
-
-	start := time.Now()
-	machine := vm.New(code)
-	err = machine.Run()
-	elapsed := time.Since(start)
-
-	if err != nil {
-		fmt.Printf("Execution error: %s\n", err)
-		return
-	}
-
-	fmt.Printf("[VM executed in %v]\n", elapsed)
-}
 
 func runBenchmarkSuite() {
 	fmt.Println("=== GoPy Benchmark Suite ===")
@@ -325,44 +284,27 @@ func runBenchmarkSuite() {
 		"tests/benchmarks/005_function.py",
 	}
 
-	fmt.Printf("%-30s %15s %15s %15s %10s\n", 
-		"Test", "GoPy (ms)", "FastVM (ms)", "CPython (ms)", "Speedup")
-	fmt.Println(strings.Repeat("-", 90))
-
-	totalSpeedup := 0.0
-	testCount := 0
+	fmt.Printf("%-30s %15s %15s\n", 
+		"Test", "GoPy (ms)", "CPython (ms)")
+	fmt.Println(strings.Repeat("-", 60))
 
 	for _, file := range benchmarkFiles {
 		// 运行 GoPy
-		gopyTime := runSingleBenchmark(file, false)
-		// 运行 FastVM
-		fastTime := runSingleBenchmark(file, true)
+		gopyTime := runSingleBenchmark(file)
 		// 运行 CPython
 		cpythonTime := runCPython(file)
 
-		var speedup float64
-		if gopyTime > 0 && fastTime > 0 {
-			speedup = float64(gopyTime) / float64(fastTime)
-			totalSpeedup += speedup
-			testCount++
-		}
-
-		fmt.Printf("%-30s %15.2f %15.2f %15.2f %10.2fx\n", 
+		fmt.Printf("%-30s %15.2f %15.2f\n", 
 			filepath.Base(file), 
 			float64(gopyTime)/float64(time.Millisecond), 
-			float64(fastTime)/float64(time.Millisecond), 
-			float64(cpythonTime)/float64(time.Millisecond),
-			speedup)
+			float64(cpythonTime)/float64(time.Millisecond))
 	}
 
 	fmt.Println()
-	if testCount > 0 {
-		fmt.Printf("Average Speedup: %.2fx\n", totalSpeedup/float64(testCount))
-	}
 	fmt.Println("=== Benchmark Complete ===")
 }
 
-func runSingleBenchmark(file string, useFast bool) time.Duration {
+func runSingleBenchmark(file string) time.Duration {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		return 0
@@ -387,13 +329,8 @@ func runSingleBenchmark(file string, useFast bool) time.Duration {
 	code := comp.Bytecode()
 
 	start := time.Now()
-	if useFast {
-		machine := vm.New(code)
-		machine.Run()
-	} else {
-		machine := vm.New(code)
-		machine.Run()
-	}
+	machine := vm.New(code)
+	machine.Run()
 	return time.Since(start)
 }
 
