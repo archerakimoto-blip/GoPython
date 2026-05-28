@@ -507,6 +507,16 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 		stmt.Operator = "*"
 	case lexer.DIV_EQ:
 		stmt.Operator = "/"
+	case lexer.OR_EQ:
+		stmt.Operator = "|"
+	case lexer.AND_EQ:
+		stmt.Operator = "&"
+	case lexer.XOR_EQ:
+		stmt.Operator = "^"
+	case lexer.LT_LT_EQ:
+		stmt.Operator = "<<"
+	case lexer.GT_GT_EQ:
+		stmt.Operator = ">>"
 	}
 
 	p.nextToken()
@@ -543,7 +553,9 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 			p.nextToken()
 		}
 		return assignStmt
-	} else if p.peekTokenIs(lexer.PLUS_EQ) || p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ) {
+	} else if p.peekTokenIs(lexer.PLUS_EQ) || p.peekTokenIs(lexer.MINUS_EQ) || p.peekTokenIs(lexer.MUL_EQ) || p.peekTokenIs(lexer.DIV_EQ) ||
+		p.peekTokenIs(lexer.OR_EQ) || p.peekTokenIs(lexer.AND_EQ) || p.peekTokenIs(lexer.XOR_EQ) ||
+		p.peekTokenIs(lexer.LT_LT_EQ) || p.peekTokenIs(lexer.GT_GT_EQ) {
 		// 这是一个增强赋值语句
 		op := ""
 		switch p.peekToken.Type {
@@ -555,6 +567,16 @@ func (p *Parser) parseExpressionStatement() ast.Statement {
 			op = "*"
 		case lexer.DIV_EQ:
 			op = "/"
+		case lexer.OR_EQ:
+			op = "|"
+		case lexer.AND_EQ:
+			op = "&"
+		case lexer.XOR_EQ:
+			op = "^"
+		case lexer.LT_LT_EQ:
+			op = "<<"
+		case lexer.GT_GT_EQ:
+			op = ">>"
 		}
 		p.nextToken() // curToken is now the aug assignment operator
 		p.nextToken() // now curToken is first token of value
