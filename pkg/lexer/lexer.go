@@ -41,6 +41,7 @@ const (
 	COLON     = ":"
 	SEMICOLON = ";"
 	DOT       = "."
+	ARROW     = "->"
 
 	LPAREN = "("
 	RPAREN = ")"
@@ -140,6 +141,7 @@ type Lexer struct {
 	previousIndent    int
 	pendingTokens     []Token
 	expectIndent      bool
+	lastKeyword       string
 }
 
 func New(input string) *Lexer {
@@ -242,6 +244,10 @@ func (l *Lexer) NextToken() Token {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: MINUS_EQ, Literal: string(ch) + string(l.ch)}
+		} else if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: ARROW, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(MINUS, l.ch)
 		}
@@ -413,6 +419,9 @@ func (l *Lexer) NextToken() Token {
 		}
 		tok.Literal = l.readIdentifier()
 		tok.Type = lookupIdent(tok.Literal)
+		if tok.Type != IDENT {
+			l.lastKeyword = tok.Literal
+		}
 		return tok
 	default:
 		if isLetter(l.ch) {

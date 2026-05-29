@@ -52,9 +52,9 @@ func (ch *Channel) Send(obj objects.Object) bool {
 
 	if ch.capacity == 0 {
 		ch.mu.Unlock()
+		reader := ch.getReader()
 		select {
-		case reader := <-ch.getReader():
-			reader <- obj
+		case reader <- obj:
 			return true
 		case <-ch.closedChan:
 			return false
@@ -121,7 +121,7 @@ func (ch *Channel) Receive() (objects.Object, bool) {
 	}
 }
 
-func (ch *Channel) getReader() <-chan objects.Object {
+func (ch *Channel) getReader() chan objects.Object {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 

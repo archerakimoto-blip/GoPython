@@ -1442,7 +1442,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 
 		for _, p := range node.Parameters {
-			c.symbolTable.Define(p.Value)
+			c.symbolTable.Define(p.Name.Value)
 		}
 
 		err := c.Compile(node.Body)
@@ -1889,7 +1889,7 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 	c.enterScope()
 
 	for _, param := range fn.Parameters {
-		c.symbolTable.Define(param.Value)
+		c.symbolTable.Define(param.Name.Value)
 	}
 
 	for _, stmt := range fn.Body.Statements {

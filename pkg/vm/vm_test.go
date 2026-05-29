@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/go-py/go-python/pkg/compiler"
@@ -81,8 +82,8 @@ func TestSimpleArithmetic(t *testing.T) {
 			}
 
 			got := result.(*objects.Integer).Value
-			if got != tt.expected {
-				t.Errorf("Expected %d, got %d", tt.expected, got)
+			if got.Cmp(big.NewInt(tt.expected)) != 0 {
+				t.Errorf("Expected %d, got %s", tt.expected, got.String())
 			}
 		})
 	}
@@ -146,8 +147,8 @@ func TestLambdaFunctions(t *testing.T) {
 			}
 
 			got := result.(*objects.Integer).Value
-			if got != tt.expected {
-				t.Errorf("Expected %d, got %d", tt.expected, got)
+			if got.Cmp(big.NewInt(tt.expected)) != 0 {
+				t.Errorf("Expected %d, got %s", tt.expected, got.String())
 			}
 		})
 	}
@@ -220,6 +221,87 @@ func TestBooleanOperations(t *testing.T) {
 			got := result.(*objects.Boolean).Value
 			if got != tt.expected {
 				t.Errorf("Expected %v, got %v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestTypeAnnotations(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected int64
+	}{
+		{
+			name:     "function with type annotation on parameter",
+			input:    "def add(x: int):\n    return x + 1\nadd2 = add(5)",
+			expected: 6,
+		},
+		{
+			name:     "function with type annotation on multiple parameters",
+			input:    "def add(x: int, y: int):\n    return x + y\nadd2 = add(3, 4)",
+			expected: 7,
+		},
+		{
+			name:     "function with return type annotation",
+			input:    "def double(x: int) -> int:\n    return x * 2\nadd2 = double(5)",
+			expected: 10,
+		},
+		{
+			name:     "function with both parameter and return type annotation",
+			input:    "def add(x: int, y: int) -> int:\n    return x + y\nadd2 = add(3, 4)",
+			expected: 7,
+		},
+		{
+			name:     "function without type annotation still works",
+			input:    "def add(x, y):\n    return x + y\nadd2 = add(3, 4)",
+			expected: 7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.input)
+			p := parser.New(l)
+			program := p.ParseProgram()
+			if len(p.Errors()) != 0 {
+				t.Fatalf("Parser errors: %v", p.Errors())
+			}
+
+			program = desugar.Desugar(program)
+
+			comp := compiler.New()
+			err := comp.Compile(program)
+			if err != nil {
+				t.Fatalf("Compilation error: %v", err)
+			}
+
+			bc := comp.Bytecode()
+
+			machine := New(bc)
+			err = machine.Run()
+			if err != nil {
+				t.Fatalf("Execution error: %v", err)
+			}
+
+			var result objects.Object
+			for _, obj := range machine.globals {
+				if obj != nil {
+					result = obj
+				}
+			}
+
+			if result == nil {
+				t.Fatal("Expected result, got nil")
+			}
+
+			if result.Type() != objects.INTEGER_OBJ {
+				t.Fatalf("Expected integer, got %s", result.Type())
+			}
+
+			got := result.(*objects.Integer).Value
+			if got.Cmp(big.NewInt(tt.expected)) != 0 {
+				t.Errorf("Expected %d, got %s", tt.expected, got.String())
 			}
 		})
 	}

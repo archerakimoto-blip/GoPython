@@ -200,6 +200,10 @@ func (p *Parser) peekTokenIs2(t lexer.TokenType) bool {
 	return p.l.Peek2Token().Type == t
 }
 
+func (p *Parser) peekPeekTokenIs(t lexer.TokenType) bool {
+	return p.l.Peek2Token().Type == t
+}
+
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
 	if p.peekTokenIs(t) {
 		p.nextToken()
@@ -636,26 +640,26 @@ func (p *Parser) parseLambdaExpression() ast.Expression {
 	}
 }
 
-func (p *Parser) parseLambdaParameters() ([]*ast.Identifier, error) {
-	idents := []*ast.Identifier{}
+func (p *Parser) parseLambdaParameters() ([]*ast.Parameter, error) {
+	params := []*ast.Parameter{}
 
 	if p.curTokenIs(lexer.COLON) {
-		return idents, nil
+		return params, nil
 	}
 
 	if p.curTokenIs(lexer.IDENT) {
-		ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		idents = append(idents, ident)
+		param := &ast.Parameter{Name: &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+		params = append(params, param)
 
 		for p.peekTokenIs(lexer.COMMA) {
 			p.nextToken()
 			p.nextToken()
-			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			idents = append(idents, ident)
+			param := &ast.Parameter{Name: &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+			params = append(params, param)
 		}
 	}
 
-	return idents, nil
+	return params, nil
 }
 
 func (p *Parser) parseAwaitExpression() ast.Expression {
@@ -1055,7 +1059,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		for {
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.SEMICOLON) {
 				break
 			}
 
@@ -1065,13 +1070,21 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.SEMICOLON) {
 				break
 			}
 
 			stmt := p.parseStatement()
 			if stmt != nil {
 				block.Statements = append(block.Statements, stmt)
+			}
+
+			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
+				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.SEMICOLON) {
+				break
 			}
 
 			if p.curTokenIs(lexer.DEDENT) {
@@ -1081,12 +1094,6 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 					p.nextToken()
 					continue
 				}
-			}
-
-			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DEDENT) ||
-				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
-				break
 			}
 
 			p.nextToken()
@@ -1116,10 +1123,16 @@ func (p *Parser) parseAsyncFunction() ast.Statement {
 	}
 	p.nextToken()
 
-	params := []*ast.Identifier{}
+	params := []*ast.Parameter{}
 	for !p.curTokenIs(lexer.RPAREN) {
 		if p.curTokenIs(lexer.IDENT) {
-			params = append(params, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+			param := &ast.Parameter{Name: &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken()
+				p.nextToken()
+				param.TypeAnnotation = p.parseExpression(LOWEST)
+			}
+			params = append(params, param)
 		}
 		p.nextToken()
 		if !p.curTokenIs(lexer.RPAREN) {
@@ -1138,6 +1151,13 @@ func (p *Parser) parseAsyncFunction() ast.Statement {
 		p.nextToken()
 	}
 
+	var returnType ast.Expression
+	if p.peekTokenIs(lexer.ARROW) {
+		p.nextToken()
+		p.nextToken()
+		returnType = p.parseExpression(LOWEST)
+	}
+
 	if !p.curTokenIs(lexer.COLON) {
 		if !p.expectPeek(lexer.COLON) {
 			return nil
@@ -1154,6 +1174,7 @@ func (p *Parser) parseAsyncFunction() ast.Statement {
 		Token:      token,
 		Name:       name,
 		Parameters: params,
+		ReturnType: returnType,
 		Body:       body,
 	}
 
@@ -1178,6 +1199,12 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		lit.Parameters = p.parseFunctionParameters()
 	}
 
+	if p.peekTokenIs(lexer.ARROW) {
+		p.nextToken()
+		p.nextToken()
+		lit.ReturnType = p.parseExpression(LOWEST)
+	}
+
 	if !p.expectPeek(lexer.COLON) {
 		return nil
 	}
@@ -1188,31 +1215,42 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	return lit
 }
 
-func (p *Parser) parseFunctionParameters() []*ast.Identifier {
-	identifiers := []*ast.Identifier{}
+func (p *Parser) parseFunctionParameters() []*ast.Parameter {
+	params := []*ast.Parameter{}
 
 	if p.peekTokenIs(lexer.RPAREN) {
 		p.nextToken()
-		return identifiers
+		return params
 	}
 
 	p.nextToken()
 
-	ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-	identifiers = append(identifiers, ident)
+	param := &ast.Parameter{Name: &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+	if p.peekTokenIs(lexer.COLON) {
+		p.nextToken()
+		p.nextToken()
+		param.TypeAnnotation = p.parseExpression(LOWEST)
+	}
+	params = append(params, param)
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		identifiers = append(identifiers, ident)
+
+		param := &ast.Parameter{Name: &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+		if p.peekTokenIs(lexer.COLON) {
+			p.nextToken()
+			p.nextToken()
+			param.TypeAnnotation = p.parseExpression(LOWEST)
+		}
+		params = append(params, param)
 	}
 
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
 	}
 
-	return identifiers
+	return params
 }
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {

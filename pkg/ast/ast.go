@@ -48,6 +48,18 @@ func (i *Identifier) expressionNode()      {}
 func (i *Identifier) TokenLiteral() string { return i.Token }
 func (i *Identifier) String() string       { return i.Value }
 
+type Parameter struct {
+	Name       *Identifier
+	TypeAnnotation Expression
+}
+
+func (p *Parameter) String() string {
+	if p.TypeAnnotation != nil {
+		return p.Name.String() + ": " + p.TypeAnnotation.String()
+	}
+	return p.Name.String()
+}
+
 type IntegerLiteral struct {
 	Token string
 	Value int64
@@ -164,7 +176,8 @@ func (bs *BlockStatement) String() string {
 type FunctionLiteral struct {
 	Token      string
 	Name       string
-	Parameters []*Identifier
+	Parameters []*Parameter
+	ReturnType Expression
 	Body       *BlockStatement
 }
 
@@ -180,8 +193,11 @@ func (fl *FunctionLiteral) String() string {
 	if fl.Name != "" {
 		out.WriteString("<" + fl.Name + ">")
 	}
-	out.WriteString("(" + strings.Join(params, ", ") + ") ")
-	out.WriteString(fl.Body.String())
+	out.WriteString("(" + strings.Join(params, ", ") + ")")
+	if fl.ReturnType != nil {
+		out.WriteString(" -> " + fl.ReturnType.String())
+	}
+	out.WriteString(" " + fl.Body.String())
 	return out.String()
 }
 
@@ -308,7 +324,7 @@ func (te *TernaryExpression) String() string {
 
 type LambdaExpression struct {
 	Token      string
-	Parameters []*Identifier
+	Parameters []*Parameter
 	Body       Expression
 }
 
@@ -807,7 +823,8 @@ func (df *DecoratedFunction) String() string {
 type AsyncFunction struct {
 	Token   string
 	Name    string
-	Parameters []*Identifier
+	Parameters []*Parameter
+	ReturnType Expression
 	Body    *BlockStatement
 }
 
@@ -826,8 +843,11 @@ func (af *AsyncFunction) String() string {
 		}
 		out.WriteString(param.String())
 	}
-	out.WriteString(") ")
-	out.WriteString(af.Body.String())
+	out.WriteString(")")
+	if af.ReturnType != nil {
+		out.WriteString(" -> " + af.ReturnType.String())
+	}
+	out.WriteString(" " + af.Body.String())
 	return out.String()
 }
 

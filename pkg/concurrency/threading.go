@@ -114,7 +114,7 @@ func (t *Thread) ID() uint64 {
 	return t.id
 }
 
-type GIL struct {
+type GILState struct {
 	mu        sync.Mutex
 	owner     uint64
 	count     int32
@@ -122,12 +122,12 @@ type GIL struct {
 	waitChan  chan struct{}
 }
 
-var GILInstance *GIL
+var GILInstance *GILState
 var GILOnce sync.Once
 
 func initGIL() {
 	GILOnce.Do(func() {
-		GILInstance = &GIL{
+		GILInstance = &GILState{
 			owner:    0,
 			count:    0,
 			waiters:  0,
@@ -150,7 +150,7 @@ func (g *GILWrapper) Release() {
 	GILInstance.release()
 }
 
-func (g *GIL) acquire() {
+func (g *GILState) acquire() {
 	g.mu.Lock()
 
 	if g.count == 0 {
@@ -178,7 +178,7 @@ func (g *GIL) acquire() {
 	g.mu.Unlock()
 }
 
-func (g *GIL) release() {
+func (g *GILState) release() {
 	g.mu.Lock()
 
 	if g.owner != getThreadID() {

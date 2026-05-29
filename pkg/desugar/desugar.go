@@ -830,8 +830,8 @@ func desugarGeneratorExpression(gen *ast.GeneratorExpression) ast.Expression {
 	funcLit := &ast.FunctionLiteral{
 		Token: "def",
 		Name:  "__gen__",
-		Parameters: []*ast.Identifier{
-			{Token: paramName, Value: paramName},
+		Parameters: []*ast.Parameter{
+			{Name: &ast.Identifier{Token: paramName, Value: paramName}},
 		},
 		Body: &ast.BlockStatement{
 			Token:      "def",

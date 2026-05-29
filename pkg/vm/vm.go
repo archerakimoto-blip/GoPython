@@ -1634,7 +1634,7 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 					return vm.push(nativeBoolToBooleanObject(res))
 				}
 			}
-			return fmt.Errorf("TypeError: unsupported operand type(s) for %s: '%s' and '%s'", op, left.Type(), right.Type())
+			return fmt.Errorf("TypeError: unsupported operand type(s) for %v: '%s' and '%s'", op, left.Type(), right.Type())
 		default:
 			return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
 		}
@@ -1722,7 +1722,7 @@ func toString(obj objects.Object) string {
 	case *objects.String:
 		return o.Value
 	case *objects.Integer:
-		return fmt.Sprintf("%d", o.Value)
+		return o.Value.String()
 	case *objects.Float:
 		return fmt.Sprintf("%g", o.Value)
 	case *objects.Boolean:
