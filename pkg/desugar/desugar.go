@@ -132,16 +132,78 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Expression: desugaredExpr,
 		}
 	case *ast.LetStatement:
+		if len(s.Names) > 1 {
+			// 多重赋值：let a, b = x, y
+			// 脱糖为 let _temp = x; let a = _temp[0]; let b = _temp[1];
+			tempIdent := &ast.Identifier{Token: "_temp", Value: "_temp"}
+			stmts := []ast.Statement{
+				&ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{tempIdent},
+					Value: desugarExpression(s.Value),
+				},
+			}
+
+			for i, name := range s.Names {
+				indexExpr := &ast.IndexExpression{
+					Token: "[",
+					Left:  tempIdent,
+					Index: &ast.IntegerLiteral{Token: string(rune('0' + i)), Value: int64(i)},
+				}
+				stmts = append(stmts, &ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{name},
+					Value: indexExpr,
+				})
+			}
+
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
 		return &ast.LetStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: s.Names,
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AssignStatement:
-		// 保持赋值语句不变，编译器会专门处理它
+		if len(s.Names) > 1 {
+			// 多重赋值：a, b = x, y
+			// 脱糖为 let _temp = x; a = _temp[0]; b = _temp[1];
+			tempIdent := &ast.Identifier{Token: "_temp", Value: "_temp"}
+			stmts := []ast.Statement{
+				&ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{tempIdent},
+					Value: desugarExpression(s.Value),
+				},
+			}
+
+			for i, name := range s.Names {
+				indexExpr := &ast.IndexExpression{
+					Token: "[",
+					Left:  tempIdent,
+					Index: &ast.IntegerLiteral{Token: string(rune('0' + i)), Value: int64(i)},
+				}
+				stmts = append(stmts, &ast.AssignStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{name},
+					Value: indexExpr,
+				})
+			}
+
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
+		// 单变量赋值，保持不变
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: s.Names,
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AugAssignStatement:
