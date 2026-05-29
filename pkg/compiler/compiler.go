@@ -1317,13 +1317,44 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
+		// 分离位置参数和关键字参数
+		posArgs := []ast.Expression{}
+		kwargsPairs := []ast.Expression{} // key1, value1, key2, value2...
+
 		for _, a := range node.Arguments {
-			if err := c.Compile(a); err != nil {
+			if keywordArg, ok := a.(*ast.KeywordArgument); ok {
+				// 处理关键字参数: 编译字符串作为key，然后是value
+				keyStr := &ast.StringLiteral{Token: keywordArg.Token, Value: keywordArg.Name.Value}
+				kwargsPairs = append(kwargsPairs, keyStr, keywordArg.Value)
+			} else {
+				posArgs = append(posArgs, a)
+			}
+		}
+
+		// 编译位置参数
+		for _, arg := range posArgs {
+			if err := c.Compile(arg); err != nil {
 				return err
 			}
 		}
 
-		c.emit1(OpCall, len(node.Arguments))
+		// 如果有关键字参数，编译成字典
+		numKwargs := len(kwargsPairs)
+		if numKwargs > 0 {
+			for _, pair := range kwargsPairs {
+				if err := c.Compile(pair); err != nil {
+					return err
+				}
+			}
+			c.emit(OpHash, numKwargs)
+		}
+
+		// 总参数数量 = 位置参数 + (如果有kwargs则+1)
+		totalArgs := len(posArgs)
+		if numKwargs > 0 {
+			totalArgs += 1
+		}
+		c.emit1(OpCall, totalArgs)
 
 	case *ast.PassStatement:
 		// pass is a no-op, do nothing

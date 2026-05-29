@@ -393,7 +393,19 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 	case *ast.ListComprehension:
 		return desugarListComprehension(e)
 	case *ast.DictComprehension:
-		return e
+		// 对字典推导式中的子表达式进行脱糖
+		dc := &ast.DictComprehension{
+			Token:    e.Token,
+			Key:      desugarExpression(e.Key),
+			Value:    desugarExpression(e.Value),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			dc.Filter = desugarExpression(e.Filter)
+		}
+		return dc
 	case *ast.FStringLiteral:
 		// Keep f-string as-is, the compiler will handle it
 		desugaredParts := make([]ast.Expression, 0, len(e.Parts))

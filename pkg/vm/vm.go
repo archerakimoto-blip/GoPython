@@ -44,6 +44,7 @@ type VM struct {
 	stack   []objects.Object
 	sp      int
 	globals []objects.Object
+	lastPopped objects.Object // 最后一次从栈弹出的元素
 
 	frames      []*Frame
 	framesIndex int
@@ -1012,31 +1013,63 @@ func (vm *VM) executeCall(numArgs int) error {
 	}
 
 	var basePointer int
+	var kwargsDict *objects.Dict = nil
+	posArgsCount := numArgs
+
+	// 检查最后一个参数是否是关键字参数字典（来自我们编译器的特殊处理）
+	if numArgs > 0 {
+		lastArgIdx := vm.sp - 1
+		if dict, ok := vm.stack[lastArgIdx].(*objects.Dict); ok {
+			kwargsDict = dict
+			posArgsCount = numArgs - 1
+		}
+	}
+
 	if callee.VarArgs || callee.KwArgs {
 		minParams := callee.NumParameters
 		if callee.VarArgs {
 			minParams -= 1
 		}
-		if numArgs < minParams {
-			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
-				minParams, numArgs)
+		if callee.KwArgs {
+			minParams -= 1
 		}
-		if numArgs > minParams {
-			extraArgs := numArgs - minParams
-			args := make([]objects.Object, extraArgs)
-			for i := 0; i < extraArgs; i++ {
-				args[i] = vm.stack[vm.sp-numArgs+minParams+i]
-			}
-			tuple := &objects.List{Elements: args}
-			if callee.VarArgs {
+
+		if posArgsCount < minParams {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				minParams, posArgsCount)
+		}
+
+		// 处理 *args（可变位置参数）
+		if callee.VarArgs {
+			if posArgsCount > minParams {
+				extraArgs := posArgsCount - minParams
+				args := make([]objects.Object, extraArgs)
+				for i := 0; i < extraArgs; i++ {
+					args[i] = vm.stack[vm.sp-numArgs+minParams+i]
+				}
+				tuple := &objects.List{Elements: args}
 				vm.stack[vm.sp-numArgs+minParams] = tuple
 				vm.sp = vm.sp - extraArgs
 				numArgs = minParams + 1
+				posArgsCount = numArgs
+			} else if posArgsCount == minParams {
+				vm.stack[vm.sp-numArgs] = &objects.List{Elements: []objects.Object{}}
+				numArgs = minParams + 1
+				posArgsCount = numArgs
 			}
-		} else if callee.VarArgs && numArgs == minParams {
-			vm.stack[vm.sp-numArgs] = &objects.List{Elements: []objects.Object{}}
-			numArgs = minParams + 1
 		}
+
+		// 处理 **kwargs（可变关键字参数）
+		if callee.KwArgs {
+			// 如果没有kwargs字典，就创建空的
+			if kwargsDict == nil {
+				kwargsDict = objects.NewDict()
+			}
+			// 将kwargsDict放到参数栈上
+			vm.stack[vm.sp-numArgs+posArgsCount] = kwargsDict
+			numArgs = posArgsCount + 1
+		}
+
 		basePointer = calleeIndex + 1
 	} else {
 		if numArgs != callee.NumParameters {
@@ -1322,14 +1355,12 @@ func (vm *VM) push(o objects.Object) error {
 func (vm *VM) pop() objects.Object {
 	o := vm.stack[vm.sp-1]
 	vm.sp--
+	vm.lastPopped = o
 	return o
 }
 
 func (vm *VM) LastPoppedStackElem() objects.Object {
-	if vm.sp > 0 {
-		return vm.stack[vm.sp-1]
-	}
-	return nil
+	return vm.lastPopped
 }
 
 func (vm *VM) EnableGC(enable bool) {
