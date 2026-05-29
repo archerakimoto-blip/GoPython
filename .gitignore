@@ -1,0 +1,8 @@
+# Go binary
+gopy
+
+# Build files
+*.exe
+*.dll
+*.so
+*.dylib
