@@ -30,6 +30,99 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		if s == nil || s.Expression == nil {
 			return nil
 		}
+		// 检查是否是带装饰器的函数
+		if fnLit, ok := s.Expression.(*ast.FunctionLiteral); ok && len(fnLit.Decorators) > 0 {
+			// 脱糖子表达式
+			desugaredFn := desugarExpression(fnLit).(*ast.FunctionLiteral)
+			desugaredDecorators := make([]ast.Expression, len(desugaredFn.Decorators))
+			for i, dec := range desugaredFn.Decorators {
+				desugaredDecorators[i] = desugarExpression(dec)
+			}
+
+			// 创建一个块语句，包含：
+			// 1. 定义原始函数（临时名称）
+			// 2. 用装饰器包装它
+			// 3. 将结果赋值回原函数名
+			stmts := []ast.Statement{}
+
+			// 原始函数名
+			funcIdent := &ast.Identifier{Token: desugaredFn.Token, Value: desugaredFn.Name}
+			// 临时函数名
+			tempIdent := &ast.Identifier{Token: desugaredFn.Token, Value: "_temp_" + desugaredFn.Name}
+
+			// 1. 把原始函数定义赋值给临时变量
+			tempFn := &ast.FunctionLiteral{
+				Token:      desugaredFn.Token,
+				Name:       "",
+				Parameters: desugaredFn.Parameters,
+				Body:       desugaredFn.Body,
+				VarArgs:    desugaredFn.VarArgs,
+				KwArgs:     desugaredFn.KwArgs,
+			}
+
+			letStmt := &ast.LetStatement{
+				Token: desugaredFn.Token,
+				Name:  tempIdent,
+				Value: tempFn,
+			}
+			stmts = append(stmts, letStmt)
+
+			// 2. 应用装饰器，从最后一个装饰器开始（因为装饰器是从下往上应用的）
+			currentValue := tempIdent
+			for i := len(desugaredDecorators) - 1; i >= 0; i-- {
+				decorator := desugaredDecorators[i]
+				// 调用装饰器
+				callExpr := &ast.CallExpression{
+					Token:     decorator.TokenLiteral(),
+					Function:  decorator,
+					Arguments: []ast.Expression{currentValue},
+				}
+				// 赋值给临时变量或最终变量
+				if i == 0 {
+					// 最后一个装饰器，赋值回原函数名
+					assignStmt := &ast.AssignStatement{
+						Token: desugaredFn.Token,
+						Name:  funcIdent,
+						Value: callExpr,
+					}
+					stmts = append(stmts, assignStmt)
+				} else {
+					// 中间步骤，赋值给临时变量
+					letStmt = &ast.LetStatement{
+						Token: desugaredFn.Token,
+						Name:  tempIdent,
+						Value: callExpr,
+					}
+					stmts = append(stmts, letStmt)
+				}
+			}
+
+			// 如果只有一个装饰器，直接赋值
+			if len(desugaredDecorators) == 1 {
+				decorator := desugaredDecorators[0]
+				callExpr := &ast.CallExpression{
+					Token:     decorator.TokenLiteral(),
+					Function:  decorator,
+					Arguments: []ast.Expression{tempFn},
+				}
+				// 清空 stmts，用更简单的方式
+				stmts = []ast.Statement{
+					&ast.LetStatement{
+						Token: desugaredFn.Token,
+						Name:  funcIdent,
+						Value: callExpr,
+					},
+				}
+			}
+
+			// 返回块语句
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
+		// 普通表达式语句处理
 		desugaredExpr := desugarExpression(s.Expression)
 		if desugaredExpr == nil {
 			return nil
@@ -335,6 +428,11 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
+		// 脱糖装饰器
+		desugaredDecorators := make([]ast.Expression, len(e.Decorators))
+		for i, dec := range e.Decorators {
+			desugaredDecorators[i] = desugarExpression(dec)
+		}
 		return &ast.FunctionLiteral{
 			Token:      e.Token,
 			Name:       e.Name,
@@ -342,6 +440,7 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Body:       desugarBlockStatement(e.Body),
 			VarArgs:    e.VarArgs,
 			KwArgs:     e.KwArgs,
+			Decorators: desugaredDecorators,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{

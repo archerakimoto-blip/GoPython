@@ -194,7 +194,21 @@ func (p *Parser) parseStatement() ast.Statement {
 	for p.curTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
 	}
-	
+
+	// 解析装饰器
+	var decorators []ast.Expression
+	for p.curTokenIs(lexer.AT) {
+		p.nextToken() // 消耗 @ 符号
+		decorator := p.parseExpression(LOWEST)
+		if decorator != nil {
+			decorators = append(decorators, decorator)
+		}
+		// 处理可能的换行符后继续解析
+		for p.curTokenIs(lexer.INDENT) || p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+	}
+
 	switch p.curToken.Type {
 	case lexer.INDENT:
 		return nil
@@ -221,13 +235,18 @@ func (p *Parser) parseStatement() ast.Statement {
 	case lexer.CLASS:
 		return p.parseClassStatement()
 	case lexer.FUNCTION:
-		fn := p.parseFunctionLiteral()
-		if fn == nil {
+		fnExpr := p.parseFunctionLiteral()
+		if fnExpr == nil {
 			return nil
+		}
+		// 类型断言为 *ast.FunctionLiteral 以访问 Decorators
+		if fn, ok := fnExpr.(*ast.FunctionLiteral); ok {
+			// 附加装饰器
+			fn.Decorators = decorators
 		}
 		return &ast.ExpressionStatement{
 			Token:      p.curToken.Literal,
-			Expression: fn,
+			Expression: fnExpr,
 		}
 	case lexer.IMPORT:
 		return p.parseImportStatement()

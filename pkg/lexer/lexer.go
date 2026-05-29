@@ -40,6 +40,7 @@ const (
 	COLON     = ":"
 	SEMICOLON = ";"
 	DOT       = "."
+	AT        = "@"
 
 	LPAREN = "("
 	RPAREN = ")"
@@ -264,6 +265,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COLON, l.ch)
 	case '.':
 		tok = newToken(DOT, l.ch)
+	case '@':
+		tok = newToken(AT, l.ch)
 	case ',':
 		tok = newToken(COMMA, l.ch)
 	case '(':

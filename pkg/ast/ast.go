@@ -168,6 +168,7 @@ type FunctionLiteral struct {
 	Body       *BlockStatement
 	VarArgs    *Identifier
 	KwArgs     *Identifier
+	Decorators []Expression // 装饰器列表
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
