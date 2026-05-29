@@ -193,6 +193,22 @@ func (fl *FunctionLiteral) String() string {
 	return out.String()
 }
 
+type KeywordArgument struct {
+	Token string
+	Name  *Identifier
+	Value Expression
+}
+
+func (ka *KeywordArgument) expressionNode()      {}
+func (ka *KeywordArgument) TokenLiteral() string { return ka.Token }
+func (ka *KeywordArgument) String() string {
+	var out bytes.Buffer
+	out.WriteString(ka.Name.String())
+	out.WriteString("=")
+	out.WriteString(ka.Value.String())
+	return out.String()
+}
+
 type CallExpression struct {
 	Token     string
 	Function  Expression

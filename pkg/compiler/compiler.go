@@ -1006,6 +1006,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		str := &objects.String{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(str))
 
+	case *ast.KeywordArgument:
+		// For simplicity, we'll just compile the value - we'll handle keyword arguments
+		// by creating a hash/dictionary to pass them
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+
 	case *ast.FStringLiteral:
 		// 编译 f-string 的所有部分
 		partsCount := 0

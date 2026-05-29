@@ -1393,16 +1393,44 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 
 	p.nextToken()
 	exp := p.parseExpression(LOWEST)
-	if exp != nil {
+	
+	// Check if it's a keyword argument
+	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
+		name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		p.nextToken() // skip '='
+		p.nextToken() // go to value
+		value := p.parseExpression(LOWEST)
+		keywordArg := &ast.KeywordArgument{
+			Token: name.Token,
+			Name:  name,
+			Value: value,
+		}
+		list = append(list, keywordArg)
+	} else if exp != nil {
 		list = append(list, exp)
 	}
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		exp = p.parseExpression(LOWEST)
-		if exp != nil {
-			list = append(list, exp)
+		
+		// Check if this is a keyword argument
+		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
+			name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken() // skip '='
+			p.nextToken() // go to value
+			value := p.parseExpression(LOWEST)
+			keywordArg := &ast.KeywordArgument{
+				Token: name.Token,
+				Name:  name,
+				Value: value,
+			}
+			list = append(list, keywordArg)
+		} else {
+			exp = p.parseExpression(LOWEST)
+			if exp != nil {
+				list = append(list, exp)
+			}
 		}
 	}
 
