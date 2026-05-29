@@ -47,6 +47,10 @@ go build -o gopy ./cmd/gopy
 - **global/nonlocal 语句** - 声明变量作用域
 - **类型注解** - 函数参数和返回值类型注解
 - **字典/列表解包** - 函数调用中的 *args 和 **kwargs
+- **del 语句** - 删除变量、列表元素、字典键或对象属性
+- **yield from 语句** - 从生成器委托到子生成器
+- **async for 语句** - 异步迭代器遍历
+- **async with 语句** - 异步上下文管理器
 
 ### 并发特性
 - **Goroutine 协程** - 轻量级执行单元，支持成千上万并发协程
@@ -61,7 +65,7 @@ go build -o gopy ./cmd/gopy
 ### 高级特性
 - 异常处理 (try/except/finally)
 - 上下文管理器 (with 语句，支持多个上下文管理器)
-- 生成器 (yield 语句)
+- 生成器 (yield 语句，yield from 委托)
 - Lambda 表达式和闭包
 - 类、对象、继承和多态
 - 装饰器 (Decorators)
@@ -79,10 +83,7 @@ go build -o gopy ./cmd/gopy
 ## 未支持的特性
 
 以下特性暂不支持，欢迎贡献！
-- 字典字面量解包（如 `{**dict1, **dict2}`）
-- 列表字面量解包（如 `[*list1, *list2]`）
 - match/case 模式匹配
-- Walrus 运算符编译支持（VM 端需要实现 OpDupTop）
 - 更多 Python 标准库
 
 ## 项目架构

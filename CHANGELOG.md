@@ -6,6 +6,10 @@
 
 ### 新增特性
 
+- **del 语句**：支持删除变量、列表元素、字典键或对象属性，自动脱糖为 `__delitem__` 或 `__delattr__` 调用
+- **yield from 语句**：支持从生成器委托到子生成器，自动脱糖为 `for item in iter: yield item` 循环
+- **async for 语句**：支持异步迭代器遍历，保留异步 for 循环结构
+- **async with 语句**：支持异步上下文管理器，处理多个上下文管理器的嵌套转换
 - **Walrus 运算符 (:=)**：支持 Python 3.8+ 的海象运算符，允许在表达式中赋值变量，例如 `if (n := len(data)) > 10:`
 - **global/nonlocal 语句**：支持 `global` 和 `nonlocal` 声明，在函数内部访问或修改外层/全局变量
 - **类型注解支持**：支持函数参数和返回值的类型注解，例如 `def func(x: int, y: str) -> bool:`
@@ -34,11 +38,11 @@
 - **elif 语句**：完整支持条件分支 `if-elif-else` 结构
 - **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
 - **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string
-- **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释，添加 `async`、`await`、`global`、`nonlocal`、`return_type` 和 `WALRUS` 关键字支持
-- **AST 改进**：添加 `AwaitExpression` 节点类型，`FunctionLiteral` 添加 `IsAsync` 字段，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 节点类型
-- **Parser 改进**：添加 `parseAsyncFunction` 和 `parseAwaitExpression` 解析函数，修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析，添加 `parseNamedExpression`、`parseGlobalStatement`、`parseNonlocalStatement`，支持类型注解和步长切片解析
+- **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释，添加 `async`、`await`、`global`、`nonlocal`、`return_type`、`DEL` 和 `WALRUS` 关键字支持
+- **AST 改进**：添加 `AwaitExpression`、`DeleteStatement`、`YieldFromStatement`、`AsyncForStatement`、`AsyncWithStatement` 节点类型，`FunctionLiteral` 添加 `IsAsync` 字段，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 节点类型
+- **Parser 改进**：添加 `parseAsyncFunction`、`parseAwaitExpression`、`parseDeleteStatement`、`parseYieldStatement`、`parseAsyncForStatement`、`parseAsyncWithStatement` 解析函数，修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析，添加 `parseNamedExpression`、`parseGlobalStatement`、`parseNonlocalStatement`，支持类型注解和步长切片解析
 - **VM 改进**：修复可变参数 basePointer 计算错误，支持 OpGreaterThan 和 OpLessThan，添加 lastPopped 字段用于修复 Lambda 测试问题，添加 `OpMakeAsync` 和 `OpAwait` 操作码支持，添加 `Async` 和 `Future` 对象类型
-- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖，保留 `AwaitExpression` 和 `FunctionLiteral.IsAsync`，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 脱糖支持
+- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖，添加 `desugarDeleteStatement`、`desugarYieldFromStatement`、`desugarAsyncForStatement`、`desugarAsyncWithStatement` 脱糖函数，保留 `AwaitExpression` 和 `FunctionLiteral.IsAsync`，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 脱糖支持
 - **Compiler 改进**：添加 `OpMakeAsync` 和 `OpAwait` 操作码，`CompiledFunction` 添加 `IsAsync` 字段，修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name），添加 `OpListUnpack` 和 `OpDictUnpack` 操作码，支持 Walrus 运算符编译，支持步长切片编译，SymbolTable 添加 `DefineGlobal`、`DefineNonlocal`、`IsGlobal`、`IsNonlocal` 方法
 - **新增测试文件**：
   - tests/features/test_decorators.py
@@ -63,6 +67,12 @@
 - 修复了词法分析器不能处理 Python 注释的问题
 - 修复了 f-string 脱糖处理错误的问题
 - 修复了 Lambda 函数测试失败的问题
+- 修复了词法分析器中重复的 case ':' 分支
+- 修复了 desugar 中重复的 ListLiteral case 分支
+- 修复了 AssignStatement 缺少 Targets 字段的问题
+- 修复了 FunctionLiteral 缺少 ReturnType 字段的问题
+- 修复了未使用的导入导致编译警告的问题
+- 修复了变量作用域解析错误的问题
 
 ## [0.2.0] - 2026-05-28
 
