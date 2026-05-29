@@ -83,6 +83,8 @@ const (
 	IMPORT   = "IMPORT"
 	FROM     = "FROM"
 	IS       = "IS"
+	BREAK    = "BREAK"
+	CONTINUE = "CONTINUE"
 	IS_NOT   = "IS_NOT"
 	AT       = "@"
 	ASYNC    = "ASYNC"
@@ -142,6 +144,7 @@ type Lexer struct {
 	pendingTokens     []Token
 	expectIndent      bool
 	lastKeyword       string
+	prevTokenType     TokenType
 }
 
 func New(input string) *Lexer {
@@ -162,6 +165,7 @@ func (l *Lexer) NextToken() Token {
 		l.pendingTokens = l.pendingTokens[1:]
 		l.justSkippedNewline = false
 		l.prevNonWhiteCh = 0
+		l.prevTokenType = tok.Type
 		return tok
 	}
 
@@ -172,6 +176,7 @@ func (l *Lexer) NextToken() Token {
 		l.pendingTokens = l.pendingTokens[1:]
 		l.justSkippedNewline = false
 		l.prevNonWhiteCh = 0
+		l.prevTokenType = tok.Type
 		return tok
 	}
 
@@ -196,18 +201,31 @@ func (l *Lexer) NextToken() Token {
 		newIndent := l.currentIndent
 		if newIndent > l.indentStack[len(l.indentStack)-1] {
 			l.indentStack = append(l.indentStack, newIndent)
+			l.justSkippedNewline = false
+			l.prevTokenType = INDENT
 			return Token{Type: INDENT, Literal: "INDENT"}
 		}
 	}
 
-	if l.justSkippedNewline && l.prevNonWhiteCh != ':' && l.prevNonWhiteCh != '@' && l.prevNonWhiteCh != 0 {
+	// Check if previous token was a statement terminator (return, pass, yield, raise, break, continue)
+	// In these cases, don't insert automatic semicolon
+	isStatementTerminator := l.prevTokenType == RETURN || l.prevTokenType == PASS ||
+		l.prevTokenType == YIELD || l.prevTokenType == RAISE ||
+		l.prevTokenType == BREAK || l.prevTokenType == CONTINUE
+
+	if l.justSkippedNewline && l.prevNonWhiteCh != ':' && l.prevNonWhiteCh != '@' && l.prevNonWhiteCh != 0 && !isStatementTerminator {
 		if isIdentifierChar(l.prevNonWhiteCh) || l.prevNonWhiteCh == ')' || l.prevNonWhiteCh == ']' || l.prevNonWhiteCh == '}' || l.prevNonWhiteCh == '"' || (l.prevNonWhiteCh >= '0' && l.prevNonWhiteCh <= '9') {
 			if l.ch != '@' {
 				l.justSkippedNewline = false
+				// Reset prevTokenType when inserting semicolon
+				l.prevTokenType = SEMICOLON
 				return Token{Type: SEMICOLON, Literal: ";"}
 			}
 		}
 	}
+
+	// Reset lastKeyword after checking
+	l.lastKeyword = ""
 
 	if l.ch == 0 {
 		for len(l.indentStack) > 1 {
@@ -217,8 +235,10 @@ func (l *Lexer) NextToken() Token {
 		if len(l.pendingTokens) > 0 {
 			tok := l.pendingTokens[0]
 			l.pendingTokens = l.pendingTokens[1:]
+			l.prevTokenType = tok.Type
 			return tok
 		}
+		l.prevTokenType = EOF
 		return Token{Type: EOF, Literal: ""}
 	}
 
@@ -421,6 +441,8 @@ func (l *Lexer) NextToken() Token {
 		tok.Type = lookupIdent(tok.Literal)
 		if tok.Type != IDENT {
 			l.lastKeyword = tok.Literal
+		} else {
+			l.lastKeyword = ""
 		}
 		return tok
 	default:
@@ -439,6 +461,8 @@ func (l *Lexer) NextToken() Token {
 				if isLetter(l.ch) {
 					nextIdent := l.readIdentifier()
 					if nextIdent == "in" && (l.ch == 0 || l.ch == ')' || l.ch == ']' || l.ch == '}' || l.ch == ',' || l.ch == ';' || l.ch == ':' || l.ch == '\n' || l.ch == '\r' || l.ch == ' ' || l.ch == '\t') {
+						l.lastKeyword = ""
+						l.prevTokenType = NOT_IN
 						return Token{Type: NOT_IN, Literal: "not in"}
 					}
 				}
@@ -449,6 +473,11 @@ func (l *Lexer) NextToken() Token {
 				l.ch = startCh
 			}
 			
+			if tok.Type != IDENT {
+				l.lastKeyword = tok.Literal
+			} else {
+				l.lastKeyword = ""
+			}
 			return tok
 		} else if isDigit(l.ch) {
 			tok.Type, tok.Literal = l.readNumber()
@@ -643,6 +672,10 @@ func lookupIdent(ident string) TokenType {
 func (l *Lexer) PushToken(tok Token) {
 	// Push token to front of pending tokens so that NextToken() returns it next!
 	l.pendingTokens = append([]Token{tok}, l.pendingTokens...)
+}
+
+func (l *Lexer) LastKeyword() string {
+	return l.lastKeyword
 }
 
 func newToken(tokenType TokenType, ch byte) Token {

@@ -200,10 +200,6 @@ func (p *Parser) peekTokenIs2(t lexer.TokenType) bool {
 	return p.l.Peek2Token().Type == t
 }
 
-func (p *Parser) peekPeekTokenIs(t lexer.TokenType) bool {
-	return p.l.Peek2Token().Type == t
-}
-
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
 	if p.peekTokenIs(t) {
 		p.nextToken()
