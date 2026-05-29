@@ -805,6 +805,15 @@ func (vm *VM) Run() error {
 
 			obj := vm.pop()
 			
+			if str, ok := obj.(*objects.String); ok {
+				if method, ok := objects.GetStringMethod(attrName); ok {
+					vm.push(str)
+					vm.push(method)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
 			if instance, ok := obj.(*objects.Instance); ok {
 				if val, ok := instance.GetAttr(attrName); ok {
 					if method, ok := val.(*compiler.CompiledFunction); ok {

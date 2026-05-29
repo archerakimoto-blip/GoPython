@@ -51,6 +51,7 @@ go build -o gopy ./cmd/gopy
 - **yield from 语句** - 从生成器委托到子生成器
 - **async for 语句** - 异步迭代器遍历
 - **async with 语句** - 异步上下文管理器
+- **字符串方法** - 完整的字符串方法集，包括 upper(), lower(), strip(), find(), replace(), split(), join() 等
 
 ### 并发特性
 - **Goroutine 协程** - 轻量级执行单元，支持成千上万并发协程

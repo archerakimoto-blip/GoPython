@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type ObjectType string
@@ -1654,3 +1655,489 @@ func CreateDatetimeModule() *Module {
 	
 	return datetimeModule
 }
+
+// 字符串方法实现
+var stringMethods = map[string]*Builtin{
+	"upper": &Builtin{
+		Name: "str.upper",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("upper() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("upper() requires a string")
+			}
+			return &String{Value: strings.ToUpper(s.Value)}
+		},
+	},
+	"lower": &Builtin{
+		Name: "str.lower",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("lower() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("lower() requires a string")
+			}
+			return &String{Value: strings.ToLower(s.Value)}
+		},
+	},
+	"strip": &Builtin{
+		Name: "str.strip",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 || len(args) > 2 {
+				return NewTypeError("strip() takes 0 or 1 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("strip() requires a string")
+			}
+			if len(args) == 1 {
+				return &String{Value: strings.TrimSpace(s.Value)}
+			}
+			chars, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("strip() argument must be a string")
+			}
+			return &String{Value: strings.Trim(s.Value, chars.Value)}
+		},
+	},
+	"lstrip": &Builtin{
+		Name: "str.lstrip",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 || len(args) > 2 {
+				return NewTypeError("lstrip() takes 0 or 1 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("lstrip() requires a string")
+			}
+			if len(args) == 1 {
+				return &String{Value: strings.TrimLeftFunc(s.Value, unicode.IsSpace)}
+			}
+			chars, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("lstrip() argument must be a string")
+			}
+			return &String{Value: strings.TrimLeft(s.Value, chars.Value)}
+		},
+	},
+	"rstrip": &Builtin{
+		Name: "str.rstrip",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 || len(args) > 2 {
+				return NewTypeError("rstrip() takes 0 or 1 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("rstrip() requires a string")
+			}
+			if len(args) == 1 {
+				return &String{Value: strings.TrimRightFunc(s.Value, unicode.IsSpace)}
+			}
+			chars, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("rstrip() argument must be a string")
+			}
+			return &String{Value: strings.TrimRight(s.Value, chars.Value)}
+		},
+	},
+	"capitalize": &Builtin{
+		Name: "str.capitalize",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("capitalize() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("capitalize() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return s
+			}
+			capitalized := strings.ToUpper(string(s.Value[0])) + strings.ToLower(s.Value[1:])
+			return &String{Value: capitalized}
+		},
+	},
+	"title": &Builtin{
+		Name: "str.title",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("title() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("title() requires a string")
+			}
+			return &String{Value: strings.Title(strings.ToLower(s.Value))}
+		},
+	},
+	"swapcase": &Builtin{
+		Name: "str.swapcase",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("swapcase() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("swapcase() requires a string")
+			}
+			return &String{Value: strings.Map(func(r rune) rune {
+				if unicode.IsUpper(r) {
+					return unicode.ToLower(r)
+				} else if unicode.IsLower(r) {
+					return unicode.ToUpper(r)
+				}
+				return r
+			}, s.Value)}
+		},
+	},
+	"len": &Builtin{
+		Name: "str.__len__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("len() takes exactly 1 argument")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("len() requires a string")
+			}
+			return &Integer{Value: int64(len(s.Value))}
+		},
+	},
+	"__len__": &Builtin{
+		Name: "str.__len__",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("len() takes exactly 1 argument")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("len() requires a string")
+			}
+			return &Integer{Value: int64(len(s.Value))}
+		},
+	},
+	"startswith": &Builtin{
+		Name: "str.startswith",
+		Fn: func(args ...Object) Object {
+			if len(args) < 2 || len(args) > 4 {
+				return NewTypeError("startswith() takes 1 to 3 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("startswith() requires a string")
+			}
+			prefix, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("startswith() first argument must be a string")
+			}
+			start := 0
+			end := len(s.Value)
+			if len(args) >= 3 {
+				if i, ok := args[2].(*Integer); ok {
+					start = int(i.Value)
+				}
+			}
+			if len(args) >= 4 {
+				if i, ok := args[3].(*Integer); ok {
+					end = int(i.Value)
+				}
+			}
+			result := strings.HasPrefix(s.Value[start:end], prefix.Value)
+			if result {
+				return True
+			}
+			return False
+		},
+	},
+	"endswith": &Builtin{
+		Name: "str.endswith",
+		Fn: func(args ...Object) Object {
+			if len(args) < 2 || len(args) > 4 {
+				return NewTypeError("endswith() takes 1 to 3 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("endswith() requires a string")
+			}
+			suffix, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("endswith() first argument must be a string")
+			}
+			start := 0
+			end := len(s.Value)
+			if len(args) >= 3 {
+				if i, ok := args[2].(*Integer); ok {
+					start = int(i.Value)
+				}
+			}
+			if len(args) >= 4 {
+				if i, ok := args[3].(*Integer); ok {
+					end = int(i.Value)
+				}
+			}
+			result := strings.HasSuffix(s.Value[start:end], suffix.Value)
+			if result {
+				return True
+			}
+			return False
+		},
+	},
+	"find": &Builtin{
+		Name: "str.find",
+		Fn: func(args ...Object) Object {
+			if len(args) < 2 || len(args) > 4 {
+				return NewTypeError("find() takes 1 to 3 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("find() requires a string")
+			}
+			substr, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("find() first argument must be a string")
+			}
+			start := 0
+			end := len(s.Value)
+			if len(args) >= 3 {
+				if i, ok := args[2].(*Integer); ok {
+					start = int(i.Value)
+				}
+			}
+			if len(args) >= 4 {
+				if i, ok := args[3].(*Integer); ok {
+					end = int(i.Value)
+				}
+			}
+			pos := strings.Index(s.Value[start:end], substr.Value)
+			if pos != -1 {
+				return &Integer{Value: int64(start + pos)}
+			}
+			return &Integer{Value: -1}
+		},
+	},
+	"replace": &Builtin{
+		Name: "str.replace",
+		Fn: func(args ...Object) Object {
+			if len(args) < 3 || len(args) > 4 {
+				return NewTypeError("replace() takes 2 or 3 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("replace() requires a string")
+			}
+			old, ok := args[1].(*String)
+			if !ok {
+				return NewTypeError("replace() first argument must be a string")
+			}
+			newStr, ok := args[2].(*String)
+			if !ok {
+				return NewTypeError("replace() second argument must be a string")
+			}
+			count := -1 // replace all occurrences
+			if len(args) >= 4 {
+				if i, ok := args[3].(*Integer); ok {
+					count = int(i.Value)
+				}
+			}
+			result := strings.Replace(s.Value, old.Value, newStr.Value, count)
+			return &String{Value: result}
+		},
+	},
+	"split": &Builtin{
+		Name: "str.split",
+		Fn: func(args ...Object) Object {
+			if len(args) < 1 || len(args) > 3 {
+				return NewTypeError("split() takes 0 or 1 or 2 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("split() requires a string")
+			}
+			sep := ""
+			maxsplit := -1
+			if len(args) >= 2 {
+				if s, ok := args[1].(*String); ok {
+					sep = s.Value
+				} else {
+					sep = ""
+				}
+			}
+			if len(args) >= 3 {
+				if i, ok := args[2].(*Integer); ok {
+					maxsplit = int(i.Value)
+				}
+			}
+			var parts []string
+			if sep == "" {
+				// split on whitespace
+				parts = strings.Fields(s.Value)
+			} else {
+				if maxsplit == -1 {
+					parts = strings.Split(s.Value, sep)
+				} else {
+					parts = strings.SplitN(s.Value, sep, maxsplit)
+				}
+			}
+			result := make([]Object, len(parts))
+			for i, part := range parts {
+				result[i] = &String{Value: part}
+			}
+			return &List{Elements: result}
+		},
+	},
+	"join": &Builtin{
+		Name: "str.join",
+		Fn: func(args ...Object) Object {
+			if len(args) != 2 {
+				return NewTypeError("join() takes exactly 1 argument")
+			}
+			sep, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("join() requires a string")
+			}
+			iter, ok := args[1].(*List)
+			if !ok {
+				return NewTypeError("join() argument must be an iterable")
+			}
+			var strParts []string
+			for _, elem := range iter.Elements {
+				if s, ok := elem.(*String); ok {
+					strParts = append(strParts, s.Value)
+				} else {
+					return NewTypeError("join() requires an iterable of strings")
+				}
+			}
+			return &String{Value: strings.Join(strParts, sep.Value)}
+		},
+	},
+	"isalpha": &Builtin{
+		Name: "str.isalpha",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("isalpha() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("isalpha() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return False
+			}
+			for _, r := range s.Value {
+				if !unicode.IsLetter(r) {
+					return False
+				}
+			}
+			return True
+		},
+	},
+	"isdigit": &Builtin{
+		Name: "str.isdigit",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("isdigit() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("isdigit() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return False
+			}
+			for _, r := range s.Value {
+				if !unicode.IsDigit(r) {
+					return False
+				}
+			}
+			return True
+		},
+	},
+	"isspace": &Builtin{
+		Name: "str.isspace",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("isspace() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("isspace() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return False
+			}
+			for _, r := range s.Value {
+				if !unicode.IsSpace(r) {
+					return False
+				}
+			}
+			return True
+		},
+	},
+	"isupper": &Builtin{
+		Name: "str.isupper",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("isupper() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("isupper() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return False
+			}
+			hasLetter := false
+			for _, r := range s.Value {
+				if unicode.IsLetter(r) {
+					hasLetter = true
+					if !unicode.IsUpper(r) {
+						return False
+					}
+				}
+			}
+			if !hasLetter {
+				return False
+			}
+			return True
+		},
+	},
+	"islower": &Builtin{
+		Name: "str.islower",
+		Fn: func(args ...Object) Object {
+			if len(args) != 1 {
+				return NewTypeError("islower() takes exactly 0 arguments")
+			}
+			s, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("islower() requires a string")
+			}
+			if len(s.Value) == 0 {
+				return False
+			}
+			hasLetter := false
+			for _, r := range s.Value {
+				if unicode.IsLetter(r) {
+					hasLetter = true
+					if !unicode.IsLower(r) {
+						return False
+					}
+				}
+			}
+			if !hasLetter {
+				return False
+			}
+			return True
+		},
+	},
+}
+
+// GetStringMethod 获取字符串的方法
+func GetStringMethod(name string) (*Builtin, bool) {
+	method, ok := stringMethods[name]
+	return method, ok
+}
+

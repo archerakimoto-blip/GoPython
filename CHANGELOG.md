@@ -11,6 +11,14 @@
 - **async for 语句**：支持异步迭代器遍历，保留异步 for 循环结构
 - **async with 语句**：支持异步上下文管理器，处理多个上下文管理器的嵌套转换
 - **Exception Chaining (from)**：支持 `raise E from X` 语法，自动设置异常的 `__cause__` 属性
+- **字符串方法**：实现了完整的字符串方法集，包括：
+  - upper(), lower(), capitalize(), title(), swapcase() - 大小写转换
+  - strip(), lstrip(), rstrip() - 去除空白字符
+  - startswith(), endswith() - 检查前缀和后缀
+  - find(), replace() - 查找和替换子字符串
+  - split(), join() - 分割和连接字符串
+  - isalpha(), isdigit(), isspace(), isupper(), islower() - 检查字符串属性
+- **VM 改进**：添加对字符串属性访问的支持，在 `OpGetAttribute` 中增加字符串方法查找
 - **Walrus 运算符 (:=)**：支持 Python 3.8+ 的海象运算符，允许在表达式中赋值变量，例如 `if (n := len(data)) > 10:`
 - **global/nonlocal 语句**：支持 `global` 和 `nonlocal` 声明，在函数内部访问或修改外层/全局变量
 - **类型注解支持**：支持函数参数和返回值的类型注解，例如 `def func(x: int, y: str) -> bool:`
