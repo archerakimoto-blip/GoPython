@@ -62,7 +62,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 
 			letStmt := &ast.LetStatement{
 				Token: desugaredFn.Token,
-				Name:  tempIdent,
+				Names: []*ast.Identifier{tempIdent},
 				Value: tempFn,
 			}
 			stmts = append(stmts, letStmt)
@@ -82,7 +82,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					// 最后一个装饰器，赋值回原函数名
 					assignStmt := &ast.AssignStatement{
 						Token: desugaredFn.Token,
-						Name:  funcIdent,
+						Names: []*ast.Identifier{funcIdent},
 						Value: callExpr,
 					}
 					stmts = append(stmts, assignStmt)
@@ -90,7 +90,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					// 中间步骤，赋值给临时变量
 					letStmt = &ast.LetStatement{
 						Token: desugaredFn.Token,
-						Name:  tempIdent,
+						Names: []*ast.Identifier{tempIdent},
 						Value: callExpr,
 					}
 					stmts = append(stmts, letStmt)
@@ -109,7 +109,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				stmts = []ast.Statement{
 					&ast.LetStatement{
 						Token: desugaredFn.Token,
-						Name:  funcIdent,
+						Names: []*ast.Identifier{funcIdent},
 						Value: callExpr,
 					},
 				}
@@ -217,7 +217,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: []*ast.Identifier{s.Name},
 			Value: infixExpr,
 		}
 	case *ast.ReturnStatement:
@@ -615,7 +615,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 	loopBodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
-			Name:  forStmt.Value,
+			Names: []*ast.Identifier{forStmt.Value},
 			Value: &ast.IndexExpression{
 				Token: "[",
 				Left:  iterable,
@@ -649,7 +649,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 		Statements: []ast.Statement{
 			&ast.LetStatement{
 				Token: "let",
-				Name:  indexVar,
+				Names: []*ast.Identifier{indexVar},
 				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
 			},
 			whileStmt,

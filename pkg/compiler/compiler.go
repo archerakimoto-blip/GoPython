@@ -1080,7 +1080,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.LetStatement:
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Names[0].Value)
 		err := c.Compile(node.Value)
 		if err != nil {
 			return err
@@ -1100,9 +1100,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// 查找变量，如果不存在就自动定义
-		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
+		symbol, ok := c.symbolTable.Resolve(node.Names[0].Value)
 		if !ok {
-			symbol = c.symbolTable.Define(node.Name.Value)
+			symbol = c.symbolTable.Define(node.Names[0].Value)
 		}
 
 		if symbol.Scope == GlobalScope {
