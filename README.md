@@ -144,6 +144,10 @@ go build -o gopy ./cmd/gopy
 - [x] **模块导入系统**（import 和 from...import）
 - [x] **激进优化功能**（循环展开、内联优化、分支预测等）
 - [x] **垃圾回收器**（标记-清除算法）
+- [x] **装饰器支持**（Decorators）：简单装饰器、多个装饰器、带参数的装饰器
+- [x] **多重赋值/元组解包**：`let a, b = 1, 2` 和 `x, y = lst` 语法
+- [x] **链式比较**：`a < b < c` 自动转换为 `(a < b) and (b < c)`
+- [x] **关键字参数和 **kwargs**：支持 `func(a=1, b=2)` 和 `def func(**kwargs)` 语法
 
 ### 异常类型系统
 
@@ -803,6 +807,86 @@ print(math.log10(100)) # 2.0
 print(math.hypot(3, 4)) # 5.0
 ```
 
+### 装饰器
+
+```python
+def my_decorator(func):
+    def wrapper(*args, **kwargs):
+        print("Before function call")
+        result = func(*args, **kwargs)
+        print("After function call")
+        return result
+    return wrapper
+
+@my_decorator
+def say_hello(name):
+    print(f"Hello, {name}!")
+    return f"Hello, {name}!"
+
+say_hello("Alice")
+```
+
+### 多重赋值
+
+```python
+# 多重赋值（使用 let）
+let a, b = 1, 2
+print(a)  # 1
+print(b)  # 2
+
+# 多重赋值（解包列表）
+let x, y = [3, 4]
+print(x)  # 3
+print(y)  # 4
+
+# 交换变量
+let temp = a
+a = b
+b = temp
+print(a, b)  # 2 1
+
+# 或者更简单的交换
+let m, n = 5, 6
+m, n = n, m
+print(m, n)  # 6 5
+```
+
+### 链式比较
+
+```python
+x = 5
+
+# 链式比较：等价于 (1 < x) and (x < 10)
+if 1 < x < 10:
+    print("x is between 1 and 10")  # 会打印
+
+# 更复杂的链式比较
+y = 15
+if 0 < x < 10 < y < 20:
+    print("All in range")  # 会打印
+```
+
+### 关键字参数和 **kwargs
+
+```python
+# 关键字参数调用
+def greet(name, greeting="Hello"):
+    return f"{greeting}, {name}!"
+
+print(greet(name="Alice"))               # Hello, Alice!
+print(greet(greeting="Hi", name="Bob")) # Hi, Bob!
+
+# **kwargs 接收所有关键字参数
+def print_kwargs(**kwargs):
+    for key, value in kwargs:
+        print(f"{key} = {value}")
+
+print_kwargs(a=1, b=2, c="test")
+# a = 1
+# b = 2
+# c = test
+```
+
 ## 测试用例
 
 项目包含完整的测试套件：
@@ -838,6 +922,12 @@ print(math.hypot(3, 4)) # 5.0
 
 ### 垃圾回收测试
 - `tests/python/test_gc.py` - gc 模块功能测试
+
+### 新特性功能测试
+- `tests/features/test_decorators.py` - 装饰器功能测试
+- `tests/features/test_chained_compare.py` - 链式比较测试
+- `tests/features/test_keyword_args.py` - 关键字参数和**kwargs测试
+- `tests/features/test_varargs.py` - 可变参数*args测试
 
 ### Go 单元测试
 - `pkg/vm/vm_test.go` - 虚拟机单元测试（包含算术、lambda、布尔运算测试）
