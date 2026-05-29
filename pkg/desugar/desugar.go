@@ -356,6 +356,11 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Operator: e.Operator,
 			Right:    desugarExpression(e.Right),
 		}
+	case *ast.AwaitExpression:
+		return &ast.AwaitExpression{
+			Token: e.Token,
+			Value: desugarExpression(e.Value),
+		}
 	case *ast.InfixExpression:
 		// 检查是否是链式比较：left 是比较表达式，operator 是比较运算符
 		if leftInfix, ok := e.Left.(*ast.InfixExpression); ok && isComparisonOp(leftInfix.Operator) && isComparisonOp(e.Operator) {
@@ -532,6 +537,7 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			VarArgs:    e.VarArgs,
 			KwArgs:     e.KwArgs,
 			Decorators: desugaredDecorators,
+			IsAsync:    e.IsAsync,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{

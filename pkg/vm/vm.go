@@ -726,6 +726,47 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+		case compiler.OpMakeAsync:
+			fnObj := vm.pop()
+			if cf, ok := fnObj.(*compiler.CompiledFunction); ok {
+				async := &objects.Async{
+					Instructions: cf.Instructions,
+					Constants:    vm.constants,
+					Locals:       make([]objects.Object, cf.NumLocals),
+					IP:           -1,
+					Stack:        make([]objects.Object, StackSize),
+					StackPtr:     0,
+					BasePointer:  0,
+					Done:         false,
+				}
+				err := vm.push(async)
+				if err != nil {
+					return err
+				}
+			}
+		case compiler.OpAwait:
+			// 简单实现：如果是 async 对象，立即返回，否则直接返回该值
+			val := vm.pop()
+			if asyncObj, ok := val.(*objects.Async); ok {
+				if asyncObj.Done {
+					err := vm.push(asyncObj.Result)
+					if err != nil {
+						return err
+					}
+				} else {
+					// 简单实现：立即返回 None
+					err := vm.push(objects.None_)
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				// 不是 async 对象，直接返回该值
+				err := vm.push(val)
+				if err != nil {
+					return err
+				}
+			}
 		case compiler.OpCreateClass:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)

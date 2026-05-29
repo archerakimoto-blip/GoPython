@@ -128,6 +128,7 @@ type CompiledFunction struct {
 	NumLocals     int
 	NumParameters int
 	IsGenerator   bool
+	IsAsync       bool
 	Free          []Symbol
 	Name          string
 	Constants     []objects.Object

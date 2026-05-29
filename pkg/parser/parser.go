@@ -81,6 +81,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
+	p.registerPrefix(lexer.ASYNC, p.parseAsyncFunction)
+	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
 	// Register an empty prefix function for colon, semicolon, ], RBRACE, DOT, RETURN, INDENT, and DEDENT to avoid errors
 	p.registerPrefix(lexer.COLON, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.SEMICOLON, func() ast.Expression { return nil })
@@ -246,6 +248,20 @@ func (p *Parser) parseStatement() ast.Statement {
 		}
 		return &ast.ExpressionStatement{
 			Token:      p.curToken.Literal,
+			Expression: fnExpr,
+		}
+	case lexer.ASYNC:
+		fnExpr := p.parseAsyncFunction()
+		if fnExpr == nil {
+			return nil
+		}
+		// 类型断言为 *ast.FunctionLiteral 以访问 Decorators
+		if fn, ok := fnExpr.(*ast.FunctionLiteral); ok {
+			// 附加装饰器
+			fn.Decorators = decorators
+		}
+		return &ast.ExpressionStatement{
+			Token:      "async " + p.curToken.Literal,
 			Expression: fnExpr,
 		}
 	case lexer.IMPORT:
@@ -1733,5 +1749,36 @@ func (p *Parser) parseClassStatement() ast.Statement {
 		Body:        body,
 		Methods:     methods,
 	}
+}
+
+func (p *Parser) parseAsyncFunction() ast.Expression {
+	// 消耗 "async"
+	p.nextToken()
+
+	if !p.curTokenIs(lexer.FUNCTION) {
+		p.errors = append(p.errors, fmt.Sprintf("expected 'def' after 'async', got %q", p.curToken.Type))
+		return nil
+	}
+
+	// 解析函数字面量
+	fn := p.parseFunctionLiteral()
+	
+	// 设置 IsAsync 标记
+	if fl, ok := fn.(*ast.FunctionLiteral); ok {
+		fl.IsAsync = true
+	}
+	
+	return fn
+}
+
+func (p *Parser) parseAwaitExpression() ast.Expression {
+	exp := &ast.AwaitExpression{Token: p.curToken.Literal}
+	
+	p.nextToken()
+	
+	// 解析 await 后的表达式
+	exp.Value = p.parseExpression(PREFIX)
+	
+	return exp
 }
 

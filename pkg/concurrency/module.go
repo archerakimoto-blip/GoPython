@@ -1,9 +1,26 @@
 package concurrency
 
 import (
+	"fmt"
 	"time"
+	"sync"
 
 	"github.com/go-py/go-python/pkg/objects"
+)
+
+// 全局变量，用于存储创建的通道和等待组
+var (
+	channels      = make(map[uint64]*Channel)
+	channelsMutex sync.Mutex
+	nextChannelID uint64 = 1
+
+	waitGroups      = make(map[uint64]*WaitGroup)
+	waitGroupsMutex sync.Mutex
+	nextWaitGroupID uint64 = 1
+
+	mutexes      = make(map[uint64]*Mutex)
+	mutexesMutex sync.Mutex
+	nextMutexID uint64 = 1
 )
 
 // CreateConcurrencyModule 创建并发模块
@@ -21,7 +38,6 @@ func CreateConcurrencyModule() *objects.Module {
 				return objects.NewError("go() expects at least 1 argument")
 			}
 			
-			// 这里我们简化处理，实际应该执行函数
 			scheduler := GetScheduler()
 			g := scheduler.Go(func() objects.Object { return objects.None_ }, nil)
 			
@@ -41,8 +57,13 @@ func CreateConcurrencyModule() *objects.Module {
 			}
 			
 			ch := NewChannel(capacity)
-			// 这里应该返回一个包装对象，我们用整数 ID 简化
-			return &objects.Integer{Value: int64(ch.ID)}
+			channelsMutex.Lock()
+			chID := nextChannelID
+			nextChannelID++
+			channels[chID] = ch
+			channelsMutex.Unlock()
+			
+			return &objects.Integer{Value: int64(chID)}
 		},
 	}
 	
@@ -54,7 +75,24 @@ func CreateConcurrencyModule() *objects.Module {
 				return objects.NewError("send() expects at least 2 arguments")
 			}
 			
-			// 简化实现
+			chIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("send() first argument must be a channel ID (integer)")
+			}
+			
+			channelsMutex.Lock()
+			ch, ok := channels[uint64(chIDArg.Value)]
+			channelsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+			}
+			
+			err := ch.Send(args[1])
+			if err != nil {
+				return objects.NewError(err.Error())
+			}
+			
 			return objects.None_
 		},
 	}
@@ -67,8 +105,25 @@ func CreateConcurrencyModule() *objects.Module {
 				return objects.NewError("recv() expects at least 1 argument")
 			}
 			
-			// 简化实现
-			return objects.None_
+			chIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("recv() first argument must be a channel ID (integer)")
+			}
+			
+			channelsMutex.Lock()
+			ch, ok := channels[uint64(chIDArg.Value)]
+			channelsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+			}
+			
+			val, _, err := ch.Receive()
+			if err != nil {
+				return objects.NewError(err.Error())
+			}
+			
+			return val
 		},
 	}
 	
@@ -80,7 +135,20 @@ func CreateConcurrencyModule() *objects.Module {
 				return objects.NewError("close() expects at least 1 argument")
 			}
 			
-			// 简化实现
+			chIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("close() first argument must be a channel ID (integer)")
+			}
+			
+			channelsMutex.Lock()
+			ch, ok := channels[uint64(chIDArg.Value)]
+			channelsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+			}
+			
+			ch.Close()
 			return objects.None_
 		},
 	}
@@ -112,7 +180,96 @@ func CreateConcurrencyModule() *objects.Module {
 	module.Fields["waitgroup"] = &objects.Builtin{
 		Name: "waitgroup",
 		Fn: func(args ...objects.Object) objects.Object {
-			// 简化实现
+			wg := NewWaitGroup()
+			waitGroupsMutex.Lock()
+			wgID := nextWaitGroupID
+			nextWaitGroupID++
+			waitGroups[wgID] = wg
+			waitGroupsMutex.Unlock()
+			
+			return &objects.Integer{Value: int64(wgID)}
+		},
+	}
+	
+	// waitgroup add
+	module.Fields["add"] = &objects.Builtin{
+		Name: "add",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 2 {
+				return objects.NewError("add() expects waitgroup ID and delta as arguments")
+			}
+			
+			wgIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("add() first argument must be a waitgroup ID (integer)")
+			}
+			
+			deltaArg, ok := args[1].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("add() second argument must be a delta (integer)")
+			}
+			
+			waitGroupsMutex.Lock()
+			wg, ok := waitGroups[uint64(wgIDArg.Value)]
+			waitGroupsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+			}
+			
+			wg.Add(int(deltaArg.Value))
+			return objects.None_
+		},
+	}
+	
+	// waitgroup done
+	module.Fields["done"] = &objects.Builtin{
+		Name: "done",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("done() expects waitgroup ID as argument")
+			}
+			
+			wgIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("done() argument must be a waitgroup ID (integer)")
+			}
+			
+			waitGroupsMutex.Lock()
+			wg, ok := waitGroups[uint64(wgIDArg.Value)]
+			waitGroupsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+			}
+			
+			wg.Done()
+			return objects.None_
+		},
+	}
+	
+	// waitgroup wait
+	module.Fields["wait"] = &objects.Builtin{
+		Name: "wait",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewError("wait() expects waitgroup ID as argument")
+			}
+			
+			wgIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("wait() argument must be a waitgroup ID (integer)")
+			}
+			
+			waitGroupsMutex.Lock()
+			wg, ok := waitGroups[uint64(wgIDArg.Value)]
+			waitGroupsMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+			}
+			
+			wg.Wait()
 			return objects.None_
 		},
 	}
@@ -121,8 +278,14 @@ func CreateConcurrencyModule() *objects.Module {
 	module.Fields["mutex"] = &objects.Builtin{
 		Name: "mutex",
 		Fn: func(args ...objects.Object) objects.Object {
-			// 简化实现
-			return objects.None_
+			mu := &Mutex{}
+			mutexesMutex.Lock()
+			muID := nextMutexID
+			nextMutexID++
+			mutexes[muID] = mu
+			mutexesMutex.Unlock()
+			
+			return &objects.Integer{Value: int64(muID)}
 		},
 	}
 	
@@ -130,7 +293,24 @@ func CreateConcurrencyModule() *objects.Module {
 	module.Fields["lock"] = &objects.Builtin{
 		Name: "lock",
 		Fn: func(args ...objects.Object) objects.Object {
-			// 简化实现
+			if len(args) < 1 {
+				return objects.NewError("lock() expects mutex ID as argument")
+			}
+			
+			muIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("lock() argument must be a mutex ID (integer)")
+			}
+			
+			mutexesMutex.Lock()
+			mu, ok := mutexes[uint64(muIDArg.Value)]
+			mutexesMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("mutex %d not found", muIDArg.Value))
+			}
+			
+			mu.Lock()
 			return objects.None_
 		},
 	}
@@ -139,7 +319,24 @@ func CreateConcurrencyModule() *objects.Module {
 	module.Fields["unlock"] = &objects.Builtin{
 		Name: "unlock",
 		Fn: func(args ...objects.Object) objects.Object {
-			// 简化实现
+			if len(args) < 1 {
+				return objects.NewError("unlock() expects mutex ID as argument")
+			}
+			
+			muIDArg, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("unlock() argument must be a mutex ID (integer)")
+			}
+			
+			mutexesMutex.Lock()
+			mu, ok := mutexes[uint64(muIDArg.Value)]
+			mutexesMutex.Unlock()
+			
+			if !ok {
+				return objects.NewError(fmt.Sprintf("mutex %d not found", muIDArg.Value))
+			}
+			
+			mu.Unlock()
 			return objects.None_
 		},
 	}
