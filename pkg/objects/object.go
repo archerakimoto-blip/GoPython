@@ -31,6 +31,8 @@ const (
 	CLASS_OBJ        ObjectType = "CLASS"
 	INSTANCE_OBJ     ObjectType = "INSTANCE"
 	MODULE_OBJ       ObjectType = "MODULE"
+	ASYNC_OBJ         ObjectType = "ASYNC"
+	FUTURE_OBJ         ObjectType = "FUTURE"
 )
 
 type Object interface {
@@ -392,6 +394,39 @@ type Generator struct {
 
 func (g *Generator) Type() ObjectType { return GENERATOR_OBJ }
 func (g *Generator) Inspect() string  { return fmt.Sprintf("generator[%p]", g) }
+
+type Async struct {
+	Instructions  []byte
+	Constants     []Object
+	Locals        []Object
+	IP            int
+	Stack         []Object
+	StackPtr      int
+	BasePointer   int
+	Done          bool
+	Result        Object
+}
+
+func (a *Async) Type() ObjectType { return ASYNC_OBJ }
+func (a *Async) Inspect() string  { return fmt.Sprintf("async[%p]", a) }
+
+type Future struct {
+	Done         bool
+	Result       Object
+	Error        error
+	WaitChan     chan struct{}
+}
+
+func (f *Future) Type() ObjectType { return FUTURE_OBJ }
+func (f *Future) Inspect() string {
+	if f.Done {
+		if f.Error != nil {
+			return fmt.Sprintf("future[error: %v]", f.Error)
+		}
+		return fmt.Sprintf("future[result: %v]", f.Result.Inspect())
+	}
+	return "future[pending]"
+}
 
 type Closure struct {
 	Instructions  []byte

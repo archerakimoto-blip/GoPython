@@ -117,6 +117,17 @@ func (pe *PrefixExpression) String() string {
 	return "(" + pe.Operator + pe.Right.String() + ")"
 }
 
+type AwaitExpression struct {
+	Token string // 'await'
+	Value Expression
+}
+
+func (ae *AwaitExpression) expressionNode()      {}
+func (ae *AwaitExpression) TokenLiteral() string { return ae.Token }
+func (ae *AwaitExpression) String() string {
+	return "(await " + ae.Value.String() + ")"
+}
+
 type InfixExpression struct {
 	Token    string
 	Left     Expression
@@ -169,6 +180,7 @@ type FunctionLiteral struct {
 	VarArgs    *Identifier
 	KwArgs     *Identifier
 	Decorators []Expression // 装饰器列表
+	IsAsync    bool         // 是否为 async 函数
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -184,6 +196,9 @@ func (fl *FunctionLiteral) String() string {
 	}
 	if fl.KwArgs != nil {
 		params = append(params, "**"+fl.KwArgs.String())
+	}
+	if fl.IsAsync {
+		out.WriteString("async ")
 	}
 	out.WriteString(fl.Token)
 	if fl.Name != "" {

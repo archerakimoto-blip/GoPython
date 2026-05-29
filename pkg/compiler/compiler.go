@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/go-py/go-python/pkg/ast"
+	"github.com/go-py/go-python/pkg/concurrency"
 	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/interop"
 	"github.com/go-py/go-python/pkg/objects"
@@ -63,6 +64,8 @@ const (
 	OpGetAttribute
 	OpSetAttribute
 	OpFormatString
+	OpMakeAsync
+	OpAwait
 )
 
 type EmittedInstruction struct {
@@ -295,6 +298,13 @@ func (c *Compiler) registerBuiltins() {
 	cpythonIndex := len(c.constants)
 	c.constants = append(c.constants, cpythonModule)
 	c.symbolTable.DefineBuiltin("cpython", cpythonIndex)
+
+	// 注册 concurrency 模块
+	concurrencyModule := concurrency.CreateConcurrencyModule()
+	objects.RegisterModule("concurrency", concurrencyModule)
+	concurrencyIndex := len(c.constants)
+	c.constants = append(c.constants, concurrencyModule)
+	c.symbolTable.DefineBuiltin("concurrency", concurrencyIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -990,9 +1000,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpBang)
 		case "-":
 			c.emit(OpMinus)
-		default:
-			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
+
+	case *ast.AwaitExpression:
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+		c.emit(OpAwait)
 
 	case *ast.IntegerLiteral:
 		integer := &objects.Integer{Value: node.Value}
@@ -1259,6 +1274,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 			NumLocals:     numLocals,
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
+			IsAsync:       node.IsAsync,
 			Free:          allFreeVars,
 			VarArgs:       node.VarArgs != nil,
 			KwArgs:        node.KwArgs != nil,
@@ -1294,6 +1310,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		if compiledFn.IsGenerator {
 			c.emit(OpMakeGenerator)
+		}
+		if compiledFn.IsAsync {
+			c.emit(OpMakeAsync)
 		}
 
 	case *ast.LambdaExpression:

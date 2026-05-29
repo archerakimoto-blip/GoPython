@@ -76,6 +76,8 @@ const (
 	PASS     = "PASS"
 	IMPORT   = "IMPORT"
 	FROM     = "FROM"
+	ASYNC    = "ASYNC"
+	AWAIT    = "AWAIT"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -114,6 +116,8 @@ var keywords = map[string]TokenType{
 	"pass":   PASS,
 	"import": IMPORT,
 	"from":   FROM,
+	"async":  ASYNC,
+	"await":  AWAIT,
 }
 
 type Lexer struct {
