@@ -683,9 +683,14 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Variable: e.Variable,
 			Iterable: desugarExpression(e.Iterable),
 			Filter:   e.Filter,
+			IsAsync:  e.IsAsync,
 		}
 		if e.Filter != nil {
 			sc.Filter = desugarExpression(e.Filter)
+		}
+		// 如果是异步集合推导式，脱糖为异步函数调用
+		if sc.IsAsync {
+			return desugarAsyncSetComprehension(sc)
 		}
 		return sc
 	case *ast.GeneratorExpression:
@@ -721,14 +726,197 @@ func isComparisonOp(op string) bool {
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
-	// 直接返回，让编译器来处理列表推导式
-	// 我们需要在这里脱糖子表达式
+	// 先脱糖子表达式
 	lc.Element = desugarExpression(lc.Element)
 	lc.Iterable = desugarExpression(lc.Iterable)
 	if lc.Filter != nil {
 		lc.Filter = desugarExpression(lc.Filter)
 	}
+
+	// 如果是异步列表推导式，需要脱糖为异步函数
+	if lc.IsAsync {
+		return desugarAsyncComprehension(lc)
+	}
+
 	return lc
+}
+
+func desugarAsyncComprehension(lc *ast.ListComprehension) ast.Expression {
+	// 将 [x async for x in agen if cond] 脱糖为:
+	// async def __async_gen():
+	//     result = []
+	//     async for x in agen:
+	//         if cond:
+	//             result.append(x)
+	//     return result
+	// __async_gen()
+
+	resultVar := &ast.Identifier{Token: "_result", Value: "_result"}
+	resultInit := &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{resultVar},
+		Value: &ast.ListLiteral{Token: "[]"},
+	}
+
+	asyncForValue := &ast.Identifier{Token: lc.Variable.Token, Value: lc.Variable.Value}
+
+	var bodyStatements []ast.Statement
+
+	if lc.Filter != nil {
+		ifExpr := &ast.IfExpression{
+			Token:     "if",
+			Condition: lc.Filter,
+			Consequence: &ast.BlockStatement{
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Expression: &ast.CallExpression{
+							Token: "append",
+							Function: &ast.MemberAccess{
+								Token:  ".",
+								Object: resultVar,
+								Member: &ast.Identifier{Token: "append", Value: "append"},
+							},
+							Arguments: []ast.Expression{lc.Element},
+						},
+					},
+				},
+			},
+		}
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{Expression: ifExpr})
+	} else {
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{
+			Expression: &ast.CallExpression{
+				Token: "append",
+				Function: &ast.MemberAccess{
+					Token:  ".",
+					Object: resultVar,
+					Member: &ast.Identifier{Token: "append", Value: "append"},
+				},
+				Arguments: []ast.Expression{lc.Element},
+			},
+		})
+	}
+
+	asyncForBody := &ast.BlockStatement{Statements: bodyStatements}
+	asyncFor := &ast.AsyncForStatement{
+		Token:    "async for",
+		Value:    asyncForValue,
+		Iterable: lc.Iterable,
+		Body:     asyncForBody,
+	}
+
+	returnStmt := &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: resultVar,
+	}
+
+	funcBody := &ast.BlockStatement{
+		Statements: []ast.Statement{resultInit, asyncFor, returnStmt},
+	}
+
+	funcLit := &ast.FunctionLiteral{
+		Token:      "async def",
+		Parameters: []*ast.Identifier{},
+		Body:       funcBody,
+		IsAsync:    true,
+	}
+
+	return &ast.CallExpression{
+		Token:     "(",
+		Function:  funcLit,
+		Arguments: []ast.Expression{},
+	}
+}
+
+func desugarAsyncSetComprehension(sc *ast.SetComprehension) ast.Expression {
+	// 将 {x async for x in agen if cond} 脱糖为:
+	// async def __async_gen():
+	//     result = set()
+	//     async for x in agen:
+	//         if cond:
+	//             result.add(x)
+	//     return result
+	// __async_gen()
+
+	resultVar := &ast.Identifier{Token: "_result", Value: "_result"}
+	resultInit := &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{resultVar},
+		Value: &ast.CallExpression{
+			Token:    "set",
+			Function: &ast.Identifier{Token: "set", Value: "set"},
+			Arguments: []ast.Expression{},
+		},
+	}
+
+	asyncForValue := &ast.Identifier{Token: sc.Variable.Token, Value: sc.Variable.Value}
+
+	var bodyStatements []ast.Statement
+
+	if sc.Filter != nil {
+		ifExpr := &ast.IfExpression{
+			Token:     "if",
+			Condition: sc.Filter,
+			Consequence: &ast.BlockStatement{
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Expression: &ast.CallExpression{
+							Token: "add",
+							Function: &ast.MemberAccess{
+								Token:  ".",
+								Object: resultVar,
+								Member: &ast.Identifier{Token: "add", Value: "add"},
+							},
+							Arguments: []ast.Expression{sc.Element},
+						},
+					},
+				},
+			},
+		}
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{Expression: ifExpr})
+	} else {
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{
+			Expression: &ast.CallExpression{
+				Token: "add",
+				Function: &ast.MemberAccess{
+					Token:  ".",
+					Object: resultVar,
+					Member: &ast.Identifier{Token: "add", Value: "add"},
+				},
+				Arguments: []ast.Expression{sc.Element},
+			},
+		})
+	}
+
+	asyncForBody := &ast.BlockStatement{Statements: bodyStatements}
+	asyncFor := &ast.AsyncForStatement{
+		Token:    "async for",
+		Value:    asyncForValue,
+		Iterable: sc.Iterable,
+		Body:     asyncForBody,
+	}
+
+	returnStmt := &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: resultVar,
+	}
+
+	funcBody := &ast.BlockStatement{
+		Statements: []ast.Statement{resultInit, asyncFor, returnStmt},
+	}
+
+	funcLit := &ast.FunctionLiteral{
+		Token:      "async def",
+		Parameters: []*ast.Identifier{},
+		Body:       funcBody,
+		IsAsync:    true,
+	}
+
+	return &ast.CallExpression{
+		Token:     "(",
+		Function:  funcLit,
+		Arguments: []ast.Expression{},
+	}
 }
 
 func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {

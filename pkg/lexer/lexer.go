@@ -460,3 +460,28 @@ func lookupIdent(ident string) TokenType {
 func newToken(tokenType TokenType, ch byte) Token {
 	return Token{Type: tokenType, Literal: string(ch)}
 }
+
+func (l *Lexer) PeekToken() Token {
+	savedPos := l.position
+	savedReadPos := l.readPosition
+	savedCh := l.ch
+	savedPrevNonWhiteCh := l.prevNonWhiteCh
+	savedJustSkippedNewline := l.justSkippedNewline
+	savedCurrentIndent := l.currentIndent
+	savedExpectIndent := l.expectIndent
+	savedPendingTokens := make([]Token, len(l.pendingTokens))
+	copy(savedPendingTokens, l.pendingTokens)
+
+	tok := l.NextToken()
+
+	l.position = savedPos
+	l.readPosition = savedReadPos
+	l.ch = savedCh
+	l.prevNonWhiteCh = savedPrevNonWhiteCh
+	l.justSkippedNewline = savedJustSkippedNewline
+	l.currentIndent = savedCurrentIndent
+	l.expectIndent = savedExpectIndent
+	l.pendingTokens = savedPendingTokens
+
+	return tok
+}

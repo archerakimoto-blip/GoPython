@@ -462,6 +462,7 @@ type ListComprehension struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (lc *ListComprehension) expressionNode()      {}
@@ -488,6 +489,7 @@ type SetComprehension struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (sc *SetComprehension) expressionNode()      {}
@@ -515,6 +517,7 @@ type DictComprehension struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (dc *DictComprehension) expressionNode()      {}
@@ -543,6 +546,7 @@ type GeneratorExpression struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (ge *GeneratorExpression) expressionNode()      {}

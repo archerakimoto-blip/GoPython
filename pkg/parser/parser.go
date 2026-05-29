@@ -179,6 +179,19 @@ func (p *Parser) peekTokenIs(t lexer.TokenType) bool {
 	return p.peekToken.Type == t
 }
 
+func (p *Parser) peekTokenAtOffset(offset int, t lexer.TokenType) bool {
+	// We only have 2 tokens lookahead, so offset must be 1
+	if offset != 1 {
+		return false
+	}
+	// Check the token after peekToken by peeking ahead
+	// This is a simple implementation - in reality we'd need token buffering
+	// For now, we assume the lexer has peeking capability
+	// We'll use the lexer's peek functionality
+	peekedToken := p.l.PeekToken()
+	return peekedToken.Type == t
+}
+
 func (p *Parser) expectPeek(t lexer.TokenType) bool {
 	if p.peekTokenIs(t) {
 		p.nextToken()
@@ -1146,10 +1159,20 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 	}
 
-	// Now check if next token is FOR! That means list comprehension!
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+	// Now check if next token is FOR or ASYNC! That means list comprehension!
+	// Check for ASYNC first (async for)
+	isAsyncFor := p.peekTokenIs(lexer.ASYNC) && p.peekTokenAtOffset(1, lexer.FOR)
+	isFor := p.peekTokenIs(lexer.FOR)
+
+	if isAsyncFor || isFor {
 		comp := &ast.ListComprehension{Token: p.curToken.Literal}
 		comp.Element = firstExpr
+
+		// Check for ASYNC keyword (async for)
+		if isAsyncFor {
+			comp.IsAsync = true
+			p.nextToken() // consume ASYNC
+		}
 
 		// Handle FOR token
 		if !p.curTokenIs(lexer.FOR) {
@@ -1177,6 +1200,15 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 		p.nextToken()
 		comp.Iterable = p.parseExpression(LOWEST)
+
+		// Parse optional IF clause
+		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+			if !p.curTokenIs(lexer.IF) {
+				p.nextToken()
+			}
+			p.nextToken() // skip IF
+			comp.Filter = p.parseExpression(LOWEST)
+		}
 
 		// Consume closing ]
 		if p.curTokenIs(lexer.RBRACKET) {
@@ -1250,6 +1282,12 @@ func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
 	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
 		comp := &ast.SetComprehension{Token: p.curToken.Literal}
 		comp.Element = firstExpr
+
+		// Check for ASYNC keyword
+		if p.peekTokenIs(lexer.ASYNC) {
+			comp.IsAsync = true
+			p.nextToken() // consume ASYNC
+		}
 
 		if !p.curTokenIs(lexer.FOR) {
 			p.nextToken()
@@ -1337,7 +1375,7 @@ func (p *Parser) parseBraceLiteral() ast.Expression {
 		return nil
 	}
 
-	if p.curTokenIs(lexer.COLON) {
+	if p.peekTokenIs(lexer.COLON) {
 		return p.parseDictLiteral()
 	}
 
@@ -1450,8 +1488,8 @@ func (p *Parser) parseDictLiteral() ast.Expression {
 
 	// Now let's try to check for dict comprehension first by parsing key, colon, value, then checking for FOR!
 	oldErrors := len(p.errors)
-	p.nextToken() // move past { to first token
 
+	// Note: parseBraceLiteral already advanced to first token, don't call nextToken again
 	key := p.parseExpression(LOWEST)
 	if len(p.errors) > oldErrors {
 		// Parsing key failed: reset errors, reset to { and parse normal dict (without comprehension)
