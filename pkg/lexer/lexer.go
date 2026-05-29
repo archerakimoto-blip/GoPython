@@ -82,6 +82,7 @@ const (
 	GLOBAL   = "GLOBAL"
 	NONLOCAL = "NONLOCAL"
 	RETURN_TYPE = "RETURN_TYPE"
+	DEL      = "DEL"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -124,6 +125,7 @@ var keywords = map[string]TokenType{
 	"await":  AWAIT,
 	"global": GLOBAL,
 	"nonlocal": NONLOCAL,
+	"del":    DEL,
 }
 
 type Lexer struct {

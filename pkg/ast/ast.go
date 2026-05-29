@@ -965,4 +965,88 @@ func (ns *NonlocalStatement) String() string {
 	return out.String()
 }
 
+// DeleteStatement 用于 del 语句
+// 例如: del x, list[0], dict['key']
+type DeleteStatement struct {
+	Token      string
+	Targets    []Expression
+}
+
+func (ds *DeleteStatement) statementNode()       {}
+func (ds *DeleteStatement) TokenLiteral() string { return ds.Token }
+func (ds *DeleteStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("del ")
+	for i, target := range ds.Targets {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(target.String())
+	}
+	return out.String()
+}
+
+// YieldFromStatement 用于 yield from 语句
+// 例如: yield from generator()
+type YieldFromStatement struct {
+	Token      string
+	Expression Expression
+}
+
+func (yfs *YieldFromStatement) statementNode()       {}
+func (yfs *YieldFromStatement) TokenLiteral() string { return yfs.Token }
+func (yfs *YieldFromStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("yield from ")
+	if yfs.Expression != nil {
+		out.WriteString(yfs.Expression.String())
+	}
+	return out.String()
+}
+
+// AsyncForStatement 用于 async for 语句
+// 例如: async for x in iterable:
+type AsyncForStatement struct {
+	Token     string
+	Value     *Identifier
+	Iterable  Expression
+	Body      *BlockStatement
+}
+
+func (afs *AsyncForStatement) statementNode()       {}
+func (afs *AsyncForStatement) TokenLiteral() string { return afs.Token }
+func (afs *AsyncForStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("async for ")
+	out.WriteString(afs.Value.String())
+	out.WriteString(" in ")
+	out.WriteString(afs.Iterable.String())
+	out.WriteString(":\n")
+	out.WriteString(afs.Body.String())
+	return out.String()
+}
+
+// AsyncWithStatement 用于 async with 语句
+// 例如: async with cm as x:
+type AsyncWithStatement struct {
+	Token string
+	Items []*ContextManagerItem
+	Body  *BlockStatement
+}
+
+func (aws *AsyncWithStatement) statementNode()       {}
+func (aws *AsyncWithStatement) TokenLiteral() string { return aws.Token }
+func (aws *AsyncWithStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("async with ")
+	itemStrs := []string{}
+	for _, item := range aws.Items {
+		itemStrs = append(itemStrs, item.String())
+	}
+	out.WriteString(strings.Join(itemStrs, ", "))
+	out.WriteString(":\n")
+	out.WriteString(aws.Body.String())
+	return out.String()
+}
+
 type Map map[string]Expression

@@ -252,23 +252,34 @@ func (p *Parser) parseStatement() ast.Statement {
 			Expression: fnExpr,
 		}
 	case lexer.ASYNC:
-		fnExpr := p.parseAsyncFunction()
-		if fnExpr == nil {
-			return nil
+		// 检查是 async def 还是 async for/async with
+		if p.peekTokenIs(lexer.FUNCTION) {
+			fnExpr := p.parseAsyncFunction()
+			if fnExpr == nil {
+				return nil
+			}
+			// 类型断言为 *ast.FunctionLiteral 以访问 Decorators
+			if fn, ok := fnExpr.(*ast.FunctionLiteral); ok {
+				// 附加装饰器
+				fn.Decorators = decorators
+			}
+			return &ast.ExpressionStatement{
+				Token:      "async " + p.curToken.Literal,
+				Expression: fnExpr,
+			}
+		} else if p.peekTokenIs(lexer.FOR) {
+			return p.parseAsyncForStatement()
+		} else if p.peekTokenIs(lexer.WITH) {
+			return p.parseAsyncWithStatement()
 		}
-		// 类型断言为 *ast.FunctionLiteral 以访问 Decorators
-		if fn, ok := fnExpr.(*ast.FunctionLiteral); ok {
-			// 附加装饰器
-			fn.Decorators = decorators
-		}
-		return &ast.ExpressionStatement{
-			Token:      "async " + p.curToken.Literal,
-			Expression: fnExpr,
-		}
+		// 未知的 async 后续 token
+		return nil
 	case lexer.GLOBAL:
 		return p.parseGlobalStatement()
 	case lexer.NONLOCAL:
 		return p.parseNonlocalStatement()
+	case lexer.DEL:
+		return p.parseDeleteStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -1871,17 +1882,6 @@ func (p *Parser) parseWithStatement() *ast.WithStatement {
 	return stmt
 }
 
-func (p *Parser) parseYieldStatement() *ast.YieldStatement {
-	stmt := &ast.YieldStatement{Token: p.curToken.Literal}
-
-	p.nextToken()
-	if !p.curTokenIs(lexer.SEMICOLON) && !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
-		stmt.Expression = p.parseExpression(LOWEST)
-	}
-
-	return stmt
-}
-
 func (p *Parser) parseClassStatement() ast.Statement {
 	token := p.curToken
 
@@ -2040,6 +2040,132 @@ func (p *Parser) parseNonlocalStatement() *ast.NonlocalStatement {
 			break
 		}
 	}
+
+	return stmt
+}
+
+// parseDeleteStatement 解析 del 语句
+// 例如: del x, list[0], dict['key']
+func (p *Parser) parseDeleteStatement() *ast.DeleteStatement {
+	stmt := &ast.DeleteStatement{Token: p.curToken.Literal}
+	p.nextToken() // 跳过 "del"
+
+	// 解析目标列表
+	for {
+		// 解析表达式作为目标
+		target := p.parseExpression(LOWEST)
+		if target != nil {
+			stmt.Targets = append(stmt.Targets, target)
+		}
+
+		// 检查是否还有逗号分隔的目标
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // 跳过逗号
+			p.nextToken() // 移动到下一个目标
+		} else {
+			break
+		}
+	}
+
+	return stmt
+}
+
+// parseYieldStatement 解析 yield 语句
+// 支持 yield 和 yield from
+func (p *Parser) parseYieldStatement() ast.Statement {
+	token := p.curToken
+	p.nextToken()
+
+	// 检查是否是 yield from
+	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "from" {
+		p.nextToken()
+		expr := p.parseExpression(LOWEST)
+		return &ast.YieldFromStatement{
+			Token:      token.Literal,
+			Expression: expr,
+		}
+	}
+
+	// 普通的 yield 语句
+	stmt := &ast.YieldStatement{Token: token.Literal}
+	if !p.curTokenIs(lexer.SEMICOLON) && !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
+		stmt.Expression = p.parseExpression(LOWEST)
+	}
+
+	return stmt
+}
+
+// parseAsyncForStatement 解析 async for 语句
+// 例如: async for x in iter:
+func (p *Parser) parseAsyncForStatement() *ast.AsyncForStatement {
+	stmt := &ast.AsyncForStatement{Token: "async " + p.curToken.Literal}
+	p.nextToken() // 跳过 "async"
+	p.nextToken() // 跳过 "for"
+
+	if !p.curTokenIs(lexer.IDENT) {
+		p.errors = append(p.errors, "expected identifier after 'async for'")
+		return nil
+	}
+	stmt.Value = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	if !p.expectPeek(lexer.IN) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Iterable = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
+
+	return stmt
+}
+
+// parseAsyncWithStatement 解析 async with 语句
+// 例如: async with cm as x:
+func (p *Parser) parseAsyncWithStatement() *ast.AsyncWithStatement {
+	stmt := &ast.AsyncWithStatement{Token: "async " + p.curToken.Literal}
+	p.nextToken() // 跳过 "async"
+	p.nextToken() // 跳过 "with"
+	stmt.Items = make([]*ast.ContextManagerItem, 0)
+
+	for {
+		// 解析上下文管理器表达式
+		item := &ast.ContextManagerItem{
+			Expr: p.parseExpression(LOWEST),
+		}
+
+		// 解析可选的 "as x"
+		if p.peekTokenIs(lexer.AS) {
+			p.nextToken()
+			if p.expectPeek(lexer.IDENT) {
+				item.Name = &ast.Identifier{
+					Token: p.curToken.Literal,
+					Value: p.curToken.Literal,
+				}
+			}
+		}
+
+		stmt.Items = append(stmt.Items, item)
+
+		// 检查是否有更多项
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // 跳过逗号
+	}
+
+	// 解析冒号
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	stmt.Body = p.parseBlockStatement()
 
 	return stmt
 }

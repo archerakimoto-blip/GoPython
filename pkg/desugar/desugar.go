@@ -317,6 +317,14 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		// nonlocal 语句本身不需要脱糖，只是声明
 		// 实际的符号表处理会在 compiler 阶段通过 AST 节点信息处理
 		return s
+	case *ast.DeleteStatement:
+		return desugarDeleteStatement(s)
+	case *ast.YieldFromStatement:
+		return desugarYieldFromStatement(s)
+	case *ast.AsyncForStatement:
+		return desugarAsyncForStatement(s)
+	case *ast.AsyncWithStatement:
+		return desugarAsyncWithStatement(s)
 	case *ast.ClassStatement:
 		desugaredClass := &ast.ClassStatement{
 			Token:       s.Token,
@@ -373,13 +381,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		// Walrus 运算符脱糖：x := expr 脱糖为 (x = expr; x)
 		// 创建一个临时变量来存储赋值和返回值
 		value := desugarExpression(e.Value)
-
-		// 返回一个逗号表达式或者通过赋值语句处理
-		// 由于我们的 AST 不支持逗号表达式，我们需要特殊处理
-		// 方案：直接生成赋值语句和标识符
-		// 但这需要返回语句而不是表达式，所以我们把它包装在一个特殊的结构中
-		// 实际上，对于简单的 walrus 表达式，我们可以直接赋值并返回
-		// 这里我们把整个表达式转换为一个赋值语句包装的表达式
 
 		// 简化处理：在赋值的同时返回右值
 		// 实际上，这需要编译器特殊处理，我们先把赋值语句添加到外层
@@ -842,7 +843,6 @@ func desugarMixedListLiteral(elements []ast.Expression) ast.Expression {
 	})
 
 	// 将整个序列包装在一个立即执行的函数中
-	// 这样我们可以有一个 BlockStatement 但返回一个 Expression
 	resultExpr := &ast.CallExpression{
 		Token: "()",
 		Function: &ast.FunctionLiteral{
@@ -888,19 +888,19 @@ func desugarMixedDictLiteral(elements []ast.Expression) ast.Expression {
 				},
 			})
 		} else if kv, ok := el.(*ast.KeyValuePair); ok {
-				// 键值对：调用 __setitem__
-				statements = append(statements, &ast.ExpressionStatement{
-					Expression: &ast.CallExpression{
-						Token: "__setitem__",
-						Function: &ast.MemberAccess{
-							Token: ".",
-							Object: tempName,
-							Member: &ast.Identifier{Token: "__setitem__", Value: "__setitem__"},
-						},
-						Arguments: []ast.Expression{kv.Key, kv.Value},
+			// 键值对：调用 __setitem__
+			statements = append(statements, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "__setitem__",
+					Function: &ast.MemberAccess{
+						Token: ".",
+						Object: tempName,
+						Member: &ast.Identifier{Token: "__setitem__", Value: "__setitem__"},
 					},
-				})
-			}
+					Arguments: []ast.Expression{kv.Key, kv.Value},
+				},
+			})
+		}
 	}
 
 	// 返回临时变量作为结果
@@ -924,4 +924,150 @@ func desugarMixedDictLiteral(elements []ast.Expression) ast.Expression {
 	}
 
 	return resultExpr
+}
+
+// desugarDeleteStatement 脱糖 del 语句
+// 对于简单变量，我们直接保留它，因为删除操作在运行时处理
+// 对于下标访问和成员访问，我们转换为 __delitem__ 和 __delattr__ 调用
+func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
+	desugaredStmts := make([]ast.Statement, 0, len(stmt.Targets))
+
+	for _, target := range stmt.Targets {
+		switch t := desugarExpression(target).(type) {
+		case *ast.Identifier:
+			// 简单标识符，保留原样
+			desugaredStmts = append(desugaredStmts, &ast.DeleteStatement{
+				Token:   stmt.Token,
+				Targets: []ast.Expression{t},
+			})
+		case *ast.IndexExpression:
+			// 下标访问：del x[y] -> x.__delitem__(y)
+			desugaredStmts = append(desugaredStmts, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "__delitem__",
+					Function: &ast.MemberAccess{
+						Token:  ".",
+						Object: t.Left,
+						Member: &ast.Identifier{Token: "__delitem__", Value: "__delitem__"},
+					},
+					Arguments: []ast.Expression{t.Index},
+				},
+			})
+		case *ast.MemberAccess:
+			// 成员访问：del x.y -> x.__delattr__(y)
+			desugaredStmts = append(desugaredStmts, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "__delattr__",
+					Function: &ast.MemberAccess{
+						Token:  ".",
+						Object: t.Object,
+						Member: &ast.Identifier{Token: "__delattr__", Value: "__delattr__"},
+					},
+					Arguments: []ast.Expression{t.Member},
+				},
+			})
+		default:
+			// 其他情况，保留原样
+			desugaredStmts = append(desugaredStmts, &ast.DeleteStatement{
+				Token:   stmt.Token,
+				Targets: []ast.Expression{t},
+			})
+		}
+	}
+
+	if len(desugaredStmts) == 1 {
+		return desugaredStmts[0]
+	}
+
+	return &ast.BlockStatement{
+		Token:      stmt.Token,
+		Statements: desugaredStmts,
+	}
+}
+
+// desugarYieldFromStatement 脱糖 yield from 语句
+// yield from iter 脱糖为：for item in iter: yield item
+func desugarYieldFromStatement(stmt *ast.YieldFromStatement) ast.Statement {
+	// 首先脱糖迭代器表达式
+	iterExpr := desugarExpression(stmt.Expression)
+
+	// 创建临时变量来迭代
+	itemIdent := &ast.Identifier{Token: "_item", Value: "_item"}
+
+	// 创建 for 循环
+	forStmt := &ast.ForStatement{
+		Token:    "for",
+		Value:    itemIdent,
+		Iterable: iterExpr,
+		Body: &ast.BlockStatement{
+			Token: "{",
+			Statements: []ast.Statement{
+				&ast.YieldStatement{
+					Token:      "yield",
+					Expression: itemIdent,
+				},
+			},
+		},
+	}
+
+	// 返回脱糖后的 for 循环
+	return desugarForToWhile(forStmt)
+}
+
+// desugarAsyncForStatement 脱糖 async for 语句
+// 我们保留原样，因为异步操作需要特殊处理
+func desugarAsyncForStatement(stmt *ast.AsyncForStatement) ast.Statement {
+	// 脱糖迭代器和循环体
+	desugaredIterable := desugarExpression(stmt.Iterable)
+	desugaredBody := desugarBlockStatement(stmt.Body)
+
+	return &ast.AsyncForStatement{
+		Token:    stmt.Token,
+		Value:    stmt.Value,
+		Iterable: desugaredIterable,
+		Body:     desugaredBody,
+	}
+}
+
+// desugarAsyncWithStatement 脱糖 async with 语句
+// 我们保留原样，因为异步操作需要特殊处理
+func desugarAsyncWithStatement(stmt *ast.AsyncWithStatement) ast.Statement {
+	// 脱糖上下文管理器表达式和循环体
+	desugaredItems := make([]*ast.ContextManagerItem, 0, len(stmt.Items))
+	for _, item := range stmt.Items {
+		desugaredItems = append(desugaredItems, &ast.ContextManagerItem{
+			Expr: desugarExpression(item.Expr),
+			Name: item.Name,
+		})
+	}
+	desugaredBody := desugarBlockStatement(stmt.Body)
+
+	// 如果只有一个上下文管理器，直接返回
+	if len(desugaredItems) == 1 {
+		return &ast.AsyncWithStatement{
+			Token: stmt.Token,
+			Items: desugaredItems,
+			Body:  desugaredBody,
+		}
+	}
+
+	// 多个上下文管理器，嵌套处理
+	var nestedStatement ast.Statement = &ast.AsyncWithStatement{
+		Token: stmt.Token,
+		Items: []*ast.ContextManagerItem{desugaredItems[len(desugaredItems)-1]},
+		Body:  desugaredBody,
+	}
+
+	for i := len(desugaredItems) - 2; i >= 0; i-- {
+		nestedStatement = &ast.AsyncWithStatement{
+			Token: stmt.Token,
+			Items: []*ast.ContextManagerItem{desugaredItems[i]},
+			Body: &ast.BlockStatement{
+				Token:      stmt.Token,
+				Statements: []ast.Statement{nestedStatement},
+			},
+		}
+	}
+
+	return nestedStatement
 }
