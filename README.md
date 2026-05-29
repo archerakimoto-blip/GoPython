@@ -41,8 +41,12 @@ go build -o gopy ./cmd/gopy
 - break/continue 语句
 - 列表推导式、集合推导式、字典推导式
 - 生成器表达式
-- 切片操作和索引赋值
+- 切片操作（支持步长）和索引赋值
 - pass 语句
+- **Walrus 运算符 (:=)** - 表达式中赋值变量
+- **global/nonlocal 语句** - 声明变量作用域
+- **类型注解** - 函数参数和返回值类型注解
+- **字典/列表解包** - 函数调用中的 *args 和 **kwargs
 
 ### 并发特性
 - **Goroutine 协程** - 轻量级执行单元，支持成千上万并发协程
@@ -75,7 +79,10 @@ go build -o gopy ./cmd/gopy
 ## 未支持的特性
 
 以下特性暂不支持，欢迎贡献！
-- 类型注解 (Type Hints)
+- 字典字面量解包（如 `{**dict1, **dict2}`）
+- 列表字面量解包（如 `[*list1, *list2]`）
+- match/case 模式匹配
+- Walrus 运算符编译支持（VM 端需要实现 OpDupTop）
 - 更多 Python 标准库
 
 ## 项目架构

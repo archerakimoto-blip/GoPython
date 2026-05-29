@@ -6,6 +6,11 @@
 
 ### 新增特性
 
+- **Walrus 运算符 (:=)**：支持 Python 3.8+ 的海象运算符，允许在表达式中赋值变量，例如 `if (n := len(data)) > 10:`
+- **global/nonlocal 语句**：支持 `global` 和 `nonlocal` 声明，在函数内部访问或修改外层/全局变量
+- **类型注解支持**：支持函数参数和返回值的类型注解，例如 `def func(x: int, y: str) -> bool:`
+- **步长切片**：支持带步长的切片操作，例如 `list[::2]`、`list[::-1]`、`list[1:10:2]`
+- **字典/列表解包**：支持函数调用中的 `*args` 和 `**kwargs` 解包，例如 `func(*[1,2,3])` 和 `func(**{'a':1})`
 - **并发架构**：实现了完整的类似 Go 语言 goroutine 的高性能并发架构，无 GIL 锁，支持真正的并行执行
   - 协程调度器：多线程调度器，支持成千上万并发协程
   - Channel 通信：支持有缓冲和无缓冲通道，提供协程间安全通信
@@ -28,12 +33,12 @@
 - **elif 语句**：完整支持条件分支 `if-elif-else` 结构
 - **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
 - **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string
-- **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释，添加 `async` 和 `await` 关键字支持
-- **AST 改进**：添加 `AwaitExpression` 节点类型，`FunctionLiteral` 添加 `IsAsync` 字段
-- **Parser 改进**：添加 `parseAsyncFunction` 和 `parseAwaitExpression` 解析函数，修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析
+- **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释，添加 `async`、`await`、`global`、`nonlocal`、`return_type` 和 `WALRUS` 关键字支持
+- **AST 改进**：添加 `AwaitExpression` 节点类型，`FunctionLiteral` 添加 `IsAsync` 字段，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 节点类型
+- **Parser 改进**：添加 `parseAsyncFunction` 和 `parseAwaitExpression` 解析函数，修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析，添加 `parseNamedExpression`、`parseGlobalStatement`、`parseNonlocalStatement`，支持类型注解和步长切片解析
 - **VM 改进**：修复可变参数 basePointer 计算错误，支持 OpGreaterThan 和 OpLessThan，添加 lastPopped 字段用于修复 Lambda 测试问题，添加 `OpMakeAsync` 和 `OpAwait` 操作码支持，添加 `Async` 和 `Future` 对象类型
-- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖，保留 `AwaitExpression` 和 `FunctionLiteral.IsAsync`
-- **Compiler 改进**：添加 `OpMakeAsync` 和 `OpAwait` 操作码，`CompiledFunction` 添加 `IsAsync` 字段，修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name）
+- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖，保留 `AwaitExpression` 和 `FunctionLiteral.IsAsync`，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 脱糖支持
+- **Compiler 改进**：添加 `OpMakeAsync` 和 `OpAwait` 操作码，`CompiledFunction` 添加 `IsAsync` 字段，修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name），添加 `OpListUnpack` 和 `OpDictUnpack` 操作码，支持 Walrus 运算符编译，支持步长切片编译，SymbolTable 添加 `DefineGlobal`、`DefineNonlocal`、`IsGlobal`、`IsNonlocal` 方法
 - **新增测试文件**：
   - tests/features/test_decorators.py
   - tests/features/test_varargs.py
