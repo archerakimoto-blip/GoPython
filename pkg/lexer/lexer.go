@@ -281,6 +281,10 @@ func (l *Lexer) NextToken() Token {
 	case '"':
 		tok.Type = STRING
 		tok.Literal = l.readString()
+	case '#':
+		// Skip comment until end of line
+		l.skipComment()
+		return l.NextToken()
 	case 'f':
 		if l.peekChar() == '"' {
 			l.readChar()
@@ -331,7 +335,7 @@ func (l *Lexer) peekChar() byte {
 
 func (l *Lexer) readIdentifier() string {
 	position := l.position
-	for isLetter(l.ch) {
+	for isLetter(l.ch) || isDigit(l.ch) {
 		l.readChar()
 	}
 	return l.input[position:l.position]
@@ -365,6 +369,12 @@ func (l *Lexer) readString() string {
 		}
 	}
 	return l.input[position:l.position]
+}
+
+func (l *Lexer) skipComment() {
+	for l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
+		l.readChar()
+	}
 }
 
 func (l *Lexer) skipWhitespace() {
