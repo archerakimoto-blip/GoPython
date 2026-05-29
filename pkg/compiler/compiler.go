@@ -1502,6 +1502,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 			if err := c.Compile(node.Expression); err != nil {
 				return err
 			}
+			
+			if node.Cause != nil {
+				c.emit(OpDupTop)
+				
+				if err := c.Compile(node.Cause); err != nil {
+					return err
+				}
+				
+				c.emit(OpSetAttribute, c.addConstant(&objects.String{Value: "__cause__"}))
+				
+				c.emit(OpDupTop)
+			}
 		} else {
 			c.emit(OpNull)
 		}

@@ -260,10 +260,10 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 		return desugaredTry
 	case *ast.RaiseStatement:
-		// 对 raise 语句进行脱糖处理：脱糖表达式
 		return &ast.RaiseStatement{
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
+			Cause:      desugarExpression(s.Cause),
 		}
 	case *ast.WithStatement:
 		// 对 with 语句进行脱糖处理：多重上下文管理器脱糖为嵌套with语句

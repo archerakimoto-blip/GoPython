@@ -99,6 +99,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.POWER, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.POWER_EQ, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RPAREN, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.EXCEPT, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.AS, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.TRY, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.NOT, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
 	p.registerInfix(lexer.PLUS, p.parseInfixExpression)
@@ -573,7 +577,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.FROM) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -587,7 +591,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		leftExp = infix(leftExp)
 	}
 
-	if p.peekTokenIs(lexer.EXCEPT) || p.peekTokenIs(lexer.FINALLY) || p.peekTokenIs(lexer.ELSE) {
+	if p.peekTokenIs(lexer.EXCEPT) || p.peekTokenIs(lexer.FINALLY) || p.peekTokenIs(lexer.ELSE) || p.peekTokenIs(lexer.FROM) {
 		p.nextToken()
 	}
 
@@ -1767,6 +1771,11 @@ func (p *Parser) parseRaiseStatement() *ast.RaiseStatement {
 	p.nextToken()
 	if !p.curTokenIs(lexer.SEMICOLON) && !p.curTokenIs(lexer.RBRACE) && !p.curTokenIs(lexer.EOF) {
 		stmt.Expression = p.parseExpression(LOWEST)
+
+		if p.curTokenIs(lexer.FROM) {
+			p.nextToken()
+			stmt.Cause = p.parseExpression(LOWEST)
+		}
 	}
 
 	return stmt

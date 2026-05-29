@@ -876,11 +876,15 @@ func (ts *TryStatement) String() string {
 type RaiseStatement struct {
 	Token       string
 	Expression  Expression
+	Cause       Expression
 }
 
 func (rs *RaiseStatement) statementNode()       {}
 func (rs *RaiseStatement) TokenLiteral() string { return rs.Token }
 func (rs *RaiseStatement) String() string {
+	if rs.Expression != nil && rs.Cause != nil {
+		return "raise " + rs.Expression.String() + " from " + rs.Cause.String()
+	}
 	if rs.Expression != nil {
 		return "raise " + rs.Expression.String()
 	}

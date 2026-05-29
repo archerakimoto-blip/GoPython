@@ -63,7 +63,7 @@ go build -o gopy ./cmd/gopy
 - **并发模块** - concurrency 模块，提供完整的并发编程 API（go、channel、send、recv、sleep、mutex 等）
 
 ### 高级特性
-- 异常处理 (try/except/finally)
+- 异常处理 (try/except/finally，**异常链 from**)
 - 上下文管理器 (with 语句，支持多个上下文管理器)
 - 生成器 (yield 语句，yield from 委托)
 - Lambda 表达式和闭包
