@@ -1295,17 +1295,16 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// 处理 global 和 nonlocal 声明
 		// 需要在编译 body 之前处理这些声明，因为它们会影响变量的作用域解析
-		if blockStmt, ok := node.Body.(*ast.BlockStatement); ok {
-			for _, stmt := range blockStmt.Statements {
-				switch s := stmt.(type) {
-				case *ast.GlobalStatement:
-					for _, name := range s.Names {
-						c.symbolTable.DefineGlobal(name.Value)
-					}
-				case *ast.NonlocalStatement:
-					for _, name := range s.Names {
-						c.symbolTable.DefineNonlocal(name.Value)
-					}
+		blockStmt := node.Body
+		for _, stmt := range blockStmt.Statements {
+			switch s := stmt.(type) {
+			case *ast.GlobalStatement:
+				for _, name := range s.Names {
+					c.symbolTable.DefineGlobal(name.Value)
+				}
+			case *ast.NonlocalStatement:
+				for _, name := range s.Names {
+					c.symbolTable.DefineNonlocal(name.Value)
 				}
 			}
 		}

@@ -283,8 +283,6 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(GT, l.ch)
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
-	case ':':
-		tok = newToken(COLON, l.ch)
 	case '.':
 		tok = newToken(DOT, l.ch)
 	case '@':

@@ -258,6 +258,18 @@ func (ce *CallExpression) String() string {
 	return out.String()
 }
 
+type KeyValuePair struct {
+	Token string
+	Key   Expression
+	Value Expression
+}
+
+func (kvp *KeyValuePair) expressionNode()      {}
+func (kvp *KeyValuePair) TokenLiteral() string { return kvp.Token }
+func (kvp *KeyValuePair) String() string {
+	return kvp.Key.String() + ": " + kvp.Value.String()
+}
+
 type ListLiteral struct {
 	Token    string
 	Elements []Expression
@@ -320,14 +332,27 @@ func (ie *IndexExpression) String() string {
 }
 
 type HashLiteral struct {
-	Token string
-	Pairs map[Expression]Expression
+	Token    string
+	Pairs    map[Expression]Expression
+	Elements []Expression // 混合了键值对和解包表达式的元素
 }
 
 func (hl *HashLiteral) expressionNode()      {}
 func (hl *HashLiteral) TokenLiteral() string { return hl.Token }
 func (hl *HashLiteral) String() string {
 	var out bytes.Buffer
+	if hl.Elements != nil {
+		// 如果有混合元素，使用新格式
+		elements := []string{}
+		for _, el := range hl.Elements {
+			elements = append(elements, el.String())
+		}
+		out.WriteString("{")
+		out.WriteString(strings.Join(elements, ", "))
+		out.WriteString("}")
+		return out.String()
+	}
+	// 旧格式兼容
 	pairs := []string{}
 	for key, value := range hl.Pairs {
 		pairs = append(pairs, key.String()+": "+value.String())

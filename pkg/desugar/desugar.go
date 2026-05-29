@@ -583,15 +583,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Function:  desugarExpression(e.Function),
 			Arguments: desugaredArgs,
 		}
-	case *ast.ListLiteral:
-		desugaredElements := make([]ast.Expression, 0, len(e.Elements))
-		for _, el := range e.Elements {
-			desugaredElements = append(desugaredElements, desugarExpression(el))
-		}
-		return &ast.ListLiteral{
-			Token:    e.Token,
-			Elements: desugaredElements,
-		}
 	case *ast.IndexExpression:
 		return &ast.IndexExpression{
 			Token: e.Token,
@@ -617,7 +608,22 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Token: e.Token,
 			Value: desugarExpression(e.Value),
 		}
+	case *ast.KeyValuePair:
+		return &ast.KeyValuePair{
+			Token: e.Token,
+			Key:   desugarExpression(e.Key),
+			Value: desugarExpression(e.Value),
+		}
 	case *ast.HashLiteral:
+		if e.Elements != nil {
+			// 混合字典字面量，需要脱糖
+			desugaredElements := []ast.Expression{}
+			for _, el := range e.Elements {
+				desugaredElements = append(desugaredElements, desugarExpression(el))
+			}
+			return desugarMixedDictLiteral(desugaredElements)
+		}
+		// 旧格式兼容
 		desugaredPairs := make(map[ast.Expression]ast.Expression)
 		for key, value := range e.Pairs {
 			desugaredPairs[desugarExpression(key)] = desugarExpression(value)
@@ -625,6 +631,32 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		return &ast.HashLiteral{
 			Token: e.Token,
 			Pairs: desugaredPairs,
+		}
+	case *ast.ListLiteral:
+		// 检查是否包含解包元素
+		hasUnpack := false
+		for _, el := range e.Elements {
+			if _, ok := el.(*ast.ListUnpack); ok {
+				hasUnpack = true
+				break
+			}
+		}
+		if hasUnpack {
+			// 混合列表字面量，脱糖
+			desugaredElements := []ast.Expression{}
+			for _, el := range e.Elements {
+				desugaredElements = append(desugaredElements, desugarExpression(el))
+			}
+			return desugarMixedListLiteral(desugaredElements)
+		}
+		// 普通列表字面量
+		desugaredElements := []ast.Expression{}
+		for _, el := range e.Elements {
+			desugaredElements = append(desugaredElements, desugarExpression(el))
+		}
+		return &ast.ListLiteral{
+			Token:    e.Token,
+			Elements: desugaredElements,
 		}
 	case *ast.ListComprehension:
 		return desugarListComprehension(e)
@@ -756,6 +788,140 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 			whileStmt,
 		},
 	}
-
 	return block
+}
+
+func desugarMixedListLiteral(elements []ast.Expression) ast.Expression {
+	// 创建临时变量名称
+	tempName := &ast.Identifier{Token: "_list", Value: "_list"}
+	statements := []ast.Statement{}
+	// 创建空列表
+	statements = append(statements, &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{tempName},
+		Value: &ast.ListLiteral{
+			Token:    "[",
+			Elements: []ast.Expression{},
+		},
+	})
+
+	for _, el := range elements {
+		if unpack, ok := el.(*ast.ListUnpack); ok {
+			// 解包：调用 extend
+			statements = append(statements, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "extend",
+					Function: &ast.MemberAccess{
+						Token: ".",
+						Object: tempName,
+						Member: &ast.Identifier{Token: "extend", Value: "extend"},
+					},
+					Arguments: []ast.Expression{unpack.Value},
+				},
+			})
+		} else {
+			// 普通元素：调用 append
+			statements = append(statements, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "append",
+					Function: &ast.MemberAccess{
+						Token: ".",
+						Object: tempName,
+						Member: &ast.Identifier{Token: "append", Value: "append"},
+					},
+					Arguments: []ast.Expression{el},
+				},
+			})
+		}
+	}
+
+	// 返回临时变量作为结果
+	statements = append(statements, &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: tempName,
+	})
+
+	// 将整个序列包装在一个立即执行的函数中
+	// 这样我们可以有一个 BlockStatement 但返回一个 Expression
+	resultExpr := &ast.CallExpression{
+		Token: "()",
+		Function: &ast.FunctionLiteral{
+			Token:       "def",
+			Name:        "",
+			Parameters:  []*ast.Identifier{},
+			Body:        &ast.BlockStatement{Token: "{", Statements: statements},
+			Decorators:  []ast.Expression{},
+			IsAsync:     false,
+		},
+		Arguments: []ast.Expression{},
+	}
+
+	return resultExpr
+}
+
+func desugarMixedDictLiteral(elements []ast.Expression) ast.Expression {
+	// 创建临时变量名称
+	tempName := &ast.Identifier{Token: "_dict", Value: "_dict"}
+	statements := []ast.Statement{}
+	// 创建空字典
+	statements = append(statements, &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{tempName},
+		Value: &ast.HashLiteral{
+			Token: "{",
+			Pairs: map[ast.Expression]ast.Expression{},
+		},
+	})
+
+	for _, el := range elements {
+		if unpack, ok := el.(*ast.DictionaryUnpack); ok {
+			// 字典解包：调用 update
+			statements = append(statements, &ast.ExpressionStatement{
+				Expression: &ast.CallExpression{
+					Token: "update",
+					Function: &ast.MemberAccess{
+						Token: ".",
+						Object: tempName,
+						Member: &ast.Identifier{Token: "update", Value: "update"},
+					},
+					Arguments: []ast.Expression{unpack.Value},
+				},
+			})
+		} else if kv, ok := el.(*ast.KeyValuePair); ok {
+				// 键值对：调用 __setitem__
+				statements = append(statements, &ast.ExpressionStatement{
+					Expression: &ast.CallExpression{
+						Token: "__setitem__",
+						Function: &ast.MemberAccess{
+							Token: ".",
+							Object: tempName,
+							Member: &ast.Identifier{Token: "__setitem__", Value: "__setitem__"},
+						},
+						Arguments: []ast.Expression{kv.Key, kv.Value},
+					},
+				})
+			}
+	}
+
+	// 返回临时变量作为结果
+	statements = append(statements, &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: tempName,
+	})
+
+	// 将整个序列包装在一个立即执行的函数中
+	resultExpr := &ast.CallExpression{
+		Token: "()",
+		Function: &ast.FunctionLiteral{
+			Token:       "def",
+			Name:        "",
+			Parameters:  []*ast.Identifier{},
+			Body:        &ast.BlockStatement{Token: "{", Statements: statements},
+			Decorators:  []ast.Expression{},
+			IsAsync:     false,
+		},
+		Arguments: []ast.Expression{},
+	}
+
+	return resultExpr
 }

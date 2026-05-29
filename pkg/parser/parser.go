@@ -1111,11 +1111,24 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	}
 
 	// Now, check if it's a list comprehension or a normal list
-	// Let's try to parse an expression and see if next token is FOR
+	// First, check if it starts with an unpack
+	var firstExpr ast.Expression
 	p.nextToken()
-	firstExpr := p.parseExpression(EQUALS)
-	if firstExpr == nil {
-		return nil
+	
+	if p.curTokenIs(lexer.ASTERISK) {
+		// List unpack
+		op := p.curToken.Literal
+		p.nextToken()
+		value := p.parseExpression(LOWEST)
+		if value != nil {
+			firstExpr = &ast.ListUnpack{Token: op, Value: value}
+		}
+	} else {
+		// Try normal expression
+		firstExpr = p.parseExpression(EQUALS)
+		if firstExpr == nil {
+			return nil
+		}
 	}
 
 	// Now check if next token is FOR! That means list comprehension!
@@ -1163,12 +1176,28 @@ func (p *Parser) parseListLiteral() ast.Expression {
 
 	// Okay, it's a normal list literal! Let's collect all elements
 	list := &ast.ListLiteral{Token: p.curToken.Literal}
-	elements := []ast.Expression{firstExpr}
+	elements := []ast.Expression{}
+	if firstExpr != nil {
+		elements = append(elements, firstExpr)
+	}
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		exp := p.parseExpression(LOWEST)
+		
+		var exp ast.Expression
+		if p.curTokenIs(lexer.ASTERISK) {
+			// List unpack
+			op := p.curToken.Literal
+			p.nextToken()
+			value := p.parseExpression(LOWEST)
+			if value != nil {
+				exp = &ast.ListUnpack{Token: op, Value: value}
+			}
+		} else {
+			exp = p.parseExpression(LOWEST)
+		}
+		
 		if exp != nil {
 			elements = append(elements, exp)
 		}
@@ -1488,31 +1517,71 @@ func (p *Parser) parseDictLiteral() ast.Expression {
 }
 
 func (p *Parser) parseNormalDictLiteral() ast.Expression {
-	// Parse normal dict literal (already called p.nextToken() once to get past {)
+	// Parse normal dict literal (supports key:value and **dict)
 	dict := &ast.HashLiteral{Token: "{"}
-	dict.Pairs = make(map[ast.Expression]ast.Expression)
-	// Reset: let's make sure we parse from the start of dict again
-	// Wait, we can't easily reset, so for simplicity let's implement parseNormalDictLiteral by just parsing pairs
-	// First get back to the { by creating a new parser? No, better to just assume we are at first token of dict, let's try
-	// Wait maybe it's easier to just return nil for now, and we'll revisit, but first let's try a test case for dictionary comprehension!
-	// Let's first implement desugar for ListComprehension and DictComprehension!
-	for !p.peekTokenIs(lexer.RBRACE) {
-		if p.curTokenIs(lexer.RBRACE) {
-			break
+	dict.Elements = []ast.Expression{}
+
+	// First element
+	if p.curTokenIs(lexer.POWER) {
+		// **dict unpack
+		op := p.curToken.Literal
+		p.nextToken()
+		value := p.parseExpression(LOWEST)
+		if value != nil {
+			dict.Elements = append(dict.Elements, &ast.DictionaryUnpack{Token: op, Value: value})
 		}
+	} else if p.curTokenIs(lexer.RBRACE) {
+		// Empty dict
+		p.nextToken()
+		return dict
+	} else {
+		// Normal key:value
 		key := p.parseExpression(LOWEST)
 		if !p.expectPeek(lexer.COLON) {
 			return nil
 		}
 		p.nextToken()
 		value := p.parseExpression(LOWEST)
-		dict.Pairs[key] = value
-		if !p.peekTokenIs(lexer.RBRACE) && !p.expectPeek(lexer.COMMA) {
-			return nil
+		dict.Elements = append(dict.Elements, &ast.KeyValuePair{Token: ":", Key: key, Value: value})
+	}
+
+	// Parse rest of elements
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		if p.peekTokenIs(lexer.RBRACE) {
+			// Allow trailing comma
+			p.nextToken()
+			break
+		}
+		p.nextToken()
+		
+		if p.curTokenIs(lexer.POWER) {
+			// **dict unpack
+			op := p.curToken.Literal
+			p.nextToken()
+			value := p.parseExpression(LOWEST)
+			if value != nil {
+				dict.Elements = append(dict.Elements, &ast.DictionaryUnpack{Token: op, Value: value})
+			}
+		} else {
+			// Normal key:value
+			key := p.parseExpression(LOWEST)
+			if !p.expectPeek(lexer.COLON) {
+				return nil
+			}
+			p.nextToken()
+			value := p.parseExpression(LOWEST)
+			dict.Elements = append(dict.Elements, &ast.KeyValuePair{Token: ":", Key: key, Value: value})
 		}
 	}
-	if !p.expectPeek(lexer.RBRACE) {
-		return nil
+
+	// Consume closing }
+	if !p.curTokenIs(lexer.RBRACE) {
+		if !p.expectPeek(lexer.RBRACE) {
+			return nil
+		}
+	} else {
+		p.nextToken()
 	}
 	return dict
 }
@@ -1591,7 +1660,7 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 				}
 				list = append(list, keywordArg)
 			} else {
-				exp = p.parseExpression(LOWEST)
+				exp := p.parseExpression(LOWEST)
 				if exp != nil {
 					list = append(list, exp)
 				}

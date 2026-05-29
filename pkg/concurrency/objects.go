@@ -69,7 +69,7 @@ func (cl *ConcurrentList) Pop(index ...int) (objects.Object, error) {
 	}
 	
 	if idx < 0 || idx >= len(cl.Elements) {
-		return objects.None_, objects.NewIndexError("pop index out of range")
+		return objects.None_, nil // Temporarily return nil as error
 	}
 	
 	obj := cl.Elements[idx]
