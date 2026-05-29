@@ -11,6 +11,17 @@ import (
 	"github.com/go-py/go-python/pkg/objects"
 )
 
+var (
+	listMethods = map[string]bool{
+		"append": true,
+		"extend": true,
+		"insert": true,
+		"remove": true,
+		"pop":    true,
+	}
+	listMethodIndices = map[string]int{}
+)
+
 type Opcode byte
 
 const (
@@ -68,6 +79,8 @@ const (
 	OpAwait
 	OpListUnpack
 	OpDictUnpack
+	OpSwap
+	OpCallBuiltinMethod
 )
 
 type EmittedInstruction struct {
@@ -349,6 +362,7 @@ func (c *Compiler) registerBuiltins() {
 	appendIndex := len(c.constants)
 	c.constants = append(c.constants, appendBuiltin)
 	c.symbolTable.DefineBuiltin("append", appendIndex)
+	listMethodIndices["append"] = appendIndex
 
 	// setitem: set dict[key] = value
 	setitemBuiltin := &objects.Builtin{
@@ -1858,10 +1872,22 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 }
 
 func (c *Compiler) compileMemberAccess(node *ast.MemberAccess) error {
-	if err := c.Compile(node.Object); err != nil {
-		return err
+	methodName := node.Member.Value
+	if listMethods[methodName] {
+		if idx, ok := listMethodIndices[methodName]; ok {
+			c.emit(OpConstant, idx)
+		} else {
+			if err := c.Compile(node.Object); err != nil {
+				return err
+			}
+			c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: methodName}))
+		}
+	} else {
+		if err := c.Compile(node.Object); err != nil {
+			return err
+		}
+		c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Member.Value}))
 	}
-	c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Member.Value}))
 	return nil
 }
 
@@ -1870,7 +1896,16 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 		return err
 	}
 	
-	c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: node.Method.Value}))
+	methodName := node.Method.Value
+	if listMethods[methodName] {
+		if idx, ok := listMethodIndices[methodName]; ok {
+			c.emit(OpConstant, idx)
+		} else {
+			c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: methodName}))
+		}
+	} else {
+		c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: methodName}))
+	}
 	
 	for _, arg := range node.Arguments {
 		if err := c.Compile(arg); err != nil {
@@ -1878,7 +1913,11 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 		}
 	}
 	
-	c.emit1(OpCall, len(node.Arguments))
+	if listMethods[methodName] {
+		c.emit1(OpCallBuiltinMethod, len(node.Arguments))
+	} else {
+		c.emit1(OpCall, len(node.Arguments))
+	}
 	return nil
 }
 

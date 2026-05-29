@@ -1159,10 +1159,12 @@ func (p *Parser) parseListLiteral() ast.Expression {
 
 	// Now check if next token is FOR or ASYNC! That means list comprehension!
 	isAsyncFor := false
-	isFor := p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR)
+	isFor := false
 
-	if !isFor && p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
+	if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
 		isAsyncFor = true
+	} else if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+		isFor = true
 	}
 
 	if isAsyncFor || isFor {
@@ -1197,6 +1199,11 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 		p.nextToken()
 		comp.Iterable = p.parseExpression(LOWEST)
+
+		if p.curTokenIs(lexer.RBRACKET) {
+			p.nextToken()
+			return comp
+		}
 
 		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
 			if !p.curTokenIs(lexer.IF) {

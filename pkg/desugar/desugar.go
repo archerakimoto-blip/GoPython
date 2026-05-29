@@ -1,6 +1,8 @@
 package desugar
 
 import (
+	"fmt"
+
 	"github.com/go-py/go-python/pkg/ast"
 )
 
@@ -728,6 +730,7 @@ func isComparisonOp(op string) bool {
 }
 
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
+	fmt.Printf("DEBUG desugarListComprehension: IsAsync=%v\n", lc.IsAsync)
 	// 先脱糖子表达式
 	lc.Element = desugarExpression(lc.Element)
 	lc.Iterable = desugarExpression(lc.Iterable)
@@ -740,8 +743,77 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 		return desugarAsyncComprehension(lc)
 	}
 
-	// 普通列表推导式先原样返回，让编译器处理
-	return lc
+	// 普通列表推导式脱糖为 for 循环
+	// [x * 2 for x in items] -> let _result = []; for x in items: _result.append(x * 2); _result
+	resultVar := &ast.Identifier{Token: "_result", Value: "_result"}
+	resultInit := &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{resultVar},
+		Value: &ast.ListLiteral{Token: "[]"},
+	}
+
+	appendCall := &ast.CallExpression{
+		Token: "append",
+		Function: &ast.MemberAccess{
+			Token:  ".",
+			Object: resultVar,
+			Member: &ast.Identifier{Token: "append", Value: "append"},
+		},
+		Arguments: []ast.Expression{lc.Element},
+	}
+
+	var bodyStatements []ast.Statement
+	if lc.Filter != nil {
+		ifExpr := &ast.IfExpression{
+			Token:     "if",
+			Condition: lc.Filter,
+			Consequence: &ast.BlockStatement{
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{Expression: appendCall},
+				},
+			},
+		}
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{Expression: ifExpr})
+	} else {
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{Expression: appendCall})
+	}
+
+	forStmt := &ast.ForStatement{
+		Token:    "for",
+		Value:    lc.Variable,
+		Iterable: lc.Iterable,
+		Body:     &ast.BlockStatement{Statements: bodyStatements},
+	}
+
+	desugaredBlock := desugarForToWhile(forStmt)
+	var forLoopStatements []ast.Statement
+	forLoopStatements = desugaredBlock.Statements
+
+	returnStmt := &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: resultVar,
+	}
+
+	allStatements := make([]ast.Statement, 0, len(forLoopStatements)+2)
+	allStatements = append(allStatements, resultInit)
+	allStatements = append(allStatements, forLoopStatements...)
+	allStatements = append(allStatements, returnStmt)
+
+	funcBody := &ast.BlockStatement{
+		Statements: allStatements,
+	}
+
+	funcLit := &ast.FunctionLiteral{
+		Token:      "def",
+		Parameters: []*ast.Identifier{},
+		Body:       funcBody,
+	}
+
+	return &ast.CallExpression{
+		Token:     "(",
+		Function:  funcLit,
+		Arguments: []ast.Expression{},
+	}
 }
 
 func desugarAsyncComprehension(lc *ast.ListComprehension) ast.Expression {

@@ -767,6 +767,36 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+		case compiler.OpSwap:
+			// Swap the top two values on the stack
+			if vm.sp < 2 {
+				return fmt.Errorf("stack overflow: not enough values to swap")
+			}
+			vm.stack[vm.sp-1], vm.stack[vm.sp-2] = vm.stack[vm.sp-2], vm.stack[vm.sp-1]
+		case compiler.OpCallBuiltinMethod:
+			numArgs := int(ins[ip+1])
+			vm.currentFrame().ip += 1
+
+			// Stack is [..., list, builtin, arg1, arg2, ...]
+			// calleeIndex points to builtin function
+			calleeIndex := vm.sp - numArgs - 1
+			calleeObj := vm.stack[calleeIndex]
+
+			builtin, ok := calleeObj.(*objects.Builtin)
+			if !ok {
+				return fmt.Errorf("calling non-function for builtin method: type %T", calleeObj)
+			}
+
+			// 构建参数：[list, arg1, arg2, ...]
+			args := make([]objects.Object, numArgs+1)
+			args[0] = vm.stack[calleeIndex-1] // list (self)
+			for i := 0; i < numArgs; i++ {
+				args[i+1] = vm.stack[vm.sp-numArgs+i]
+			}
+
+			result := builtin.Fn(args...)
+			vm.sp = vm.sp - numArgs - 2 // 移除所有参数和 builtin 函数
+			return vm.push(result)
 		case compiler.OpCreateClass:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
@@ -1176,6 +1206,12 @@ func (vm *VM) executeBangOperator() error {
 func (vm *VM) executeComparison(op compiler.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+
+	fmt.Printf("DEBUG executeComparison: left=%v (type=%T), right=%v (type=%T), sp=%d\n", left, left, right, right, vm.sp)
+
+	if left == nil || right == nil {
+		return fmt.Errorf("nil operand in comparison: left=%v, right=%v", left, right)
+	}
 
 	if left.Type() == objects.INTEGER_OBJ && right.Type() == objects.INTEGER_OBJ {
 		return vm.executeIntegerComparison(op, left, right)
