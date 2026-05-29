@@ -48,9 +48,11 @@ go build -o gopy ./cmd/gopy
 - **Goroutine 协程** - 轻量级执行单元，支持成千上万并发协程
 - **Channel 通道** - 协程间通信机制，支持有缓冲和无缓冲通道
 - **协程调度器** - 多线程调度器，无 GIL 锁，支持真正的并行执行
+- **async/await 语法** - Python 风格的异步编程语法，支持 `async def` 和 `await` 表达式
+- **异步对象** - Async 和 Future 对象，用于异步任务管理
 - **并发安全数据结构** - ConcurrentList、ConcurrentDict
 - **同步原语** - Mutex、WaitGroup、Once、原子整数、对象池
-- **并发模块** - concurrency 模块，提供完整的并发编程 API
+- **并发模块** - concurrency 模块，提供完整的并发编程 API（go、channel、send、recv、sleep、mutex 等）
 
 ### 高级特性
 - 异常处理 (try/except/finally)
@@ -73,7 +75,6 @@ go build -o gopy ./cmd/gopy
 ## 未支持的特性
 
 以下特性暂不支持，欢迎贡献！
-- 异步编程 (async/await) - 可通过并发模块实现
 - 类型注解 (Type Hints)
 - 更多 Python 标准库
 
