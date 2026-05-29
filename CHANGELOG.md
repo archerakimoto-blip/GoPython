@@ -6,6 +6,12 @@
 
 ### 新增特性
 
+- **并发架构**：实现了完整的类似 Go 语言 goroutine 的高性能并发架构，无 GIL 锁，支持真正的并行执行
+  - 协程调度器：多线程调度器，支持成千上万并发协程
+  - Channel 通信：支持有缓冲和无缓冲通道，提供协程间安全通信
+  - 并发安全数据结构：ConcurrentList、ConcurrentDict
+  - 同步原语：Mutex、WaitGroup、Once、原子整数、对象池
+  - 并发模块：concurrency 模块，提供完整的并发编程 API
 - **装饰器支持**（Decorators）：支持 `@decorator` 语法，包括简单装饰器、多个装饰器、带参数的装饰器
 - **多重赋值/元组解包**：支持 `let a, b = 1, 2` 和 `x, y = [3,4]` 语法
 - **链式比较**：支持 `a < b < c` 语法，自动转换为 `(a < b) and (b < c)`
@@ -30,6 +36,10 @@
   - tests/features/test_varargs.py
   - tests/features/test_kwargs.py
   - tests/features/test_keyword_args.py
+  - tests/concurrency_examples/ping_pong.py
+  - tests/concurrency_examples/producer_consumer.py
+- **新增文档**：
+  - docs/concurrency_architecture.md：并发架构设计文档
 
 ### 修复的问题
 

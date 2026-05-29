@@ -1,6 +1,6 @@
 # Go Python 解释器 (GoPy)
 
-一个用 Go 语言编写的高效 Python 解释器，包含完整的 JIT 编译架构、调试工具和性能分析器。
+一个用 Go 语言编写的高效 Python 解释器，包含完整的 JIT 编译架构、调试工具、性能分析器和高性能并发系统。
 
 详细更新历史请查看 [CHANGELOG.md](CHANGELOG.md)
 
@@ -44,6 +44,14 @@ go build -o gopy ./cmd/gopy
 - 切片操作和索引赋值
 - pass 语句
 
+### 并发特性
+- **Goroutine 协程** - 轻量级执行单元，支持成千上万并发协程
+- **Channel 通道** - 协程间通信机制，支持有缓冲和无缓冲通道
+- **协程调度器** - 多线程调度器，无 GIL 锁，支持真正的并行执行
+- **并发安全数据结构** - ConcurrentList、ConcurrentDict
+- **同步原语** - Mutex、WaitGroup、Once、原子整数、对象池
+- **并发模块** - concurrency 模块，提供完整的并发编程 API
+
 ### 高级特性
 - 异常处理 (try/except/finally)
 - 上下文管理器 (with 语句，支持多个上下文管理器)
@@ -60,13 +68,12 @@ go build -o gopy ./cmd/gopy
 - CPython 互操作
 
 ### 标准库
-- math, sys, os, json, gc, random, string, time, datetime
+- math, sys, os, json, gc, random, string, time, datetime, concurrency
 
 ## 未支持的特性
 
 以下特性暂不支持，欢迎贡献！
-- 异步编程 (async/await)
-- 多进程/多线程
+- 异步编程 (async/await) - 可通过并发模块实现
 - 类型注解 (Type Hints)
 - 更多 Python 标准库
 
@@ -84,10 +91,14 @@ go build -o gopy ./cmd/gopy
 │   ├── compiler/       # 字节码编译器
 │   ├── vm/             # 虚拟机
 │   ├── objects/        # 核心对象系统
+│   ├── concurrency/    # 并发系统（协程、调度器、Channel）
 │   ├── jit/            # JIT 编译器
 │   ├── gc/             # 垃圾回收器
 │   ├── debugger/       # 调试器
 │   └── profiler/       # 性能分析器
 ├── tests/              # 测试用例
+│   ├── features/       # 功能测试
+│   └── concurrency_examples/  # 并发示例
+├── docs/               # 文档
 └── go.mod
 ```
