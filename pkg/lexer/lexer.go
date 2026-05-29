@@ -78,6 +78,10 @@ const (
 	FROM     = "FROM"
 	ASYNC    = "ASYNC"
 	AWAIT    = "AWAIT"
+	WALRUS   = "WALRUS"
+	GLOBAL   = "GLOBAL"
+	NONLOCAL = "NONLOCAL"
+	RETURN_TYPE = "RETURN_TYPE"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -118,6 +122,8 @@ var keywords = map[string]TokenType{
 	"from":   FROM,
 	"async":  ASYNC,
 	"await":  AWAIT,
+	"global": GLOBAL,
+	"nonlocal": NONLOCAL,
 }
 
 type Lexer struct {
@@ -193,6 +199,14 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok = newToken(ASSIGN, l.ch)
 		}
+	case ':':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: WALRUS, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(COLON, l.ch)
+		}
 	case '+':
 		if l.peekChar() == '=' {
 			ch := l.ch
@@ -202,7 +216,11 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(PLUS, l.ch)
 		}
 	case '-':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: RETURN_TYPE, Literal: string(ch) + string(l.ch)}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: MINUS_EQ, Literal: string(ch) + string(l.ch)}

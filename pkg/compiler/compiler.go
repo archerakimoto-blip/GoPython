@@ -66,6 +66,8 @@ const (
 	OpFormatString
 	OpMakeAsync
 	OpAwait
+	OpListUnpack
+	OpDictUnpack
 )
 
 type EmittedInstruction struct {
@@ -1008,6 +1010,26 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 		c.emit(OpAwait)
+	case *ast.NamedExpression:
+		// Walrus 运算符: x := expr
+		// 编译表达式并将结果赋值给变量
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+
+		// Walrus 运算符需要：1. 赋值给变量，2. 返回赋值结果
+		// 策略：复制栈顶值 -> 一份用于赋值，一份用于返回
+		c.emit(OpDupTop) // 复制栈顶值，此时栈上有两个相同的值
+
+		// 获取栈顶的值用于赋值
+		symbol := c.symbolTable.Define(node.Name.Value)
+		if symbol.Scope == GlobalScope {
+			c.emit(OpSetGlobal, symbol.Index)
+		} else {
+			c.emit1(OpSetLocal, symbol.Index)
+		}
+		// 此时栈顶还有一个值（原始值的副本），作为表达式结果返回
 
 	case *ast.IntegerLiteral:
 		integer := &objects.Integer{Value: node.Value}
@@ -1028,6 +1050,22 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if err != nil {
 			return err
 		}
+
+	case *ast.DictionaryUnpack:
+		// 字典解包: **dict
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+		c.emit(OpDictUnpack)
+
+	case *ast.ListUnpack:
+		// 列表解包: *list
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+		c.emit(OpListUnpack)
 
 	case *ast.FStringLiteral:
 		// 编译 f-string 的所有部分
@@ -1187,37 +1225,63 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpHash, len(node.Pairs)*2)
 
 	case *ast.IndexExpression:
-		err := c.Compile(node.Left)
-		if err != nil {
-			return err
+		if slice, ok := node.Index.(*ast.SliceExpression); ok {
+			// 处理切片表达式
+			err := c.Compile(node.Left)
+			if err != nil {
+				return err
+			}
+
+			// 编译 lower
+			if slice.Lower == nil {
+				c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+			} else {
+				err = c.Compile(slice.Lower)
+				if err != nil {
+					return err
+				}
+			}
+
+			// 编译 upper
+			if slice.Upper == nil {
+				c.emit(OpConstant, c.addConstant(&objects.Integer{Value: -1}))
+			} else {
+				err = c.Compile(slice.Upper)
+				if err != nil {
+					return err
+				}
+			}
+
+			// 编译 step
+			if slice.Step == nil {
+				// 默认步长为 None，VM 会根据上下文决定是 1 还是 -1
+				c.emit(OpNull)
+			} else {
+				err = c.Compile(slice.Step)
+				if err != nil {
+					return err
+				}
+			}
+
+			c.emit(OpSlice)
+		} else {
+			// 正常索引
+			err := c.Compile(node.Left)
+			if err != nil {
+				return err
+			}
+
+			err = c.Compile(node.Index)
+			if err != nil {
+				return err
+			}
+			c.emit(OpIndex)
 		}
-		err = c.Compile(node.Index)
-		if err != nil {
-			return err
-		}
-		c.emit(OpIndex)
 	case *ast.SliceExpression:
-		err := c.Compile(node.Left)
-		if err != nil {
-			return err
-		}
-		if node.Start == nil {
-			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
-		} else {
-			err = c.Compile(node.Start)
-			if err != nil {
-				return err
-			}
-		}
-		if node.End == nil {
-			c.emit(OpConstant, c.addConstant(&objects.Integer{Value: -1}))
-		} else {
-			err = c.Compile(node.End)
-			if err != nil {
-				return err
-			}
-		}
-		c.emit(OpSlice)
+		// SliceExpression 现在是 IndexExpression.Index，需要单独处理
+		// 但实际上，解析器现在返回的是 IndexExpression{Index: SliceExpression}
+		// 所以这个 case 不会被直接触发
+		return nil
 
 	case *ast.FunctionLiteral:
 		outerInstructions := c.instructions
@@ -1227,6 +1291,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		for _, p := range node.Parameters {
 			c.symbolTable.Define(p.Value)
+		}
+
+		// 处理 global 和 nonlocal 声明
+		// 需要在编译 body 之前处理这些声明，因为它们会影响变量的作用域解析
+		if blockStmt, ok := node.Body.(*ast.BlockStatement); ok {
+			for _, stmt := range blockStmt.Statements {
+				switch s := stmt.(type) {
+				case *ast.GlobalStatement:
+					for _, name := range s.Names {
+						c.symbolTable.DefineGlobal(name.Value)
+					}
+				case *ast.NonlocalStatement:
+					for _, name := range s.Names {
+						c.symbolTable.DefineNonlocal(name.Value)
+					}
+				}
+			}
 		}
 
 		err := c.Compile(node.Body)
@@ -1464,6 +1545,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpNull)
 		}
 		c.emit(OpYieldValue)
+		return nil
+	case *ast.GlobalStatement:
+		// global 语句只是声明，不需要编译任何代码
+		return nil
+	case *ast.NonlocalStatement:
+		// nonlocal 语句只是声明，不需要编译任何代码
 		return nil
 	case *ast.ClassStatement:
 		return c.compileClassStatement(node)

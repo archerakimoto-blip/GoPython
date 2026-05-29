@@ -128,6 +128,20 @@ func (ae *AwaitExpression) String() string {
 	return "(await " + ae.Value.String() + ")"
 }
 
+// NamedExpression 用于 Walrus 运算符 (:=) - Python 3.8+
+// 例如: (x := 5) 或 if (n := len(a)) > 10
+type NamedExpression struct {
+	Token  string
+	Name   *Identifier
+	Value  Expression
+}
+
+func (ne *NamedExpression) expressionNode()      {}
+func (ne *NamedExpression) TokenLiteral() string { return ne.Token }
+func (ne *NamedExpression) String() string {
+	return "(" + ne.Name.String() + " := " + ne.Value.String() + ")"
+}
+
 type InfixExpression struct {
 	Token    string
 	Left     Expression
@@ -263,10 +277,40 @@ func (al *ListLiteral) String() string {
 	return out.String()
 }
 
+type SliceExpression struct {
+	Token  string
+	Lower  Expression
+	Upper  Expression
+	Step   Expression // nil 表示无步长（使用默认值 1 或 -1）
+}
+
+func (s *SliceExpression) expressionNode()      {}
+func (s *SliceExpression) TokenLiteral() string { return s.Token }
+func (s *SliceExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("[")
+	if s.Lower != nil {
+		out.WriteString(s.Lower.String())
+	}
+	out.WriteString(":")
+	if s.Upper != nil {
+		out.WriteString(s.Upper.String())
+	}
+	if s.Step != nil {
+		out.WriteString(":")
+		out.WriteString(s.Step.String())
+	}
+	out.WriteString("]")
+	return out.String()
+}
+
+// IndexExpression represents array indexing and slicing
+// For simple indexing: array[index]
+// For slicing: array[lower:upper:step]
 type IndexExpression struct {
 	Token string
 	Left  Expression
-	Index Expression
+	Index Expression // Expression for simple index, or SliceExpression for slicing
 }
 
 func (ie *IndexExpression) expressionNode()      {}
@@ -313,26 +357,46 @@ func (sl *SetLiteral) String() string {
 	return out.String()
 }
 
-type SliceExpression struct {
+// DictionaryUnpack represents dictionary unpacking: **dict
+// Used in function calls (f(**kwargs)) and dict literals ({**d1, **d2})
+type DictionaryUnpack struct {
 	Token string
-	Left  Expression
-	Start Expression
-	End   Expression
+	Value Expression
 }
 
-func (se *SliceExpression) expressionNode()      {}
-func (se *SliceExpression) TokenLiteral() string { return se.Token }
-func (se *SliceExpression) String() string {
-	var startStr, endStr string
-	if se.Start != nil {
-		startStr = se.Start.String()
-	}
-	if se.End != nil {
-		endStr = se.End.String()
-	}
-	return "(" + se.Left.String() + "[" + startStr + ":" + endStr + "])"
+func (du *DictionaryUnpack) expressionNode()      {}
+func (du *DictionaryUnpack) TokenLiteral() string { return du.Token }
+func (du *DictionaryUnpack) String() string {
+	return "(**" + du.Value.String() + ")"
 }
 
+// ListUnpack represents list unpacking: *list
+// Used in function calls (f(*args)) and list literals ([*l1, *l2])
+type ListUnpack struct {
+	Token string
+	Value Expression
+}
+
+func (lp *ListUnpack) expressionNode()      {}
+func (lp *ListUnpack) TokenLiteral() string { return lp.Token }
+func (lp *ListUnpack) String() string {
+	return "(*" + lp.Value.String() + ")"
+}
+
+// SpreadItem represents a spread/unpack expression in list or dict literals
+// Token will be either ASTERISK (*) or POWER (**)
+type SpreadItem struct {
+	Token string // "*" or "**"
+	Value Expression
+}
+
+func (si *SpreadItem) expressionNode()      {}
+func (si *SpreadItem) TokenLiteral() string { return si.Token }
+func (si *SpreadItem) String() string {
+	return si.Token + si.Value.String()
+}
+
+// TernaryExpression represents ternary if-else expressions
 type TernaryExpression struct {
 	Token      string
 	Condition  Expression
@@ -831,6 +895,48 @@ func (ws *WithStatement) String() string {
 	out.WriteString(" {\n")
 	out.WriteString(ws.Body.String())
 	out.WriteString("\n}")
+	return out.String()
+}
+
+// GlobalStatement 用于 global 语句
+// 例如: global x, y
+type GlobalStatement struct {
+	Token  string
+	Names  []*Identifier
+}
+
+func (gs *GlobalStatement) statementNode()       {}
+func (gs *GlobalStatement) TokenLiteral() string { return gs.Token }
+func (gs *GlobalStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("global ")
+	for i, name := range gs.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
+	return out.String()
+}
+
+// NonlocalStatement 用于 nonlocal 语句
+// 例如: nonlocal x, y
+type NonlocalStatement struct {
+	Token  string
+	Names  []*Identifier
+}
+
+func (ns *NonlocalStatement) statementNode()       {}
+func (ns *NonlocalStatement) TokenLiteral() string { return ns.Token }
+func (ns *NonlocalStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("nonlocal ")
+	for i, name := range ns.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
 	return out.String()
 }
 

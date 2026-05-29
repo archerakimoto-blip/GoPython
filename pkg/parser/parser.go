@@ -117,6 +117,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.IF, p.parseTernaryExpression)
+	p.registerInfix(lexer.WALRUS, p.parseNamedExpression)
 
 	p.nextToken()
 	p.nextToken()
@@ -264,6 +265,10 @@ func (p *Parser) parseStatement() ast.Statement {
 			Token:      "async " + p.curToken.Literal,
 			Expression: fnExpr,
 		}
+	case lexer.GLOBAL:
+		return p.parseGlobalStatement()
+	case lexer.NONLOCAL:
+		return p.parseNonlocalStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -325,6 +330,15 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 			return nil
 		}
 		stmt.Names = append(stmt.Names, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+	}
+
+	// 支持类型注解: x: int = 5
+	if p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken() // 跳过冒号
+		// 跳过类型表达式
+		for !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
 	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
@@ -909,6 +923,15 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 		p.parseFunctionParameters(lit)
 	}
 
+	// 支持返回类型注解: def func() -> int:
+	if p.peekTokenIs(lexer.RETURN_TYPE) {
+		p.nextToken() // 跳过 ->
+		// 跳过类型表达式（简单实现：跳过直到遇到冒号）
+		for !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.EOF) {
+			p.nextToken()
+		}
+	}
+
 	if !p.expectPeek(lexer.COLON) {
 		return nil
 	}
@@ -993,7 +1016,29 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			// 保存参数名
+			paramName := p.curToken.Literal
+			paramToken := p.curToken.Literal
+
+			// 检查是否有类型注解 (x: int)
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // 跳过冒号
+				// 跳过类型表达式（简单实现：跳过直到遇到逗号、右括号或等号）
+				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
+					p.nextToken()
+				}
+			}
+
+			// 检查是否有默认值 (x: int = 5 或 x = 5)
+			if p.peekTokenIs(lexer.ASSIGN) {
+				p.nextToken() // 跳过 =
+				// 跳过默认值表达式
+				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
+					p.nextToken()
+				}
+			}
+
+			ident := &ast.Identifier{Token: paramToken, Value: paramName}
 			lit.Parameters = append(lit.Parameters, ident)
 		} else {
 			break
@@ -1018,7 +1063,29 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			// 保存参数名
+			paramName := p.curToken.Literal
+			paramToken := p.curToken.Literal
+
+			// 检查是否有类型注解 (x: int)
+			if p.peekTokenIs(lexer.COLON) {
+				p.nextToken() // 跳过冒号
+				// 跳过类型表达式
+				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
+					p.nextToken()
+				}
+			}
+
+			// 检查是否有默认值 (x: int = 5 或 x = 5)
+			if p.peekTokenIs(lexer.ASSIGN) {
+				p.nextToken() // 跳过 =
+				// 跳过默认值表达式
+				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
+					p.nextToken()
+				}
+			}
+
+			ident := &ast.Identifier{Token: paramToken, Value: paramName}
 			lit.Parameters = append(lit.Parameters, ident)
 		} else {
 			break
@@ -1266,28 +1333,39 @@ func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 
+	// Check if this is a slice expression (contains colon)
 	if p.curTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COLON) {
-		slice := &ast.SliceExpression{Token: "[", Left: left}
+		slice := &ast.SliceExpression{Token: "["}
 
-		// Parse start
+		// Parse lower bound (before first colon)
 		if !p.curTokenIs(lexer.COLON) {
-			// Temporarily ignore errors about colon
 			oldErrors := len(p.errors)
-			slice.Start = p.parseExpression(LOWEST)
+			slice.Lower = p.parseExpression(LOWEST)
 			p.errors = p.errors[:oldErrors]
 		}
 
-		// Move past colon
+		// Move past first colon
 		if !p.curTokenIs(lexer.COLON) {
 			p.nextToken()
 		}
 		p.nextToken()
 
-		// Parse end
-		if !p.curTokenIs(lexer.RBRACKET) {
+		// Parse upper bound (before second colon or closing bracket)
+		if !p.curTokenIs(lexer.COLON) && !p.curTokenIs(lexer.RBRACKET) {
 			oldErrors := len(p.errors)
-			slice.End = p.parseExpression(LOWEST)
+			slice.Upper = p.parseExpression(LOWEST)
 			p.errors = p.errors[:oldErrors]
+		}
+
+		// Check for step (second colon)
+		if p.curTokenIs(lexer.COLON) {
+			p.nextToken()
+			// Parse step value
+			if !p.curTokenIs(lexer.RBRACKET) {
+				oldErrors := len(p.errors)
+				slice.Step = p.parseExpression(LOWEST)
+				p.errors = p.errors[:oldErrors]
+			}
 		}
 
 		// Consume ]
@@ -1297,7 +1375,12 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 			p.nextToken()
 		}
 
-		return slice
+		// Wrap in IndexExpression
+		return &ast.IndexExpression{
+			Token: "[",
+			Left:  left,
+			Index: slice,
+		}
 	}
 
 	// Normal index
@@ -1443,29 +1526,24 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	}
 
 	p.nextToken()
-	exp := p.parseExpression(LOWEST)
-	
-	// Check if it's a keyword argument
-	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
-		name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		p.nextToken() // skip '='
-		p.nextToken() // go to value
-		value := p.parseExpression(LOWEST)
-		keywordArg := &ast.KeywordArgument{
-			Token: name.Token,
-			Name:  name,
-			Value: value,
-		}
-		list = append(list, keywordArg)
-	} else if exp != nil {
-		list = append(list, exp)
-	}
 
-	for p.peekTokenIs(lexer.COMMA) {
+	// 检查是否是解包操作符
+	if p.curTokenIs(lexer.ASTERISK) || p.curTokenIs(lexer.POWER) {
+		// 保存操作符
+		op := p.curToken.Literal
 		p.nextToken()
-		p.nextToken()
-		
-		// Check if this is a keyword argument
+		value := p.parseExpression(LOWEST)
+		if value != nil {
+			if op == "**" {
+				list = append(list, &ast.DictionaryUnpack{Token: op, Value: value})
+			} else {
+				list = append(list, &ast.ListUnpack{Token: op, Value: value})
+			}
+		}
+	} else {
+		exp := p.parseExpression(LOWEST)
+
+		// Check if it's a keyword argument
 		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
 			name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 			p.nextToken() // skip '='
@@ -1477,10 +1555,46 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 				Value: value,
 			}
 			list = append(list, keywordArg)
+		} else if exp != nil {
+			list = append(list, exp)
+		}
+	}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+
+		// 检查是否是解包操作符
+		if p.curTokenIs(lexer.ASTERISK) || p.curTokenIs(lexer.POWER) {
+			// 保存操作符
+			op := p.curToken.Literal
+			p.nextToken()
+			value := p.parseExpression(LOWEST)
+			if value != nil {
+				if op == "**" {
+					list = append(list, &ast.DictionaryUnpack{Token: op, Value: value})
+				} else {
+					list = append(list, &ast.ListUnpack{Token: op, Value: value})
+				}
+			}
 		} else {
-			exp = p.parseExpression(LOWEST)
-			if exp != nil {
-				list = append(list, exp)
+			// Check if this is a keyword argument
+			if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
+				name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+				p.nextToken() // skip '='
+				p.nextToken() // go to value
+				value := p.parseExpression(LOWEST)
+				keywordArg := &ast.KeywordArgument{
+					Token: name.Token,
+					Name:  name,
+					Value: value,
+				}
+				list = append(list, keywordArg)
+			} else {
+				exp = p.parseExpression(LOWEST)
+				if exp != nil {
+					list = append(list, exp)
+				}
 			}
 		}
 	}
@@ -1773,12 +1887,91 @@ func (p *Parser) parseAsyncFunction() ast.Expression {
 
 func (p *Parser) parseAwaitExpression() ast.Expression {
 	exp := &ast.AwaitExpression{Token: p.curToken.Literal}
-	
+
 	p.nextToken()
-	
+
 	// 解析 await 后的表达式
 	exp.Value = p.parseExpression(PREFIX)
-	
+
 	return exp
+}
+
+// parseNamedExpression 解析 Walrus 运算符 (:=)
+// 例如: (x := 5) 或 if (n := len(a)) > 10
+func (p *Parser) parseNamedExpression(left ast.Expression) ast.Expression {
+	// left 应该是 Identifier
+	ident, ok := left.(*ast.Identifier)
+	if !ok {
+		p.errors = append(p.errors, "walrus operator must be used with an identifier")
+		return left
+	}
+
+	p.nextToken()
+
+	// 解析右侧表达式
+	// Walrus 运算符的优先级很低，所以我们使用 LOWEST
+	value := p.parseExpression(LOWEST)
+
+	return &ast.NamedExpression{
+		Token: p.curToken.Literal,
+		Name:  ident,
+		Value: value,
+	}
+}
+
+// parseGlobalStatement 解析 global 语句
+// 例如: global x, y
+func (p *Parser) parseGlobalStatement() *ast.GlobalStatement {
+	stmt := &ast.GlobalStatement{Token: p.curToken.Literal}
+
+	// 解析变量名列表
+	for {
+		p.nextToken()
+		if p.curTokenIs(lexer.IDENT) {
+			stmt.Names = append(stmt.Names, &ast.Identifier{
+				Token: p.curToken.Literal,
+				Value: p.curToken.Literal,
+			})
+		} else {
+			break
+		}
+
+		// 检查是否还有逗号分隔的变量
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // 消费逗号
+		} else {
+			break
+		}
+	}
+
+	return stmt
+}
+
+// parseNonlocalStatement 解析 nonlocal 语句
+// 例如: nonlocal x, y
+func (p *Parser) parseNonlocalStatement() *ast.NonlocalStatement {
+	stmt := &ast.NonlocalStatement{Token: p.curToken.Literal}
+
+	// 解析变量名列表
+	for {
+		p.nextToken()
+		if p.curTokenIs(lexer.IDENT) {
+			stmt.Names = append(stmt.Names, &ast.Identifier{
+				Token: p.curToken.Literal,
+				Value: p.curToken.Literal,
+			})
+		} else {
+			break
+		}
+
+		// 检查是否还有逗号分隔的变量
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken() // 消费逗号
+		} else {
+			break
+		}
+	}
+
+	return stmt
 }
 

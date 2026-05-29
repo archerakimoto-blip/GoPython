@@ -309,6 +309,14 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
 		}
+	case *ast.GlobalStatement:
+		// global 语句本身不需要脱糖，只是声明
+		// 实际的符号表处理会在 compiler 阶段通过 AST 节点信息处理
+		return s
+	case *ast.NonlocalStatement:
+		// nonlocal 语句本身不需要脱糖，只是声明
+		// 实际的符号表处理会在 compiler 阶段通过 AST 节点信息处理
+		return s
 	case *ast.ClassStatement:
 		desugaredClass := &ast.ClassStatement{
 			Token:       s.Token,
@@ -360,6 +368,26 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		return &ast.AwaitExpression{
 			Token: e.Token,
 			Value: desugarExpression(e.Value),
+		}
+	case *ast.NamedExpression:
+		// Walrus 运算符脱糖：x := expr 脱糖为 (x = expr; x)
+		// 创建一个临时变量来存储赋值和返回值
+		value := desugarExpression(e.Value)
+
+		// 返回一个逗号表达式或者通过赋值语句处理
+		// 由于我们的 AST 不支持逗号表达式，我们需要特殊处理
+		// 方案：直接生成赋值语句和标识符
+		// 但这需要返回语句而不是表达式，所以我们把它包装在一个特殊的结构中
+		// 实际上，对于简单的 walrus 表达式，我们可以直接赋值并返回
+		// 这里我们把整个表达式转换为一个赋值语句包装的表达式
+
+		// 简化处理：在赋值的同时返回右值
+		// 实际上，这需要编译器特殊处理，我们先把赋值语句添加到外层
+		// 这里我们返回一个特殊的结构，编译器会识别并处理
+		return &ast.NamedExpression{
+			Token: e.Token,
+			Name:  e.Name,
+			Value: value,
 		}
 	case *ast.InfixExpression:
 		// 检查是否是链式比较：left 是比较表达式，operator 是比较运算符
@@ -571,11 +599,23 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Index: desugarExpression(e.Index),
 		}
 	case *ast.SliceExpression:
+		// SliceExpression 现在是 IndexExpression.Index，不会直接出现
+		// 这个 case 是为了完整性
 		return &ast.SliceExpression{
 			Token: e.Token,
-			Left:  desugarExpression(e.Left),
-			Start: desugarExpression(e.Start),
-			End:   desugarExpression(e.End),
+			Lower: desugarExpression(e.Lower),
+			Upper: desugarExpression(e.Upper),
+			Step:  desugarExpression(e.Step),
+		}
+	case *ast.DictionaryUnpack:
+		return &ast.DictionaryUnpack{
+			Token: e.Token,
+			Value: desugarExpression(e.Value),
+		}
+	case *ast.ListUnpack:
+		return &ast.ListUnpack{
+			Token: e.Token,
+			Value: desugarExpression(e.Value),
 		}
 	case *ast.HashLiteral:
 		desugaredPairs := make(map[ast.Expression]ast.Expression)
