@@ -567,6 +567,32 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			dc.Filter = desugarExpression(e.Filter)
 		}
 		return dc
+	case *ast.SetComprehension:
+		// 对集合推导式中的子表达式进行脱糖
+		sc := &ast.SetComprehension{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			sc.Filter = desugarExpression(e.Filter)
+		}
+		return sc
+	case *ast.GeneratorExpression:
+		// 对生成器表达式中的子表达式进行脱糖
+		ge := &ast.GeneratorExpression{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			ge.Filter = desugarExpression(e.Filter)
+		}
+		return ge
 	case *ast.FStringLiteral:
 		// Keep f-string as-is, the compiler will handle it
 		desugaredParts := make([]ast.Expression, 0, len(e.Parts))

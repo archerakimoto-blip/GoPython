@@ -433,6 +433,32 @@ func (dc *DictComprehension) String() string {
 	return out.String()
 }
 
+type GeneratorExpression struct {
+	Token    string
+	Element  Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (ge *GeneratorExpression) expressionNode()      {}
+func (ge *GeneratorExpression) TokenLiteral() string { return ge.Token }
+func (ge *GeneratorExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(ge.Element.String())
+	out.WriteString(" for ")
+	out.WriteString(ge.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(ge.Iterable.String())
+	if ge.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(ge.Filter.String())
+	}
+	out.WriteString(")")
+	return out.String()
+}
+
 type YieldStatement struct {
 	Token    string
 	Expression Expression

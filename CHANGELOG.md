@@ -8,18 +8,20 @@
 
 - **装饰器支持**（Decorators）：支持 `@decorator` 语法，包括简单装饰器、多个装饰器、带参数的装饰器
 - **多重赋值/元组解包**：支持 `let a, b = 1, 2` 和 `x, y = [3,4]` 语法
-- **链式比较**：支持 `a &lt; b &lt; c` 语法，自动转换为 `(a &lt; b) and (b &lt; c)`
-- **关键字参数和 **kwargs**：支持 `func(a=1, b=2)` 关键字参数调用和 `def func(**kwargs)` 可变关键字参数
-- ***args 可变参数**：支持 `def func(*args)` 可变位置参数
+- **链式比较**：支持 `a < b < c` 语法，自动转换为 `(a < b) and (b < c)`
+- **关键字参数和 ****kwargs**：支持 `func(a=1, b=2)` 关键字参数调用和 `def func(**kwargs)` 可变关键字参数
+- ****args 可变参数**：支持 `def func(*args)` 可变位置参数
 - **增强赋值**（Augmented Assignment）：支持 `a += 1`、`a -= 1`、`a *= 2`、`a /= 2`、`a %= 2`、`a **= 2` 语法
 - **字典推导式**：完整支持 `{key: value for key, value in iterable}` 和 `{key: value for key, value in iterable if condition}`
+- **集合推导式**（SetComprehension）：支持 `{x for x in iterable}` 语法
+- **生成器表达式**（GeneratorExpression）：支持 `(x for x in iterable)` 语法
 - **elif 语句**：完整支持条件分支 `if-elif-else` 结构
 - **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
 - **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string
 - **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释
 - **VM 改进**：修复可变参数 basePointer 计算错误，支持 OpGreaterThan 和 OpLessThan，添加 lastPopped 字段用于修复 Lambda 测试问题
 - **Parser 改进**：修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析
-- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖
+- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖
 - **Compiler 改进**：修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name）
 - **新增测试文件**：
   - tests/features/test_decorators.py
