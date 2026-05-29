@@ -1158,8 +1158,12 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	}
 
 	// Now check if next token is FOR or ASYNC! That means list comprehension!
-	isAsyncFor := p.peekTokenIs(lexer.ASYNC) && p.peekTokenAtOffset(1, lexer.FOR)
-	isFor := p.peekTokenIs(lexer.FOR)
+	isAsyncFor := false
+	isFor := p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR)
+
+	if !isFor && p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
+		isAsyncFor = true
+	}
 
 	if isAsyncFor || isFor {
 		comp := &ast.ListComprehension{Token: p.curToken.Literal}
