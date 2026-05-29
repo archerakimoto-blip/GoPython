@@ -738,7 +738,82 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 		return desugarAsyncComprehension(lc)
 	}
 
-	return lc
+	// 普通列表推导式也脱糖：将 [x for x in y if c] 转换为函数调用
+	// 这样编译器就不需要复杂地处理列表推导式的编译了
+	resultVar := &ast.Identifier{Token: "_result", Value: "_result"}
+	resultInit := &ast.LetStatement{
+		Token: "let",
+		Names: []*ast.Identifier{resultVar},
+		Value: &ast.ListLiteral{Token: "[]"},
+	}
+
+	forValue := &ast.Identifier{Token: lc.Variable.Token, Value: lc.Variable.Value}
+
+	var bodyStatements []ast.Statement
+
+	if lc.Filter != nil {
+		ifExpr := &ast.IfExpression{
+			Token:     "if",
+			Condition: lc.Filter,
+			Consequence: &ast.BlockStatement{
+				Statements: []ast.Statement{
+					&ast.ExpressionStatement{
+						Expression: &ast.CallExpression{
+							Token: "append",
+							Function: &ast.MemberAccess{
+								Token:  ".",
+								Object: resultVar,
+								Member: &ast.Identifier{Token: "append", Value: "append"},
+							},
+							Arguments: []ast.Expression{lc.Element},
+						},
+					},
+				},
+			},
+		}
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{Expression: ifExpr})
+	} else {
+		bodyStatements = append(bodyStatements, &ast.ExpressionStatement{
+			Expression: &ast.CallExpression{
+				Token: "append",
+				Function: &ast.MemberAccess{
+					Token:  ".",
+					Object: resultVar,
+					Member: &ast.Identifier{Token: "append", Value: "append"},
+				},
+				Arguments: []ast.Expression{lc.Element},
+			},
+		})
+	}
+
+	forBody := &ast.BlockStatement{Statements: bodyStatements}
+	forStmt := &ast.ForStatement{
+		Token:    "for",
+		Value:    forValue,
+		Iterable: lc.Iterable,
+		Body:     forBody,
+	}
+
+	returnStmt := &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: resultVar,
+	}
+
+	funcBody := &ast.BlockStatement{
+		Statements: []ast.Statement{resultInit, forStmt, returnStmt},
+	}
+
+	funcLit := &ast.FunctionLiteral{
+		Token:      "def",
+		Parameters: []*ast.Identifier{},
+		Body:       funcBody,
+	}
+
+	return &ast.CallExpression{
+		Token:     "(",
+		Function:  funcLit,
+		Arguments: []ast.Expression{},
+	}
 }
 
 func desugarAsyncComprehension(lc *ast.ListComprehension) ast.Expression {

@@ -485,3 +485,36 @@ func (l *Lexer) PeekToken() Token {
 
 	return tok
 }
+
+func (l *Lexer) PeekTokenN(n int) Token {
+	if n <= 0 {
+		return Token{}
+	}
+	// 先保存所有状态
+	savedPos := l.position
+	savedReadPos := l.readPosition
+	savedCh := l.ch
+	savedPrevNonWhiteCh := l.prevNonWhiteCh
+	savedJustSkippedNewline := l.justSkippedNewline
+	savedCurrentIndent := l.currentIndent
+	savedExpectIndent := l.expectIndent
+	savedPendingTokens := make([]Token, len(l.pendingTokens))
+	copy(savedPendingTokens, l.pendingTokens)
+
+	tok := Token{}
+	for i := 0; i < n; i++ {
+		tok = l.NextToken()
+	}
+
+	// 恢复状态
+	l.position = savedPos
+	l.readPosition = savedReadPos
+	l.ch = savedCh
+	l.prevNonWhiteCh = savedPrevNonWhiteCh
+	l.justSkippedNewline = savedJustSkippedNewline
+	l.currentIndent = savedCurrentIndent
+	l.expectIndent = savedExpectIndent
+	l.pendingTokens = savedPendingTokens
+
+	return tok
+}

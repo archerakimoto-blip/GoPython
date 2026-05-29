@@ -1491,6 +1491,46 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.ForStatement:
 		return fmt.Errorf("for loops should be desugared before compilation")
+	case *ast.AsyncForStatement:
+		// 异步 for 循环: async for x in agen: ...
+		// 我们将 async for 脱糖为一个 while 循环，使用 async iterators
+		// 实现步骤:
+		// 1. 定义迭代器变量
+		// 2. 循环: 调用 __anext__(), 等待结果，赋值给变量
+		// 3. 如果有 StopAsyncIteration 异常则退出
+		
+		// 第一步：编译迭代器并定义迭代器变量
+		iterVar := c.symbolTable.Define("__async_iter__")
+		if err := c.Compile(node.Iterable); err != nil {
+			return err
+		}
+		// 获取 __aiter__ 方法并调用
+		c.emit(OpConstant, c.addConstant(&objects.String{Value: "__aiter__"}))
+		c.emit(OpGetAttribute)
+		c.emit1(OpCall, 0)
+		c.emit(OpSetLocal, iterVar.Index)
+		
+		loopStart := len(c.instructions)
+		
+		// 第二步：调用 __anext__ 方法并 await
+		c.emit(OpGetLocal, iterVar.Index)
+		c.emit(OpConstant, c.addConstant(&objects.String{Value: "__anext__"}))
+		c.emit(OpGetAttribute)
+		c.emit1(OpCall, 0)
+		c.emit(OpAwait)
+		
+		// 第三步：赋值给循环变量并执行循环体
+		loopVar := c.symbolTable.Define(node.Value.Value)
+		c.emit(OpSetLocal, loopVar.Index)
+		
+		if err := c.Compile(node.Body); err != nil {
+			return err
+		}
+		
+		// 第四步：跳回循环开始
+		c.emit(OpJump, loopStart)
+		
+		return nil
 	case *ast.BreakStatement:
 		return fmt.Errorf("break statements should be desugared before compilation")
 	case *ast.ContinueStatement:

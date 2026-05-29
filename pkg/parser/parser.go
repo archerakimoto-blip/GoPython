@@ -185,10 +185,8 @@ func (p *Parser) peekTokenAtOffset(offset int, t lexer.TokenType) bool {
 		return false
 	}
 	// Check the token after peekToken by peeking ahead
-	// This is a simple implementation - in reality we'd need token buffering
-	// For now, we assume the lexer has peeking capability
-	// We'll use the lexer's peek functionality
-	peekedToken := p.l.PeekToken()
+	// Use lexer's PeekTokenN to get token after next
+	peekedToken := p.l.PeekTokenN(2) // Peek second token ahead (offset 1)
 	return peekedToken.Type == t
 }
 
@@ -1142,7 +1140,7 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	// First, check if it starts with an unpack
 	var firstExpr ast.Expression
 	p.nextToken()
-	
+
 	if p.curTokenIs(lexer.ASTERISK) {
 		// List unpack
 		op := p.curToken.Literal
@@ -1160,7 +1158,6 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	}
 
 	// Now check if next token is FOR or ASYNC! That means list comprehension!
-	// Check for ASYNC first (async for)
 	isAsyncFor := p.peekTokenIs(lexer.ASYNC) && p.peekTokenAtOffset(1, lexer.FOR)
 	isFor := p.peekTokenIs(lexer.FOR)
 
@@ -1168,24 +1165,21 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		comp := &ast.ListComprehension{Token: p.curToken.Literal}
 		comp.Element = firstExpr
 
-		// Check for ASYNC keyword (async for)
 		if isAsyncFor {
 			comp.IsAsync = true
-			p.nextToken() // consume ASYNC
+			p.nextToken()
 		}
 
 		// Handle FOR token
 		if !p.curTokenIs(lexer.FOR) {
 			p.nextToken()
 		}
-		// Now curToken should be FOR
 		if !p.curTokenIs(lexer.FOR) {
 			p.errors = append(p.errors, "expected FOR in list comprehension")
 			return nil
 		}
 		p.nextToken()
 
-		// Parse variable
 		if !p.curTokenIs(lexer.IDENT) {
 			p.errors = append(p.errors, "expected IDENT after FOR")
 			return nil
@@ -1193,7 +1187,6 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 		p.nextToken()
 
-		// Parse IN
 		if !p.curTokenIs(lexer.IN) {
 			p.errors = append(p.errors, "expected IN after variable")
 			return nil
@@ -1201,16 +1194,14 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		p.nextToken()
 		comp.Iterable = p.parseExpression(LOWEST)
 
-		// Parse optional IF clause
 		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
 			if !p.curTokenIs(lexer.IF) {
 				p.nextToken()
 			}
-			p.nextToken() // skip IF
+			p.nextToken()
 			comp.Filter = p.parseExpression(LOWEST)
 		}
 
-		// Consume closing ]
 		if p.curTokenIs(lexer.RBRACKET) {
 			p.nextToken()
 		} else if p.peekTokenIs(lexer.RBRACKET) {
@@ -1221,7 +1212,7 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		return comp
 	}
 
-	// Okay, it's a normal list literal! Let's collect all elements
+	// Okay, it's a normal list literal!
 	list := &ast.ListLiteral{Token: p.curToken.Literal}
 	elements := []ast.Expression{}
 	if firstExpr != nil {
@@ -1231,10 +1222,9 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
-		
+
 		var exp ast.Expression
 		if p.curTokenIs(lexer.ASTERISK) {
-			// List unpack
 			op := p.curToken.Literal
 			p.nextToken()
 			value := p.parseExpression(LOWEST)
@@ -1244,15 +1234,17 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		} else {
 			exp = p.parseExpression(LOWEST)
 		}
-		
+
 		if exp != nil {
 			elements = append(elements, exp)
 		}
 	}
 
-	// Consume closing ]
 	if !p.curTokenIs(lexer.RBRACKET) {
-		if !p.expectPeek(lexer.RBRACKET) {
+		if p.peekTokenIs(lexer.RBRACKET) {
+			p.nextToken()
+		} else {
+			p.errors = append(p.errors, "expected RBRACKET at end of list literal")
 			return nil
 		}
 	} else {
