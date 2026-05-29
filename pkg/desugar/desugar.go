@@ -27,9 +27,102 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	}
 	switch s := stmt.(type) {
 	case *ast.ExpressionStatement:
-		if s.Expression == nil {
+		if s == nil || s.Expression == nil {
 			return nil
 		}
+		// 检查是否是带装饰器的函数
+		if fnLit, ok := s.Expression.(*ast.FunctionLiteral); ok && len(fnLit.Decorators) > 0 {
+			// 脱糖子表达式
+			desugaredFn := desugarExpression(fnLit).(*ast.FunctionLiteral)
+			desugaredDecorators := make([]ast.Expression, len(desugaredFn.Decorators))
+			for i, dec := range desugaredFn.Decorators {
+				desugaredDecorators[i] = desugarExpression(dec)
+			}
+
+			// 创建一个块语句，包含：
+			// 1. 定义原始函数（临时名称）
+			// 2. 用装饰器包装它
+			// 3. 将结果赋值回原函数名
+			stmts := []ast.Statement{}
+
+			// 原始函数名
+			funcIdent := &ast.Identifier{Token: desugaredFn.Token, Value: desugaredFn.Name}
+			// 临时函数名
+			tempIdent := &ast.Identifier{Token: desugaredFn.Token, Value: "_temp_" + desugaredFn.Name}
+
+			// 1. 把原始函数定义赋值给临时变量
+			tempFn := &ast.FunctionLiteral{
+				Token:      desugaredFn.Token,
+				Name:       "",
+				Parameters: desugaredFn.Parameters,
+				Body:       desugaredFn.Body,
+				VarArgs:    desugaredFn.VarArgs,
+				KwArgs:     desugaredFn.KwArgs,
+			}
+
+			letStmt := &ast.LetStatement{
+				Token: desugaredFn.Token,
+				Names: []*ast.Identifier{tempIdent},
+				Value: tempFn,
+			}
+			stmts = append(stmts, letStmt)
+
+			// 2. 应用装饰器，从最后一个装饰器开始（因为装饰器是从下往上应用的）
+			currentValue := tempIdent
+			for i := len(desugaredDecorators) - 1; i >= 0; i-- {
+				decorator := desugaredDecorators[i]
+				// 调用装饰器
+				callExpr := &ast.CallExpression{
+					Token:     decorator.TokenLiteral(),
+					Function:  decorator,
+					Arguments: []ast.Expression{currentValue},
+				}
+				// 赋值给临时变量或最终变量
+				if i == 0 {
+					// 最后一个装饰器，赋值回原函数名
+					assignStmt := &ast.AssignStatement{
+						Token: desugaredFn.Token,
+						Names: []*ast.Identifier{funcIdent},
+						Value: callExpr,
+					}
+					stmts = append(stmts, assignStmt)
+				} else {
+					// 中间步骤，赋值给临时变量
+					letStmt = &ast.LetStatement{
+						Token: desugaredFn.Token,
+						Names: []*ast.Identifier{tempIdent},
+						Value: callExpr,
+					}
+					stmts = append(stmts, letStmt)
+				}
+			}
+
+			// 如果只有一个装饰器，直接赋值
+			if len(desugaredDecorators) == 1 {
+				decorator := desugaredDecorators[0]
+				callExpr := &ast.CallExpression{
+					Token:     decorator.TokenLiteral(),
+					Function:  decorator,
+					Arguments: []ast.Expression{tempFn},
+				}
+				// 清空 stmts，用更简单的方式
+				stmts = []ast.Statement{
+					&ast.LetStatement{
+						Token: desugaredFn.Token,
+						Names: []*ast.Identifier{funcIdent},
+						Value: callExpr,
+					},
+				}
+			}
+
+			// 返回块语句
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
+		// 普通表达式语句处理
 		desugaredExpr := desugarExpression(s.Expression)
 		if desugaredExpr == nil {
 			return nil
@@ -39,16 +132,78 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Expression: desugaredExpr,
 		}
 	case *ast.LetStatement:
+		if len(s.Names) > 1 {
+			// 多重赋值：let a, b = x, y
+			// 脱糖为 let _temp = x; let a = _temp[0]; let b = _temp[1];
+			tempIdent := &ast.Identifier{Token: "_temp", Value: "_temp"}
+			stmts := []ast.Statement{
+				&ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{tempIdent},
+					Value: desugarExpression(s.Value),
+				},
+			}
+
+			for i, name := range s.Names {
+				indexExpr := &ast.IndexExpression{
+					Token: "[",
+					Left:  tempIdent,
+					Index: &ast.IntegerLiteral{Token: string(rune('0' + i)), Value: int64(i)},
+				}
+				stmts = append(stmts, &ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{name},
+					Value: indexExpr,
+				})
+			}
+
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
 		return &ast.LetStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: s.Names,
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AssignStatement:
-		// 保持赋值语句不变，编译器会专门处理它
+		if len(s.Names) > 1 {
+			// 多重赋值：a, b = x, y
+			// 脱糖为 let _temp = x; a = _temp[0]; b = _temp[1];
+			tempIdent := &ast.Identifier{Token: "_temp", Value: "_temp"}
+			stmts := []ast.Statement{
+				&ast.LetStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{tempIdent},
+					Value: desugarExpression(s.Value),
+				},
+			}
+
+			for i, name := range s.Names {
+				indexExpr := &ast.IndexExpression{
+					Token: "[",
+					Left:  tempIdent,
+					Index: &ast.IntegerLiteral{Token: string(rune('0' + i)), Value: int64(i)},
+				}
+				stmts = append(stmts, &ast.AssignStatement{
+					Token: s.Token,
+					Names: []*ast.Identifier{name},
+					Value: indexExpr,
+				})
+			}
+
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: stmts,
+			}
+		}
+
+		// 单变量赋值，保持不变
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: s.Names,
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AugAssignStatement:
@@ -62,7 +217,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 		return &ast.AssignStatement{
 			Token: s.Token,
-			Name:  s.Name,
+			Names: []*ast.Identifier{s.Name},
 			Value: infixExpr,
 		}
 	case *ast.ReturnStatement:
@@ -111,14 +266,43 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Expression: desugarExpression(s.Expression),
 		}
 	case *ast.WithStatement:
-		// 对 with 语句进行脱糖处理：脱糖表达式和 body
-		desugaredWith := &ast.WithStatement{
+		// 对 with 语句进行脱糖处理：多重上下文管理器脱糖为嵌套with语句
+		desugaredItems := make([]*ast.ContextManagerItem, 0, len(s.Items))
+		for _, item := range s.Items {
+			desugaredItems = append(desugaredItems, &ast.ContextManagerItem{
+				Expr: desugarExpression(item.Expr),
+				Name: item.Name,
+			})
+		}
+
+		// 如果只有1个上下文管理器，直接处理
+		if len(desugaredItems) == 1 {
+			return &ast.WithStatement{
+				Token: s.Token,
+				Items: desugaredItems,
+				Body:  desugarBlockStatement(s.Body),
+			}
+		}
+
+		// 多重上下文管理器：从最后一个开始，嵌套到前一个的Body里
+		var nestedStatement ast.Statement = &ast.WithStatement{
 			Token: s.Token,
-			Expr:  desugarExpression(s.Expr),
-			Name:  s.Name,
+			Items: []*ast.ContextManagerItem{desugaredItems[len(desugaredItems)-1]},
 			Body:  desugarBlockStatement(s.Body),
 		}
-		return desugaredWith
+
+		for i := len(desugaredItems) - 2; i >= 0; i-- {
+			nestedStatement = &ast.WithStatement{
+				Token: s.Token,
+				Items: []*ast.ContextManagerItem{desugaredItems[i]},
+				Body: &ast.BlockStatement{
+					Token:      s.Token,
+					Statements: []ast.Statement{nestedStatement},
+				},
+			}
+		}
+
+		return nestedStatement
 	case *ast.YieldStatement:
 		// 对 yield 语句进行脱糖处理：脱糖表达式
 		return &ast.YieldStatement{
@@ -141,6 +325,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 
 // desugarBlockStatement 脱糖块语句
 func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
+	if block == nil {
+		return nil
+	}
 	desugared := &ast.BlockStatement{
 		Token:      block.Token,
 		Statements: make([]ast.Statement, 0, len(block.Statements)),
@@ -332,11 +519,19 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
+		// 脱糖装饰器
+		desugaredDecorators := make([]ast.Expression, len(e.Decorators))
+		for i, dec := range e.Decorators {
+			desugaredDecorators[i] = desugarExpression(dec)
+		}
 		return &ast.FunctionLiteral{
 			Token:      e.Token,
 			Name:       e.Name,
 			Parameters: e.Parameters,
 			Body:       desugarBlockStatement(e.Body),
+			VarArgs:    e.VarArgs,
+			KwArgs:     e.KwArgs,
+			Decorators: desugaredDecorators,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
@@ -388,28 +583,55 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 	case *ast.ListComprehension:
 		return desugarListComprehension(e)
 	case *ast.DictComprehension:
-		return e
+		// 对字典推导式中的子表达式进行脱糖
+		dc := &ast.DictComprehension{
+			Token:    e.Token,
+			Key:      desugarExpression(e.Key),
+			Value:    desugarExpression(e.Value),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			dc.Filter = desugarExpression(e.Filter)
+		}
+		return dc
+	case *ast.SetComprehension:
+		// 对集合推导式中的子表达式进行脱糖
+		sc := &ast.SetComprehension{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			sc.Filter = desugarExpression(e.Filter)
+		}
+		return sc
+	case *ast.GeneratorExpression:
+		// 对生成器表达式中的子表达式进行脱糖
+		ge := &ast.GeneratorExpression{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			ge.Filter = desugarExpression(e.Filter)
+		}
+		return ge
 	case *ast.FStringLiteral:
-		// Desugar f-string into a chain of + expressions (concatenation)
-		var result ast.Expression
+		// Keep f-string as-is, the compiler will handle it
+		desugaredParts := make([]ast.Expression, 0, len(e.Parts))
 		for _, part := range e.Parts {
-			desugaredPart := desugarExpression(part)
-			if result == nil {
-				result = desugaredPart
-			} else {
-				result = &ast.InfixExpression{
-					Token:    "+",
-					Left:     result,
-					Operator: "+",
-					Right:    desugaredPart,
-				}
-			}
+			desugaredParts = append(desugaredParts, desugarExpression(part))
 		}
-		// If the f-string is empty, return empty string literal
-		if result == nil {
-			return &ast.StringLiteral{Value: ""}
+		return &ast.FStringLiteral{
+			Token: e.Token,
+			Parts: desugaredParts,
 		}
-		return result
 	default:
 		return expr
 	}
@@ -430,7 +652,7 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	return lc
 }
 
-func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
+func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
 	iterable := desugarExpression(forStmt.Iterable)
 
@@ -445,10 +667,10 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	}
 
-	bodyStmts := []ast.Statement{
+	loopBodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
-			Name:  forStmt.Value,
+			Names: []*ast.Identifier{forStmt.Value},
 			Value: &ast.IndexExpression{
 				Token: "[",
 				Left:  iterable,
@@ -457,23 +679,37 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	}
 
-	bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
+	loopBodyStmts = append(loopBodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
 
-	bodyStmts = append(bodyStmts, &ast.AugAssignStatement{
+	loopBodyStmts = append(loopBodyStmts, &ast.AugAssignStatement{
 		Token:    "+=",
 		Name:     indexVar,
 		Operator: "+",
 		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
 	})
 
-	body := &ast.BlockStatement{
+	loopBody := &ast.BlockStatement{
 		Token:      forStmt.Token,
-		Statements: bodyStmts,
+		Statements: loopBodyStmts,
 	}
 
-	return &ast.WhileStatement{
+	whileStmt := &ast.WhileStatement{
 		Token:     forStmt.Token,
 		Condition: condition,
-		Body:      body,
+		Body:      loopBody,
 	}
+
+	block := &ast.BlockStatement{
+		Token: forStmt.Token,
+		Statements: []ast.Statement{
+			&ast.LetStatement{
+				Token: "let",
+				Names: []*ast.Identifier{indexVar},
+				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+			},
+			whileStmt,
+		},
+	}
+
+	return block
 }

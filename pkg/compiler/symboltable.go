@@ -1,6 +1,8 @@
 package compiler
 
-import "github.com/go-py/go-python/pkg/objects"
+import (
+	"github.com/go-py/go-python/pkg/objects"
+)
 
 type SymbolScope string
 
@@ -50,7 +52,6 @@ func NewEnclosedSymbolTable(outer *SymbolTable) *SymbolTable {
 }
 
 func (s *SymbolTable) Define(name string) Symbol {
-	// Local variables start after free variables
 	symbol := Symbol{Name: name, Index: len(s.Free) + s.numDefinitions}
 	if s.outer == nil {
 		symbol.Scope = GlobalScope
@@ -130,6 +131,8 @@ type CompiledFunction struct {
 	Free          []Symbol
 	Name          string
 	Constants     []objects.Object
+	VarArgs       bool
+	KwArgs        bool
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {

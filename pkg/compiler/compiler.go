@@ -20,6 +20,9 @@ const (
 	OpSub
 	OpMul
 	OpDiv
+	OpMod
+	OpFloorDiv
+	OpPower
 	OpTrue
 	OpFalse
 	OpEqual
@@ -898,6 +901,9 @@ func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
 }
 
 func (c *Compiler) Compile(node ast.Node) error {
+	if node == nil {
+		return nil
+	}
 	switch node := node.(type) {
 	case *ast.Program:
 		for _, s := range node.Statements {
@@ -955,6 +961,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpMul)
 		case "/":
 			c.emit(OpDiv)
+		case "%":
+			c.emit(OpMod)
+		case "//":
+			c.emit(OpFloorDiv)
+		case "**":
+			c.emit(OpPower)
 		case ">":
 			c.emit(OpGreaterThan)
 		case "==":
@@ -962,11 +974,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		case "!=":
 			c.emit(OpNotEqual)
 		case "and", "or":
-			// 为了测试链式比较，我们暂时把 AND/OR 当作普通运算符传递给虚拟机
-			// 我们会在虚拟机里处理它们，或者用其他方法
-			// 先暂时不实现短路逻辑，直接让它们通过编译器
-			// 让我们先不处理它们，看看我们的脱糖阶段能不能处理好
-			return fmt.Errorf("unknown operator %s", node.Operator)
+			return fmt.Errorf("and/or operators should be desugared before compilation")
 		default:
 			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
@@ -997,6 +1005,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.StringLiteral:
 		str := &objects.String{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(str))
+
+	case *ast.KeywordArgument:
+		// For simplicity, we'll just compile the value - we'll handle keyword arguments
+		// by creating a hash/dictionary to pass them
+		err := c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
 
 	case *ast.FStringLiteral:
 		// 编译 f-string 的所有部分
@@ -1064,7 +1080,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.LetStatement:
-		symbol := c.symbolTable.Define(node.Name.Value)
+		symbol := c.symbolTable.Define(node.Names[0].Value)
 		err := c.Compile(node.Value)
 		if err != nil {
 			return err
@@ -1084,9 +1100,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		// 查找变量，如果不存在就自动定义
-		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
+		symbol, ok := c.symbolTable.Resolve(node.Names[0].Value)
 		if !ok {
-			symbol = c.symbolTable.Define(node.Name.Value)
+			symbol = c.symbolTable.Define(node.Names[0].Value)
 		}
 
 		if symbol.Scope == GlobalScope {
@@ -1244,6 +1260,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
 			Free:          allFreeVars,
+			VarArgs:       node.VarArgs != nil,
+			KwArgs:        node.KwArgs != nil,
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
@@ -1299,13 +1317,44 @@ func (c *Compiler) Compile(node ast.Node) error {
 			return err
 		}
 
+		// 分离位置参数和关键字参数
+		posArgs := []ast.Expression{}
+		kwargsPairs := []ast.Expression{} // key1, value1, key2, value2...
+
 		for _, a := range node.Arguments {
-			if err := c.Compile(a); err != nil {
+			if keywordArg, ok := a.(*ast.KeywordArgument); ok {
+				// 处理关键字参数: 编译字符串作为key，然后是value
+				keyStr := &ast.StringLiteral{Token: keywordArg.Token, Value: keywordArg.Name.Value}
+				kwargsPairs = append(kwargsPairs, keyStr, keywordArg.Value)
+			} else {
+				posArgs = append(posArgs, a)
+			}
+		}
+
+		// 编译位置参数
+		for _, arg := range posArgs {
+			if err := c.Compile(arg); err != nil {
 				return err
 			}
 		}
 
-		c.emit1(OpCall, len(node.Arguments))
+		// 如果有关键字参数，编译成字典
+		numKwargs := len(kwargsPairs)
+		if numKwargs > 0 {
+			for _, pair := range kwargsPairs {
+				if err := c.Compile(pair); err != nil {
+					return err
+				}
+			}
+			c.emit(OpHash, numKwargs)
+		}
+
+		// 总参数数量 = 位置参数 + (如果有kwargs则+1)
+		totalArgs := len(posArgs)
+		if numKwargs > 0 {
+			totalArgs += 1
+		}
+		c.emit1(OpCall, totalArgs)
 
 	case *ast.PassStatement:
 		// pass is a no-op, do nothing
@@ -1360,28 +1409,32 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpRaise)
 		return nil
 	case *ast.WithStatement:
-		if err := c.Compile(node.Expr); err != nil {
-			return err
-		}
-
-		c.emit(OpEnterContext)
-
-		if node.Name != nil {
-			symbol := c.symbolTable.Define(node.Name.Value)
-			if symbol.Scope == GlobalScope {
-				c.emit(OpSetGlobal, symbol.Index)
-			} else {
-				c.emit1(OpSetLocal, symbol.Index)
+		// 处理单个上下文管理器（因为多重的已经被desugar成嵌套with了）
+		if len(node.Items) > 0 {
+			item := node.Items[0]
+			if err := c.Compile(item.Expr); err != nil {
+				return err
 			}
-		} else {
-			c.emit(OpPop)
-		}
 
-		if err := c.Compile(node.Body); err != nil {
-			return err
-		}
+			c.emit(OpEnterContext)
 
-		c.emit(OpExitContext)
+			if item.Name != nil {
+				symbol := c.symbolTable.Define(item.Name.Value)
+				if symbol.Scope == GlobalScope {
+					c.emit(OpSetGlobal, symbol.Index)
+				} else {
+					c.emit1(OpSetLocal, symbol.Index)
+				}
+			} else {
+				c.emit(OpPop)
+			}
+
+			if err := c.Compile(node.Body); err != nil {
+				return err
+			}
+
+			c.emit(OpExitContext)
+		}
 		return nil
 	case *ast.YieldStatement:
 		if node.Expression != nil {

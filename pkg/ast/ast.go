@@ -166,6 +166,9 @@ type FunctionLiteral struct {
 	Name       string
 	Parameters []*Identifier
 	Body       *BlockStatement
+	VarArgs    *Identifier
+	KwArgs     *Identifier
+	Decorators []Expression // 装饰器列表
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -176,12 +179,34 @@ func (fl *FunctionLiteral) String() string {
 	for _, p := range fl.Parameters {
 		params = append(params, p.String())
 	}
+	if fl.VarArgs != nil {
+		params = append(params, "*"+fl.VarArgs.String())
+	}
+	if fl.KwArgs != nil {
+		params = append(params, "**"+fl.KwArgs.String())
+	}
 	out.WriteString(fl.Token)
 	if fl.Name != "" {
 		out.WriteString("<" + fl.Name + ">")
 	}
 	out.WriteString("(" + strings.Join(params, ", ") + ") ")
 	out.WriteString(fl.Body.String())
+	return out.String()
+}
+
+type KeywordArgument struct {
+	Token string
+	Name  *Identifier
+	Value Expression
+}
+
+func (ka *KeywordArgument) expressionNode()      {}
+func (ka *KeywordArgument) TokenLiteral() string { return ka.Token }
+func (ka *KeywordArgument) String() string {
+	var out bytes.Buffer
+	out.WriteString(ka.Name.String())
+	out.WriteString("=")
+	out.WriteString(ka.Value.String())
 	return out.String()
 }
 
@@ -408,6 +433,32 @@ func (dc *DictComprehension) String() string {
 	return out.String()
 }
 
+type GeneratorExpression struct {
+	Token    string
+	Element  Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (ge *GeneratorExpression) expressionNode()      {}
+func (ge *GeneratorExpression) TokenLiteral() string { return ge.Token }
+func (ge *GeneratorExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(ge.Element.String())
+	out.WriteString(" for ")
+	out.WriteString(ge.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(ge.Iterable.String())
+	if ge.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(ge.Filter.String())
+	}
+	out.WriteString(")")
+	return out.String()
+}
+
 type YieldStatement struct {
 	Token    string
 	Expression Expression
@@ -502,7 +553,7 @@ func (mc *MethodCall) String() string {
 
 type LetStatement struct {
 	Token string
-	Name  *Identifier
+	Names []*Identifier
 	Value Expression
 }
 
@@ -511,7 +562,12 @@ func (ls *LetStatement) TokenLiteral() string { return ls.Token }
 func (ls *LetStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(ls.TokenLiteral() + " ")
-	out.WriteString(ls.Name.String())
+	for i, name := range ls.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
 	out.WriteString(" = ")
 	if ls.Value != nil {
 		out.WriteString(ls.Value.String())
@@ -522,14 +578,22 @@ func (ls *LetStatement) String() string {
 
 type AssignStatement struct {
 	Token       string
-	Name        *Identifier
+	Names       []*Identifier
 	Value       Expression
 }
 
 func (as *AssignStatement) statementNode()       {}
 func (as *AssignStatement) TokenLiteral() string { return as.Token }
 func (as *AssignStatement) String() string {
-	return as.Name.String() + " = " + as.Value.String()
+	var out bytes.Buffer
+	for i, name := range as.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
+	out.WriteString(" = " + as.Value.String())
+	return out.String()
 }
 
 type AugAssignStatement struct {
@@ -719,21 +783,36 @@ func (rs *RaiseStatement) String() string {
 	return "raise"
 }
 
+type ContextManagerItem struct {
+	Expr Expression
+	Name *Identifier
+}
+
+func (cmi *ContextManagerItem) String() string {
+	var out bytes.Buffer
+	out.WriteString(cmi.Expr.String())
+	if cmi.Name != nil {
+		out.WriteString(" as " + cmi.Name.String())
+	}
+	return out.String()
+}
+
 type WithStatement struct {
-	Token string
-	Expr  Expression
-	Name  *Identifier
-	Body  *BlockStatement
+	Token      string
+	Items      []*ContextManagerItem
+	Body       *BlockStatement
 }
 
 func (ws *WithStatement) statementNode()       {}
 func (ws *WithStatement) TokenLiteral() string { return ws.Token }
 func (ws *WithStatement) String() string {
 	var out bytes.Buffer
-	out.WriteString("with " + ws.Expr.String())
-	if ws.Name != nil {
-		out.WriteString(" as " + ws.Name.String())
+	out.WriteString("with ")
+	itemStrs := []string{}
+	for _, item := range ws.Items {
+		itemStrs = append(itemStrs, item.String())
 	}
+	out.WriteString(strings.Join(itemStrs, ", "))
 	out.WriteString(" {\n")
 	out.WriteString(ws.Body.String())
 	out.WriteString("\n}")

@@ -18,12 +18,20 @@ const (
 	BANG     = "!"
 	ASTERISK = "*"
 	SLASH    = "/"
+	PERCENT  = "%"
 	LT       = "<"
 	GT       = ">"
 	PLUS_EQ  = "+="
 	MINUS_EQ = "-="
 	MUL_EQ   = "*="
 	DIV_EQ   = "/="
+	PERCENT_EQ = "%="
+	FLOOR_DIV  = "//"
+	FLOOR_DIV_EQ = "//="
+	POWER    = "**"
+	POWER_EQ = "**="
+	VAR_ARGS = "VAR_ARGS"
+	KW_ARGS  = "KW_ARGS"
 
 	EQ     = "=="
 	NOT_EQ = "!="
@@ -32,6 +40,7 @@ const (
 	COLON     = ":"
 	SEMICOLON = ";"
 	DOT       = "."
+	AT        = "@"
 
 	LPAREN = "("
 	RPAREN = ")"
@@ -45,6 +54,7 @@ const (
 	TRUE     = "TRUE"
 	FALSE    = "FALSE"
 	IF       = "IF"
+	ELIF     = "ELIF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
 	WHILE    = "WHILE"
@@ -82,6 +92,7 @@ var keywords = map[string]TokenType{
 	"true":   TRUE,
 	"false":  FALSE,
 	"if":     IF,
+	"elif":   ELIF,
 	"else":   ELSE,
 	"return": RETURN,
 	"while":  WHILE,
@@ -195,7 +206,16 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(MINUS, l.ch)
 		}
 	case '*':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '*' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: POWER_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: POWER, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: MUL_EQ, Literal: string(ch) + string(l.ch)}
@@ -203,12 +223,29 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(ASTERISK, l.ch)
 		}
 	case '/':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '/' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: FLOOR_DIV_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: FLOOR_DIV, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: DIV_EQ, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(SLASH, l.ch)
+		}
+	case '%':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: PERCENT_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(PERCENT, l.ch)
 		}
 	case '!':
 		if l.peekChar() == '=' {
@@ -228,6 +265,8 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COLON, l.ch)
 	case '.':
 		tok = newToken(DOT, l.ch)
+	case '@':
+		tok = newToken(AT, l.ch)
 	case ',':
 		tok = newToken(COMMA, l.ch)
 	case '(':
@@ -245,6 +284,10 @@ func (l *Lexer) NextToken() Token {
 	case '"':
 		tok.Type = STRING
 		tok.Literal = l.readString()
+	case '#':
+		// Skip comment until end of line
+		l.skipComment()
+		return l.NextToken()
 	case 'f':
 		if l.peekChar() == '"' {
 			l.readChar()
@@ -295,7 +338,7 @@ func (l *Lexer) peekChar() byte {
 
 func (l *Lexer) readIdentifier() string {
 	position := l.position
-	for isLetter(l.ch) {
+	for isLetter(l.ch) || isDigit(l.ch) {
 		l.readChar()
 	}
 	return l.input[position:l.position]
@@ -329,6 +372,12 @@ func (l *Lexer) readString() string {
 		}
 	}
 	return l.input[position:l.position]
+}
+
+func (l *Lexer) skipComment() {
+	for l.ch != '\n' && l.ch != '\r' && l.ch != 0 {
+		l.readChar()
+	}
 }
 
 func (l *Lexer) skipWhitespace() {

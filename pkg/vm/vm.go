@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/go-py/go-python/pkg/compiler"
@@ -43,6 +44,7 @@ type VM struct {
 	stack   []objects.Object
 	sp      int
 	globals []objects.Object
+	lastPopped objects.Object // 最后一次从栈弹出的元素
 
 	frames      []*Frame
 	framesIndex int
@@ -229,7 +231,7 @@ func (vm *VM) Run() error {
 				}
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv:
+		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower:
 			err := vm.executeBinaryOperation(op)
 			if err != nil {
 				return err
@@ -1010,12 +1012,74 @@ func (vm *VM) executeCall(numArgs int) error {
 		return vm.push(gen)
 	}
 
-	if numArgs != callee.NumParameters {
-		return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
-			callee.NumParameters, numArgs)
+	var basePointer int
+	var kwargsDict *objects.Dict = nil
+	posArgsCount := numArgs
+
+	// 检查最后一个参数是否是关键字参数字典（来自我们编译器的特殊处理）
+	if numArgs > 0 {
+		lastArgIdx := vm.sp - 1
+		if dict, ok := vm.stack[lastArgIdx].(*objects.Dict); ok {
+			kwargsDict = dict
+			posArgsCount = numArgs - 1
+		}
 	}
 
-	frame := NewFrame(callee, vm.sp-numArgs)
+	if callee.VarArgs || callee.KwArgs {
+		minParams := callee.NumParameters
+		if callee.VarArgs {
+			minParams -= 1
+		}
+		if callee.KwArgs {
+			minParams -= 1
+		}
+
+		if posArgsCount < minParams {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				minParams, posArgsCount)
+		}
+
+		// 处理 *args（可变位置参数）
+		if callee.VarArgs {
+			if posArgsCount > minParams {
+				extraArgs := posArgsCount - minParams
+				args := make([]objects.Object, extraArgs)
+				for i := 0; i < extraArgs; i++ {
+					args[i] = vm.stack[vm.sp-numArgs+minParams+i]
+				}
+				tuple := &objects.List{Elements: args}
+				vm.stack[vm.sp-numArgs+minParams] = tuple
+				vm.sp = vm.sp - extraArgs
+				numArgs = minParams + 1
+				posArgsCount = numArgs
+			} else if posArgsCount == minParams {
+				vm.stack[vm.sp-numArgs] = &objects.List{Elements: []objects.Object{}}
+				numArgs = minParams + 1
+				posArgsCount = numArgs
+			}
+		}
+
+		// 处理 **kwargs（可变关键字参数）
+		if callee.KwArgs {
+			// 如果没有kwargs字典，就创建空的
+			if kwargsDict == nil {
+				kwargsDict = objects.NewDict()
+			}
+			// 将kwargsDict放到参数栈上
+			vm.stack[vm.sp-numArgs+posArgsCount] = kwargsDict
+			numArgs = posArgsCount + 1
+		}
+
+		basePointer = calleeIndex + 1
+	} else {
+		if numArgs != callee.NumParameters {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				callee.NumParameters, numArgs)
+		}
+		basePointer = vm.sp - numArgs
+	}
+
+	frame := NewFrame(callee, basePointer)
 	vm.pushFrame(frame)
 	vm.sp = frame.basePointer + callee.NumLocals
 
@@ -1076,6 +1140,10 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 		return vm.push(nativeBoolToBooleanObject(left == right))
 	case compiler.OpNotEqual:
 		return vm.push(nativeBoolToBooleanObject(left != right))
+	case compiler.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() > right.Inspect()))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() < right.Inspect()))
 	default:
 		return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
 	}
@@ -1139,6 +1207,14 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 		return vm.executeBinaryFloatOperation(op, left, right)
 	}
 
+	if leftType == objects.INTEGER_OBJ && rightType == objects.FLOAT_OBJ {
+		return vm.executeBinaryFloatOperation(op, &objects.Float{Value: float64(left.(*objects.Integer).Value)}, right)
+	}
+
+	if leftType == objects.FLOAT_OBJ && rightType == objects.INTEGER_OBJ {
+		return vm.executeBinaryFloatOperation(op, left, &objects.Float{Value: float64(right.(*objects.Integer).Value)})
+	}
+
 	if op == compiler.OpAdd {
 		leftStr := toString(left)
 		rightStr := toString(right)
@@ -1193,6 +1269,31 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 			return vm.push(objects.NewZeroDivisionError("division by zero"))
 		}
 		result = leftValue / rightValue
+	case compiler.OpMod:
+		if rightValue == 0 {
+			return vm.push(objects.NewZeroDivisionError("modulo by zero"))
+		}
+		result = leftValue % rightValue
+	case compiler.OpFloorDiv:
+		if rightValue == 0 {
+			return vm.push(objects.NewZeroDivisionError("floor division by zero"))
+		}
+		result = leftValue / rightValue
+		if leftValue < 0 && leftValue%rightValue != 0 {
+			result -= 1
+		}
+	case compiler.OpPower:
+		if rightValue < 0 {
+			return fmt.Errorf("negative exponent not supported for integers")
+		}
+		result = 1
+		for i := int64(0); i < rightValue; i++ {
+			result *= leftValue
+		}
+	case compiler.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
@@ -1220,6 +1321,12 @@ func (vm *VM) executeBinaryFloatOperation(op compiler.Opcode, left, right object
 		result = leftValue * rightValue
 	case compiler.OpDiv:
 		result = leftValue / rightValue
+	case compiler.OpMod:
+		result = math.Mod(leftValue, rightValue)
+	case compiler.OpFloorDiv:
+		result = math.Floor(leftValue / rightValue)
+	case compiler.OpPower:
+		result = math.Pow(leftValue, rightValue)
 	default:
 		return fmt.Errorf("unknown float operator: %d", op)
 	}
@@ -1248,14 +1355,12 @@ func (vm *VM) push(o objects.Object) error {
 func (vm *VM) pop() objects.Object {
 	o := vm.stack[vm.sp-1]
 	vm.sp--
+	vm.lastPopped = o
 	return o
 }
 
 func (vm *VM) LastPoppedStackElem() objects.Object {
-	if vm.sp > 0 {
-		return vm.stack[vm.sp-1]
-	}
-	return nil
+	return vm.lastPopped
 }
 
 func (vm *VM) EnableGC(enable bool) {
