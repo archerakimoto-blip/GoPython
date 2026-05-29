@@ -301,7 +301,15 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 		return nil
 	}
 
-	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Names = []*ast.Identifier{{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // skip comma
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
+		}
+		stmt.Names = append(stmt.Names, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
 		return nil
@@ -407,7 +415,15 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 func (p *Parser) parseAssignStatement() *ast.AssignStatement {
 	stmt := &ast.AssignStatement{Token: p.curToken.Literal}
 
-	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Names = []*ast.Identifier{{Token: p.curToken.Literal, Value: p.curToken.Literal}}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // skip comma
+		if !p.expectPeek(lexer.IDENT) {
+			return nil
+		}
+		stmt.Names = append(stmt.Names, &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal})
+	}
 
 	if !p.expectPeek(lexer.ASSIGN) {
 		return nil

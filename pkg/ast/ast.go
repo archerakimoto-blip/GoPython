@@ -527,7 +527,7 @@ func (mc *MethodCall) String() string {
 
 type LetStatement struct {
 	Token string
-	Name  *Identifier
+	Names []*Identifier
 	Value Expression
 }
 
@@ -536,7 +536,12 @@ func (ls *LetStatement) TokenLiteral() string { return ls.Token }
 func (ls *LetStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(ls.TokenLiteral() + " ")
-	out.WriteString(ls.Name.String())
+	for i, name := range ls.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
 	out.WriteString(" = ")
 	if ls.Value != nil {
 		out.WriteString(ls.Value.String())
@@ -547,14 +552,22 @@ func (ls *LetStatement) String() string {
 
 type AssignStatement struct {
 	Token       string
-	Name        *Identifier
+	Names       []*Identifier
 	Value       Expression
 }
 
 func (as *AssignStatement) statementNode()       {}
 func (as *AssignStatement) TokenLiteral() string { return as.Token }
 func (as *AssignStatement) String() string {
-	return as.Name.String() + " = " + as.Value.String()
+	var out bytes.Buffer
+	for i, name := range as.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
+	out.WriteString(" = " + as.Value.String())
+	return out.String()
 }
 
 type AugAssignStatement struct {
