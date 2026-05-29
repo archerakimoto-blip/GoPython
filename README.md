@@ -32,23 +32,25 @@ go build -o gopy ./cmd/gopy
 - 比较运算 (==, !=, >, <, >=, <=, 链式比较)
 - 布尔运算 (and, or, not)
 - 变量绑定和作用域 (let)
+- 多重赋值/元组解包
+- 增强赋值 (+=, -=, *=, /=, %=, **=)
 - 函数定义和调用
+- 关键字参数和 *args/**kwargs
 - 条件语句 (if/elif/else)
 - 循环语句 (for/while)
 - break/continue 语句
 - 列表推导式、集合推导式、字典推导式
+- 生成器表达式
 - 切片操作和索引赋值
 - pass 语句
 
 ### 高级特性
 - 异常处理 (try/except/finally)
-- 上下文管理器 (with 语句)
+- 上下文管理器 (with 语句，支持多个上下文管理器)
 - 生成器 (yield 语句)
 - Lambda 表达式和闭包
 - 类、对象、继承和多态
 - 装饰器 (Decorators)
-- 多重赋值/元组解包
-- 关键字参数和 *args/**kwargs
 - 标准 Python 缩进语法
 - f-string 格式化字符串
 - 模块导入系统 (import/from...import)
@@ -67,8 +69,6 @@ go build -o gopy ./cmd/gopy
 - 多进程/多线程
 - 类型注解 (Type Hints)
 - 更多 Python 标准库
-- 属性装饰器 (@property, @name.setter)
-- 更高级的解包语法 (*rest, **rest)
 
 ## 项目架构
 
