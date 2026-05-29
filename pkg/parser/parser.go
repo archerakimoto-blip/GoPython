@@ -683,7 +683,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && !p.peekTokenIs(lexer.RPAREN) && (p.curTokenIs(lexer.COLON) || precedence < p.peekPrecedence()) {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.EOF) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -706,9 +706,6 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 					}
 					continue
 				}
-			}
-			if p.peekTokenIs(lexer.COLON) {
-				return leftExp
 			}
 			return leftExp
 		}
@@ -976,61 +973,10 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 		return nil
 	}
 
-	// Handle suffix operators after grouped expressions (e.g., (lambda x: x)(5))
-	for p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACKET) || p.peekTokenIs(lexer.DOT) {
-		if p.peekTokenIs(lexer.LPAREN) {
-			p.nextToken()
-			args := []ast.Expression{}
-			if !p.peekTokenIs(lexer.RPAREN) {
-				for {
-					arg := p.parseExpression(LOWEST)
-					if arg == nil {
-						return nil
-					}
-					args = append(args, arg)
-					if p.peekTokenIs(lexer.RPAREN) {
-						break
-					}
-					if !p.peekTokenIs(lexer.COMMA) {
-						break
-					}
-					p.nextToken()
-				}
-			}
-			if !p.expectPeek(lexer.RPAREN) {
-				return nil
-			}
-			firstExpr = &ast.CallExpression{
-				Token:     firstExpr.String(),
-				Function:  firstExpr,
-				Arguments: args,
-			}
-		} else if p.peekTokenIs(lexer.LBRACKET) {
-			p.nextToken()
-			p.nextToken()
-			index := p.parseExpression(LOWEST)
-			if !p.expectPeek(lexer.RBRACKET) {
-				return nil
-			}
-			firstExpr = &ast.IndexExpression{
-				Token: firstExpr.String(),
-				Left:  firstExpr,
-				Index: index,
-			}
-		} else if p.peekTokenIs(lexer.DOT) {
-			p.nextToken()
-			p.nextToken()
-			if !p.curTokenIs(lexer.IDENT) {
-				p.errors = append(p.errors, "expected identifier after dot")
-				return nil
-			}
-			member := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			firstExpr = &ast.MemberAccess{
-				Token:  p.curToken.Literal,
-				Object: firstExpr,
-				Member: member,
-			}
-		}
+	// Check if this is a function call
+	for p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken()
+		firstExpr = p.parseCallExpression(firstExpr)
 	}
 
 	return firstExpr
@@ -1310,7 +1256,11 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 	exp := &ast.CallExpression{Token: p.curToken.Literal, Function: function}
+	if p.curTokenIs(lexer.LPAREN) {
+		p.nextToken()
+	}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	fmt.Printf("DEBUG parseCallExpression: args len=%d\n", len(exp.Arguments))
 	return exp
 }
 
@@ -1720,26 +1670,25 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 		return list
 	}
 
-	p.nextToken()
-	exp := p.parseExpression(LOWEST)
-	if exp != nil {
-		list = append(list, exp)
-	}
-
-	for p.peekTokenIs(lexer.COMMA) {
-		p.nextToken()
-		p.nextToken()
-		exp = p.parseExpression(LOWEST)
+	for {
+		if p.curTokenIs(end) {
+			p.nextToken()
+			break
+		}
+		exp := p.parseExpression(LOWEST)
 		if exp != nil {
 			list = append(list, exp)
 		}
-	}
-
-	// Ensure we consume the end token
-	if !p.curTokenIs(end) && p.peekTokenIs(end) {
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
 		p.nextToken()
-	} else if p.curTokenIs(end) {
-		p.nextToken()
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken()
+		} else if p.curTokenIs(end) {
+			p.nextToken()
+			break
+		}
 	}
 
 	return list
