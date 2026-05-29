@@ -1631,21 +1631,34 @@ func (p *Parser) parseExceptClause() *ast.ExceptClause {
 
 func (p *Parser) parseWithStatement() *ast.WithStatement {
 	stmt := &ast.WithStatement{Token: p.curToken.Literal}
+	stmt.Items = make([]*ast.ContextManagerItem, 0)
 
 	p.nextToken()
 
-	// Parse the with expression
-	stmt.Expr = p.parseExpression(LOWEST)
+	for {
+		// Parse the with expression
+		item := &ast.ContextManagerItem{
+			Expr: p.parseExpression(LOWEST),
+		}
 
-	// Parse optional 'as x'
-	if p.peekTokenIs(lexer.AS) {
-		p.nextToken()
-		if p.expectPeek(lexer.IDENT) {
-			stmt.Name = &ast.Identifier{
-				Token: p.curToken.Literal,
-				Value: p.curToken.Literal,
+		// Parse optional 'as x'
+		if p.peekTokenIs(lexer.AS) {
+			p.nextToken()
+			if p.expectPeek(lexer.IDENT) {
+				item.Name = &ast.Identifier{
+					Token: p.curToken.Literal,
+					Value: p.curToken.Literal,
+				}
 			}
 		}
+
+		stmt.Items = append(stmt.Items, item)
+
+		// Check if there's another item separated by comma
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		p.nextToken() // consume comma
 	}
 
 	// Parse colon

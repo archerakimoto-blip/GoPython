@@ -783,21 +783,36 @@ func (rs *RaiseStatement) String() string {
 	return "raise"
 }
 
+type ContextManagerItem struct {
+	Expr Expression
+	Name *Identifier
+}
+
+func (cmi *ContextManagerItem) String() string {
+	var out bytes.Buffer
+	out.WriteString(cmi.Expr.String())
+	if cmi.Name != nil {
+		out.WriteString(" as " + cmi.Name.String())
+	}
+	return out.String()
+}
+
 type WithStatement struct {
-	Token string
-	Expr  Expression
-	Name  *Identifier
-	Body  *BlockStatement
+	Token      string
+	Items      []*ContextManagerItem
+	Body       *BlockStatement
 }
 
 func (ws *WithStatement) statementNode()       {}
 func (ws *WithStatement) TokenLiteral() string { return ws.Token }
 func (ws *WithStatement) String() string {
 	var out bytes.Buffer
-	out.WriteString("with " + ws.Expr.String())
-	if ws.Name != nil {
-		out.WriteString(" as " + ws.Name.String())
+	out.WriteString("with ")
+	itemStrs := []string{}
+	for _, item := range ws.Items {
+		itemStrs = append(itemStrs, item.String())
 	}
+	out.WriteString(strings.Join(itemStrs, ", "))
 	out.WriteString(" {\n")
 	out.WriteString(ws.Body.String())
 	out.WriteString("\n}")

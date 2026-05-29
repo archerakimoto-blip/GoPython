@@ -1409,28 +1409,32 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpRaise)
 		return nil
 	case *ast.WithStatement:
-		if err := c.Compile(node.Expr); err != nil {
-			return err
-		}
-
-		c.emit(OpEnterContext)
-
-		if node.Name != nil {
-			symbol := c.symbolTable.Define(node.Name.Value)
-			if symbol.Scope == GlobalScope {
-				c.emit(OpSetGlobal, symbol.Index)
-			} else {
-				c.emit1(OpSetLocal, symbol.Index)
+		// 处理单个上下文管理器（因为多重的已经被desugar成嵌套with了）
+		if len(node.Items) > 0 {
+			item := node.Items[0]
+			if err := c.Compile(item.Expr); err != nil {
+				return err
 			}
-		} else {
-			c.emit(OpPop)
-		}
 
-		if err := c.Compile(node.Body); err != nil {
-			return err
-		}
+			c.emit(OpEnterContext)
 
-		c.emit(OpExitContext)
+			if item.Name != nil {
+				symbol := c.symbolTable.Define(item.Name.Value)
+				if symbol.Scope == GlobalScope {
+					c.emit(OpSetGlobal, symbol.Index)
+				} else {
+					c.emit1(OpSetLocal, symbol.Index)
+				}
+			} else {
+				c.emit(OpPop)
+			}
+
+			if err := c.Compile(node.Body); err != nil {
+				return err
+			}
+
+			c.emit(OpExitContext)
+		}
 		return nil
 	case *ast.YieldStatement:
 		if node.Expression != nil {

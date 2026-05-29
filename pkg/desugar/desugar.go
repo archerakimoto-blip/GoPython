@@ -266,14 +266,43 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Expression: desugarExpression(s.Expression),
 		}
 	case *ast.WithStatement:
-		// 对 with 语句进行脱糖处理：脱糖表达式和 body
-		desugaredWith := &ast.WithStatement{
+		// 对 with 语句进行脱糖处理：多重上下文管理器脱糖为嵌套with语句
+		desugaredItems := make([]*ast.ContextManagerItem, 0, len(s.Items))
+		for _, item := range s.Items {
+			desugaredItems = append(desugaredItems, &ast.ContextManagerItem{
+				Expr: desugarExpression(item.Expr),
+				Name: item.Name,
+			})
+		}
+
+		// 如果只有1个上下文管理器，直接处理
+		if len(desugaredItems) == 1 {
+			return &ast.WithStatement{
+				Token: s.Token,
+				Items: desugaredItems,
+				Body:  desugarBlockStatement(s.Body),
+			}
+		}
+
+		// 多重上下文管理器：从最后一个开始，嵌套到前一个的Body里
+		var nestedStatement ast.Statement = &ast.WithStatement{
 			Token: s.Token,
-			Expr:  desugarExpression(s.Expr),
-			Name:  s.Name,
+			Items: []*ast.ContextManagerItem{desugaredItems[len(desugaredItems)-1]},
 			Body:  desugarBlockStatement(s.Body),
 		}
-		return desugaredWith
+
+		for i := len(desugaredItems) - 2; i >= 0; i-- {
+			nestedStatement = &ast.WithStatement{
+				Token: s.Token,
+				Items: []*ast.ContextManagerItem{desugaredItems[i]},
+				Body: &ast.BlockStatement{
+					Token:      s.Token,
+					Statements: []ast.Statement{nestedStatement},
+				},
+			}
+		}
+
+		return nestedStatement
 	case *ast.YieldStatement:
 		// 对 yield 语句进行脱糖处理：脱糖表达式
 		return &ast.YieldStatement{

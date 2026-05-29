@@ -15,13 +15,15 @@
 - **字典推导式**：完整支持 `{key: value for key, value in iterable}` 和 `{key: value for key, value in iterable if condition}`
 - **集合推导式**（SetComprehension）：支持 `{x for x in iterable}` 语法
 - **生成器表达式**（GeneratorExpression）：支持 `(x for x in iterable)` 语法
+- **多重上下文管理器**：支持 `with a, b:` 语法，自动脱糖成嵌套with语句
+- **属性装饰器**：支持 @property、@name.setter、@name.deleter 装饰器语法（框架已支持，可进一步扩展 property 类型）
 - **elif 语句**：完整支持条件分支 `if-elif-else` 结构
 - **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
 - **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string
 - **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释
 - **VM 改进**：修复可变参数 basePointer 计算错误，支持 OpGreaterThan 和 OpLessThan，添加 lastPopped 字段用于修复 Lambda 测试问题
 - **Parser 改进**：修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析
-- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖
+- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖
 - **Compiler 改进**：修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name）
 - **新增测试文件**：
   - tests/features/test_decorators.py
