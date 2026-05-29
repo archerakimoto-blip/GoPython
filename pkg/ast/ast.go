@@ -166,6 +166,8 @@ type FunctionLiteral struct {
 	Name       string
 	Parameters []*Identifier
 	Body       *BlockStatement
+	VarArgs    *Identifier
+	KwArgs     *Identifier
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -175,6 +177,12 @@ func (fl *FunctionLiteral) String() string {
 	params := []string{}
 	for _, p := range fl.Parameters {
 		params = append(params, p.String())
+	}
+	if fl.VarArgs != nil {
+		params = append(params, "*"+fl.VarArgs.String())
+	}
+	if fl.KwArgs != nil {
+		params = append(params, "**"+fl.KwArgs.String())
 	}
 	out.WriteString(fl.Token)
 	if fl.Name != "" {

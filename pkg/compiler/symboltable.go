@@ -130,6 +130,8 @@ type CompiledFunction struct {
 	Free          []Symbol
 	Name          string
 	Constants     []objects.Object
+	VarArgs       bool
+	KwArgs        bool
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {

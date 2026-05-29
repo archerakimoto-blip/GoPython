@@ -18,12 +18,20 @@ const (
 	BANG     = "!"
 	ASTERISK = "*"
 	SLASH    = "/"
+	PERCENT  = "%"
 	LT       = "<"
 	GT       = ">"
 	PLUS_EQ  = "+="
 	MINUS_EQ = "-="
 	MUL_EQ   = "*="
 	DIV_EQ   = "/="
+	PERCENT_EQ = "%="
+	FLOOR_DIV  = "//"
+	FLOOR_DIV_EQ = "//="
+	POWER    = "**"
+	POWER_EQ = "**="
+	VAR_ARGS = "VAR_ARGS"
+	KW_ARGS  = "KW_ARGS"
 
 	EQ     = "=="
 	NOT_EQ = "!="
@@ -45,6 +53,7 @@ const (
 	TRUE     = "TRUE"
 	FALSE    = "FALSE"
 	IF       = "IF"
+	ELIF     = "ELIF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
 	WHILE    = "WHILE"
@@ -82,6 +91,7 @@ var keywords = map[string]TokenType{
 	"true":   TRUE,
 	"false":  FALSE,
 	"if":     IF,
+	"elif":   ELIF,
 	"else":   ELSE,
 	"return": RETURN,
 	"while":  WHILE,
@@ -195,7 +205,16 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(MINUS, l.ch)
 		}
 	case '*':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '*' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: POWER_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: POWER, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: MUL_EQ, Literal: string(ch) + string(l.ch)}
@@ -203,12 +222,29 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(ASTERISK, l.ch)
 		}
 	case '/':
-		if l.peekChar() == '=' {
+		if l.peekChar() == '/' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: FLOOR_DIV_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: FLOOR_DIV, Literal: string(ch) + string(l.ch)}
+			}
+		} else if l.peekChar() == '=' {
 			ch := l.ch
 			l.readChar()
 			tok = Token{Type: DIV_EQ, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(SLASH, l.ch)
+		}
+	case '%':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: PERCENT_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(PERCENT, l.ch)
 		}
 	case '!':
 		if l.peekChar() == '=' {

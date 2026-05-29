@@ -27,7 +27,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	}
 	switch s := stmt.(type) {
 	case *ast.ExpressionStatement:
-		if s.Expression == nil {
+		if s == nil || s.Expression == nil {
 			return nil
 		}
 		desugaredExpr := desugarExpression(s.Expression)
@@ -141,6 +141,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 
 // desugarBlockStatement 脱糖块语句
 func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
+	if block == nil {
+		return nil
+	}
 	desugared := &ast.BlockStatement{
 		Token:      block.Token,
 		Statements: make([]ast.Statement, 0, len(block.Statements)),
@@ -337,6 +340,8 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Name:       e.Name,
 			Parameters: e.Parameters,
 			Body:       desugarBlockStatement(e.Body),
+			VarArgs:    e.VarArgs,
+			KwArgs:     e.KwArgs,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
@@ -430,7 +435,7 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	return lc
 }
 
-func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
+func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
 	iterable := desugarExpression(forStmt.Iterable)
 
@@ -445,7 +450,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	}
 
-	bodyStmts := []ast.Statement{
+	loopBodyStmts := []ast.Statement{
 		&ast.AssignStatement{
 			Token: "=",
 			Name:  forStmt.Value,
@@ -457,23 +462,37 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.WhileStatement {
 		},
 	}
 
-	bodyStmts = append(bodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
+	loopBodyStmts = append(loopBodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
 
-	bodyStmts = append(bodyStmts, &ast.AugAssignStatement{
+	loopBodyStmts = append(loopBodyStmts, &ast.AugAssignStatement{
 		Token:    "+=",
 		Name:     indexVar,
 		Operator: "+",
 		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
 	})
 
-	body := &ast.BlockStatement{
+	loopBody := &ast.BlockStatement{
 		Token:      forStmt.Token,
-		Statements: bodyStmts,
+		Statements: loopBodyStmts,
 	}
 
-	return &ast.WhileStatement{
+	whileStmt := &ast.WhileStatement{
 		Token:     forStmt.Token,
 		Condition: condition,
-		Body:      body,
+		Body:      loopBody,
 	}
+
+	block := &ast.BlockStatement{
+		Token: forStmt.Token,
+		Statements: []ast.Statement{
+			&ast.LetStatement{
+				Token: "let",
+				Name:  indexVar,
+				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+			},
+			whileStmt,
+		},
+	}
+
+	return block
 }

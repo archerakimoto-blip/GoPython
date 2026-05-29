@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/go-py/go-python/pkg/compiler"
@@ -229,7 +230,7 @@ func (vm *VM) Run() error {
 				}
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv:
+		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower:
 			err := vm.executeBinaryOperation(op)
 			if err != nil {
 				return err
@@ -1010,14 +1011,44 @@ func (vm *VM) executeCall(numArgs int) error {
 		return vm.push(gen)
 	}
 
-	if numArgs != callee.NumParameters {
-		return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
-			callee.NumParameters, numArgs)
+	if callee.VarArgs || callee.KwArgs {
+		minParams := callee.NumParameters
+		if callee.VarArgs {
+			minParams -= 1
+		}
+		if numArgs < minParams {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				minParams, numArgs)
+		}
+		if numArgs > minParams || callee.VarArgs {
+			extraArgs := numArgs - minParams
+			args := make([]objects.Object, extraArgs)
+			for i := 0; i < extraArgs; i++ {
+				args[i] = vm.stack[vm.sp-numArgs+minParams+i]
+			}
+			tuple := &objects.List{Elements: args}
+			if callee.VarArgs {
+				vm.stack[vm.sp-numArgs+minParams] = tuple
+				vm.sp = vm.sp - extraArgs
+				numArgs = minParams + 1
+			}
+		}
+	} else {
+		if numArgs != callee.NumParameters {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				callee.NumParameters, numArgs)
+		}
 	}
 
-	frame := NewFrame(callee, vm.sp-numArgs)
-	vm.pushFrame(frame)
-	vm.sp = frame.basePointer + callee.NumLocals
+	if callee.VarArgs {
+		frame := NewFrame(callee, vm.sp-numArgs)
+		vm.pushFrame(frame)
+		vm.sp = frame.basePointer + callee.NumLocals
+	} else {
+		frame := NewFrame(callee, vm.sp-numArgs)
+		vm.pushFrame(frame)
+		vm.sp = frame.basePointer + callee.NumLocals
+	}
 
 	return nil
 }
@@ -1139,6 +1170,14 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 		return vm.executeBinaryFloatOperation(op, left, right)
 	}
 
+	if leftType == objects.INTEGER_OBJ && rightType == objects.FLOAT_OBJ {
+		return vm.executeBinaryFloatOperation(op, &objects.Float{Value: float64(left.(*objects.Integer).Value)}, right)
+	}
+
+	if leftType == objects.FLOAT_OBJ && rightType == objects.INTEGER_OBJ {
+		return vm.executeBinaryFloatOperation(op, left, &objects.Float{Value: float64(right.(*objects.Integer).Value)})
+	}
+
 	if op == compiler.OpAdd {
 		leftStr := toString(left)
 		rightStr := toString(right)
@@ -1193,6 +1232,27 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 			return vm.push(objects.NewZeroDivisionError("division by zero"))
 		}
 		result = leftValue / rightValue
+	case compiler.OpMod:
+		if rightValue == 0 {
+			return vm.push(objects.NewZeroDivisionError("modulo by zero"))
+		}
+		result = leftValue % rightValue
+	case compiler.OpFloorDiv:
+		if rightValue == 0 {
+			return vm.push(objects.NewZeroDivisionError("floor division by zero"))
+		}
+		result = leftValue / rightValue
+		if leftValue < 0 && leftValue%rightValue != 0 {
+			result -= 1
+		}
+	case compiler.OpPower:
+		if rightValue < 0 {
+			return fmt.Errorf("negative exponent not supported for integers")
+		}
+		result = 1
+		for i := int64(0); i < rightValue; i++ {
+			result *= leftValue
+		}
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
@@ -1220,6 +1280,12 @@ func (vm *VM) executeBinaryFloatOperation(op compiler.Opcode, left, right object
 		result = leftValue * rightValue
 	case compiler.OpDiv:
 		result = leftValue / rightValue
+	case compiler.OpMod:
+		result = math.Mod(leftValue, rightValue)
+	case compiler.OpFloorDiv:
+		result = math.Floor(leftValue / rightValue)
+	case compiler.OpPower:
+		result = math.Pow(leftValue, rightValue)
 	default:
 		return fmt.Errorf("unknown float operator: %d", op)
 	}

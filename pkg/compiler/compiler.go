@@ -20,6 +20,9 @@ const (
 	OpSub
 	OpMul
 	OpDiv
+	OpMod
+	OpFloorDiv
+	OpPower
 	OpTrue
 	OpFalse
 	OpEqual
@@ -955,6 +958,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpMul)
 		case "/":
 			c.emit(OpDiv)
+		case "%":
+			c.emit(OpMod)
+		case "//":
+			c.emit(OpFloorDiv)
+		case "**":
+			c.emit(OpPower)
 		case ">":
 			c.emit(OpGreaterThan)
 		case "==":
@@ -962,11 +971,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		case "!=":
 			c.emit(OpNotEqual)
 		case "and", "or":
-			// 为了测试链式比较，我们暂时把 AND/OR 当作普通运算符传递给虚拟机
-			// 我们会在虚拟机里处理它们，或者用其他方法
-			// 先暂时不实现短路逻辑，直接让它们通过编译器
-			// 让我们先不处理它们，看看我们的脱糖阶段能不能处理好
-			return fmt.Errorf("unknown operator %s", node.Operator)
+			return fmt.Errorf("and/or operators should be desugared before compilation")
 		default:
 			return fmt.Errorf("unknown operator %s", node.Operator)
 		}
@@ -1085,8 +1090,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// 查找变量，如果不存在就自动定义
 		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
+		fmt.Printf("DEBUG AssignStatement: Resolve(%s) = %v, scope=%v\n", node.Name.Value, ok, symbol.Scope)
 		if !ok {
 			symbol = c.symbolTable.Define(node.Name.Value)
+			fmt.Printf("DEBUG AssignStatement: Defined %s, scope=%v, index=%d\n", node.Name.Value, symbol.Scope, symbol.Index)
 		}
 
 		if symbol.Scope == GlobalScope {
@@ -1100,6 +1107,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
+
+		fmt.Printf("DEBUG Identifier: Resolve(%s) = %v, scope=%v, index=%d\n", node.Value, ok, symbol.Scope, symbol.Index)
 
 		if symbol.Scope == BuiltinScope {
 			c.emit(OpConstant, symbol.Index)
@@ -1198,6 +1207,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.symbolTable.Define(p.Value)
 		}
 
+		if node.VarArgs != nil {
+		}
+		if node.KwArgs != nil {
+		}
+
 		err := c.Compile(node.Body)
 		if err != nil {
 			return err
@@ -1244,6 +1258,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			NumParameters: len(node.Parameters),
 			IsGenerator:   c.hasYieldInBody(node.Body),
 			Free:          allFreeVars,
+			VarArgs:       node.VarArgs != nil,
+			KwArgs:        node.KwArgs != nil,
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
