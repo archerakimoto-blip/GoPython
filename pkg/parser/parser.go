@@ -248,6 +248,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return nil
 	case lexer.EOF:
 		return nil
+	case lexer.ELIF:
+		return nil
+	case lexer.ELSE:
+		return nil
 	case lexer.LBRACKET:
 		return p.parseExpressionStatement()
 	default:
@@ -827,6 +831,11 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				break
 			}
 
+			p.nextToken()
+		}
+
+		// Consume the DEDENT token if present
+		if p.curTokenIs(lexer.DEDENT) {
 			p.nextToken()
 		}
 	}

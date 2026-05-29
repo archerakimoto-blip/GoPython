@@ -1011,6 +1011,7 @@ func (vm *VM) executeCall(numArgs int) error {
 		return vm.push(gen)
 	}
 
+	var basePointer int
 	if callee.VarArgs || callee.KwArgs {
 		minParams := callee.NumParameters
 		if callee.VarArgs {
@@ -1020,7 +1021,7 @@ func (vm *VM) executeCall(numArgs int) error {
 			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
 				minParams, numArgs)
 		}
-		if numArgs > minParams || callee.VarArgs {
+		if numArgs > minParams {
 			extraArgs := numArgs - minParams
 			args := make([]objects.Object, extraArgs)
 			for i := 0; i < extraArgs; i++ {
@@ -1032,23 +1033,22 @@ func (vm *VM) executeCall(numArgs int) error {
 				vm.sp = vm.sp - extraArgs
 				numArgs = minParams + 1
 			}
+		} else if callee.VarArgs && numArgs == minParams {
+			vm.stack[vm.sp-numArgs] = &objects.List{Elements: []objects.Object{}}
+			numArgs = minParams + 1
 		}
+		basePointer = calleeIndex + 1
 	} else {
 		if numArgs != callee.NumParameters {
 			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
 				callee.NumParameters, numArgs)
 		}
+		basePointer = vm.sp - numArgs
 	}
 
-	if callee.VarArgs {
-		frame := NewFrame(callee, vm.sp-numArgs)
-		vm.pushFrame(frame)
-		vm.sp = frame.basePointer + callee.NumLocals
-	} else {
-		frame := NewFrame(callee, vm.sp-numArgs)
-		vm.pushFrame(frame)
-		vm.sp = frame.basePointer + callee.NumLocals
-	}
+	frame := NewFrame(callee, basePointer)
+	vm.pushFrame(frame)
+	vm.sp = frame.basePointer + callee.NumLocals
 
 	return nil
 }
@@ -1107,6 +1107,10 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 		return vm.push(nativeBoolToBooleanObject(left == right))
 	case compiler.OpNotEqual:
 		return vm.push(nativeBoolToBooleanObject(left != right))
+	case compiler.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() > right.Inspect()))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() < right.Inspect()))
 	default:
 		return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
 	}
@@ -1253,6 +1257,10 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		for i := int64(0); i < rightValue; i++ {
 			result *= leftValue
 		}
+	case compiler.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}

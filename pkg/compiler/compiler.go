@@ -901,6 +901,9 @@ func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
 }
 
 func (c *Compiler) Compile(node ast.Node) error {
+	if node == nil {
+		return nil
+	}
 	switch node := node.(type) {
 	case *ast.Program:
 		for _, s := range node.Statements {
@@ -1090,10 +1093,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		// 查找变量，如果不存在就自动定义
 		symbol, ok := c.symbolTable.Resolve(node.Name.Value)
-		fmt.Printf("DEBUG AssignStatement: Resolve(%s) = %v, scope=%v\n", node.Name.Value, ok, symbol.Scope)
 		if !ok {
 			symbol = c.symbolTable.Define(node.Name.Value)
-			fmt.Printf("DEBUG AssignStatement: Defined %s, scope=%v, index=%d\n", node.Name.Value, symbol.Scope, symbol.Index)
 		}
 
 		if symbol.Scope == GlobalScope {
@@ -1107,8 +1108,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if !ok {
 			return fmt.Errorf("undefined variable %s", node.Value)
 		}
-
-		fmt.Printf("DEBUG Identifier: Resolve(%s) = %v, scope=%v, index=%d\n", node.Value, ok, symbol.Scope, symbol.Index)
 
 		if symbol.Scope == BuiltinScope {
 			c.emit(OpConstant, symbol.Index)
@@ -1205,11 +1204,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		for _, p := range node.Parameters {
 			c.symbolTable.Define(p.Value)
-		}
-
-		if node.VarArgs != nil {
-		}
-		if node.KwArgs != nil {
 		}
 
 		err := c.Compile(node.Body)
