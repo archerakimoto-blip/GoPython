@@ -242,11 +242,10 @@ func (vm *VM) Run() error {
 	vm.startTime = time.Now()
 	vm.instructionCount = 0
 
-	// 缓存热点数据，减少方法调用
 	for {
 		frame := vm.frames[vm.framesIndex-1]
 		
-		if frame.ip >= len(frame.fn.Instructions)-1 {
+		if frame.ip >= len(frame.fn.Instructions) {
 			break
 		}
 		
@@ -264,32 +263,33 @@ func (vm *VM) Run() error {
 		frame.ip++
 		ip := frame.ip
 		ins := frame.fn.Instructions
-		
-		if ip >= len(ins)-1 {
+		if ip >= len(ins) {
 			break
 		}
-		vm.instructionCount++
 		op := compiler.Opcode(ins[ip])
 
 		switch op {
-		// === 最高频指令 ===
 		case compiler.OpGetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			vm.push(vm.stack[frame.basePointer + localIndex])
+			continue
 
 		case compiler.OpSetLocal:
 			localIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			vm.stack[frame.basePointer+localIndex] = vm.pop()
+			continue
 
 		case compiler.OpConstant:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			vm.push(vm.constants[constIndex])
+			continue
 
 		case compiler.OpPop:
 			vm.pop()
+			continue
 
 		case compiler.OpJumpNotTruthy:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -299,22 +299,26 @@ func (vm *VM) Run() error {
 			if !isTruthy(condition) {
 				frame.ip = pos - 1
 			}
+			continue
 
 		case compiler.OpJump:
 			pos := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip = pos - 1
+			continue
 
 		case compiler.OpGetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			vm.push(vm.globals[globalIndex])
+			continue
 
 		case compiler.OpSetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
-			vm.globals[globalIndex] = vm.pop()
+			value := vm.pop()
+			vm.globals[globalIndex] = value
+			continue
 
-		// === 函数调用与返回 ===
 		case compiler.OpCall:
 			numArgs := int(ins[ip+1])
 			frame.ip += 1
@@ -322,6 +326,7 @@ func (vm *VM) Run() error {
 			if err := vm.executeCall(numArgs); err != nil {
 				return err
 			}
+			continue
 
 		case compiler.OpReturnValue:
 			returnValue := vm.pop()
@@ -332,14 +337,9 @@ func (vm *VM) Run() error {
 				return nil
 			}
 			
-			// 检查是否是从生成器返回
-			calleeIndex := vm.sp - 1
-			if calleeIndex >= 0 {
+			if calleeIndex := vm.sp - 1; calleeIndex >= 0 {
 				if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
 					gen.Done = true
-					// 生成器返回时，栈顶应该是生成器对象（calleeIndex）
-					// 不需要额外推送任何值，因为生成器已经在栈上了
-					// 只需要设置 vm.sp 为 calleeIndex + 1
 					vm.sp = calleeIndex + 1
 					return nil
 				}
@@ -350,6 +350,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+			continue
 
 		case compiler.OpReturn:
 			frame := vm.popFrame()
@@ -359,8 +360,7 @@ func (vm *VM) Run() error {
 			}
 			
 			if len(vm.frames) > 0 && vm.sp > 0 {
-				calleeIndex := vm.sp - 1
-				if calleeIndex >= 0 {
+				if calleeIndex := vm.sp - 1; calleeIndex >= 0 {
 					if gen, ok := vm.stack[calleeIndex].(*objects.Generator); ok {
 						gen.Done = true
 					}
@@ -372,6 +372,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+			continue
 
 		// === 算术运算指令 ===
 		case compiler.OpAdd:
@@ -413,6 +414,7 @@ func (vm *VM) Run() error {
 					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 				}
 			}
+			continue
 
 		case compiler.OpSub:
 			right, left := vm.pop2()
@@ -446,6 +448,7 @@ func (vm *VM) Run() error {
 					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 				}
 			}
+			continue
 
 		case compiler.OpMul:
 			right, left := vm.pop2()
@@ -479,6 +482,7 @@ func (vm *VM) Run() error {
 					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 				}
 			}
+			continue
 
 		case compiler.OpDiv:
 			right, left := vm.pop2()
@@ -520,8 +524,8 @@ func (vm *VM) Run() error {
 					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 				}
 			}
+			continue
 
-		// 比较运算
 		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterThanEqual, compiler.OpLessThanEqual:
 			right, left := vm.pop2()
 
@@ -588,8 +592,8 @@ func (vm *VM) Run() error {
 			if err := vm.executeComparison(op); err != nil {
 				return err
 			}
+			continue
 
-		// === 属性访问（高频）===
 		case compiler.OpGetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
@@ -818,6 +822,7 @@ func (vm *VM) Run() error {
 			}
 
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
+			continue
 
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -845,29 +850,30 @@ func (vm *VM) Run() error {
 			}
 			
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+			continue
 
-		// === 常量与布尔值 ===
 		case compiler.OpTrue:
 			vm.push(objects.True)
+			continue
 
 		case compiler.OpFalse:
 			vm.push(objects.False)
+			continue
 
 		case compiler.OpNull:
 			vm.push(objects.None_)
+			continue
 
-		// === 闭包与自由变量 ===
 		case compiler.OpGetFree:
 			freeIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 
-			// Use the stored free variables from the closure
 			if frame.freeVars != nil && freeIndex < len(frame.freeVars) {
 				vm.push(frame.freeVars[freeIndex])
 			} else {
-				// Fallback: try to get from stack (for non-closure functions)
 				vm.push(vm.stack[frame.basePointer-len(frame.fn.Free)+freeIndex])
 			}
+			continue
 
 		case compiler.OpClosure:
 			constIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -879,7 +885,6 @@ func (vm *VM) Run() error {
 				return fmt.Errorf("not a function: %T", vm.constants[constIndex])
 			}
 
-			// Pop free variables from stack
 			free := make([]objects.Object, numFree)
 			for i := numFree - 1; i >= 0; i-- {
 				free[i] = vm.pop()
@@ -894,22 +899,26 @@ func (vm *VM) Run() error {
 			}
 
 			vm.push(closure)
+			continue
 
 		case compiler.OpDupTop:
 			if vm.sp > 0 {
 				top := vm.stack[vm.sp-1]
 				vm.push(top)
 			}
+			continue
 
 		case compiler.OpMinus:
 			if err := vm.executeMinusOperator(); err != nil {
 				return err
 			}
+			continue
 
 		case compiler.OpBang:
 			if err := vm.executeBangOperator(); err != nil {
 				return err
 			}
+			continue
 
 		case compiler.OpArray:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -919,6 +928,7 @@ func (vm *VM) Run() error {
 			vm.sp = vm.sp - numElements
 
 			vm.push(array)
+			continue
 
 		case compiler.OpHash:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -931,6 +941,7 @@ func (vm *VM) Run() error {
 			vm.sp = vm.sp - numElements
 
 			vm.push(hash)
+			continue
 
 		case compiler.OpSet:
 			numElements := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -940,6 +951,7 @@ func (vm *VM) Run() error {
 			vm.sp = vm.sp - numElements
 
 			vm.push(set)
+			continue
 
 		case compiler.OpIndex:
 			index := vm.pop()
@@ -948,6 +960,7 @@ func (vm *VM) Run() error {
 			if err := vm.executeIndexExpression(left, index); err != nil {
 				return err
 			}
+			continue
 		case compiler.OpSlice:
 			end := vm.pop()
 			start := vm.pop()
@@ -956,6 +969,7 @@ func (vm *VM) Run() error {
 			if err := vm.executeSliceExpression(left, start, end); err != nil {
 				return err
 			}
+			continue
 
 		case compiler.OpBeginTry:
 			exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -977,6 +991,7 @@ func (vm *VM) Run() error {
 			handler.exceptCount = exceptCount
 			handler.baseIP = frame.ip + 1
 			vm.exceptionStack = append(vm.exceptionStack, handler)
+			continue
 		case compiler.OpEndTry:
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
@@ -1039,6 +1054,7 @@ func (vm *VM) Run() error {
 					}
 				}
 			}
+			continue
 		case compiler.OpRaise:
 			errObj := vm.pop()
 			caught := false
@@ -1091,6 +1107,8 @@ func (vm *VM) Run() error {
 				vm.pendingError = errObj
 				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 			}
+			continue
+
 		case compiler.OpExceptHandler:
 			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
@@ -1131,6 +1149,7 @@ func (vm *VM) Run() error {
 					}
 				}
 			}
+			continue
 		case compiler.OpFinally:
 			finallyEndIP := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
@@ -1151,7 +1170,7 @@ func (vm *VM) Run() error {
 			pendingError := vm.pendingError
 			vm.pendingError = nil
 
-			if pendingError != nil {
+				if pendingError != nil {
 				if len(vm.exceptionStack) > 0 {
 					lastIdx := len(vm.exceptionStack) - 1
 					for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP == -1 {
@@ -1162,6 +1181,7 @@ func (vm *VM) Run() error {
 					}
 				}
 			}
+			continue
 		case compiler.OpEnterContext:
 			ctxManager := vm.pop()
 			if cm, ok := ctxManager.(*objects.ContextManager); ok {
@@ -1183,6 +1203,7 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+			continue
 		case compiler.OpExitContext:
 			exc := vm.pop()
 			ctxManager := vm.pop()
@@ -1205,6 +1226,7 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+			continue
 		case compiler.OpMakeGenerator:
 			fnObj := vm.pop()
 			if cf, ok := fnObj.(*compiler.CompiledFunction); ok {
@@ -1223,6 +1245,7 @@ func (vm *VM) Run() error {
 					return err
 				}
 			}
+			continue
 		case compiler.OpCreateClass:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
@@ -1231,17 +1254,16 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+			continue
 		case compiler.OpCreateClassWithSuper:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
 			frame.ip += 2
 			
-			// Pop super class from stack
 			superClass := vm.pop()
 			if superClass != nil {
 				if superCls, ok := superClass.(*objects.Class); ok {
 					class.SuperClass = superCls
-					// Inherit methods from super class
 					for name, method := range superCls.Methods {
 						if _, exists := class.Methods[name]; !exists {
 							class.Methods[name] = method
@@ -1254,12 +1276,11 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
-		// === 字符串格式化 ===
+			continue
 		case compiler.OpFormatString:
 			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			frame.ip += 2
 			
-			// 从栈上获取所有的部分，按顺序拼接
 			var result string
 			for i := partsCount - 1; i >= 0; i-- {
 				part := vm.pop()
@@ -1278,6 +1299,7 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+			continue
 		case compiler.OpIndexAssign:
 			value := vm.pop()
 			indexObj := vm.pop()
@@ -1301,6 +1323,7 @@ func (vm *VM) Run() error {
 			}
 
 			vm.push(value)
+			continue
 		
 		case compiler.OpListAppend:
 			value := vm.pop()
@@ -1311,6 +1334,7 @@ func (vm *VM) Run() error {
 			} else {
 				return fmt.Errorf("append requires a list, got %T", list)
 			}
+			continue
 		
 		case compiler.OpDictSet:
 			value := vm.pop()
@@ -1322,6 +1346,7 @@ func (vm *VM) Run() error {
 			} else {
 				return fmt.Errorf("dict set requires a dict, got %T", dict)
 			}
+			continue
 		
 		case compiler.OpYieldValue:
 			// 获取要产出的值
@@ -1373,7 +1398,8 @@ func (vm *VM) Run() error {
 			vm.sp = frame.basePointer - 1
 			vm.popFrame()
 			vm.push(gen)
-	}
+			continue
+		}
 	}
 
 	return nil

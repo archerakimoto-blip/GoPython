@@ -683,8 +683,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	
 	leftExp := prefix()
 
-	// Otherwise continue with normal infix processing
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.PLUS_EQ) && !p.peekTokenIs(lexer.MINUS_EQ) && !p.peekTokenIs(lexer.MUL_EQ) && !p.peekTokenIs(lexer.DIV_EQ) && !p.peekTokenIs(lexer.RPAREN) && (p.curTokenIs(lexer.COLON) || precedence < p.peekPrecedence()) {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -695,9 +694,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		if infix == nil {
 			if p.peekTokenIs(lexer.NOT) {
 				if p.peekTokenIs2(lexer.IN) {
-					p.nextToken() // NOT
-					p.nextToken() // IN
-					p.nextToken() // 移动到右侧表达式的第一个 token
+					p.nextToken()
+					p.nextToken()
+					p.nextToken()
 					rightExp := p.parseExpression(LOWEST)
 					leftExp = &ast.InfixExpression{
 						Token:    "not in",
@@ -707,6 +706,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 					}
 					continue
 				}
+			}
+			if p.peekTokenIs(lexer.COLON) {
+				return leftExp
 			}
 			return leftExp
 		}
@@ -969,9 +971,66 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 		return gen
 	}
 
-	// Regular grouped expression - just return the parsed expression
+	// Regular grouped expression
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
+	}
+
+	// Handle suffix operators after grouped expressions (e.g., (lambda x: x)(5))
+	for p.peekTokenIs(lexer.LPAREN) || p.peekTokenIs(lexer.LBRACKET) || p.peekTokenIs(lexer.DOT) {
+		if p.peekTokenIs(lexer.LPAREN) {
+			p.nextToken()
+			args := []ast.Expression{}
+			if !p.peekTokenIs(lexer.RPAREN) {
+				for {
+					arg := p.parseExpression(LOWEST)
+					if arg == nil {
+						return nil
+					}
+					args = append(args, arg)
+					if p.peekTokenIs(lexer.RPAREN) {
+						break
+					}
+					if !p.peekTokenIs(lexer.COMMA) {
+						break
+					}
+					p.nextToken()
+				}
+			}
+			if !p.expectPeek(lexer.RPAREN) {
+				return nil
+			}
+			firstExpr = &ast.CallExpression{
+				Token:     firstExpr.String(),
+				Function:  firstExpr,
+				Arguments: args,
+			}
+		} else if p.peekTokenIs(lexer.LBRACKET) {
+			p.nextToken()
+			p.nextToken()
+			index := p.parseExpression(LOWEST)
+			if !p.expectPeek(lexer.RBRACKET) {
+				return nil
+			}
+			firstExpr = &ast.IndexExpression{
+				Token: firstExpr.String(),
+				Left:  firstExpr,
+				Index: index,
+			}
+		} else if p.peekTokenIs(lexer.DOT) {
+			p.nextToken()
+			p.nextToken()
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected identifier after dot")
+				return nil
+			}
+			member := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			firstExpr = &ast.MemberAccess{
+				Token:  p.curToken.Literal,
+				Object: firstExpr,
+				Member: member,
+			}
+		}
 	}
 
 	return firstExpr
