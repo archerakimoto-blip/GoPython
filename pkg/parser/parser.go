@@ -1260,7 +1260,6 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 		p.nextToken()
 	}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
-	fmt.Printf("DEBUG parseCallExpression: args len=%d\n", len(exp.Arguments))
 	return exp
 }
 
@@ -1665,7 +1664,7 @@ func (p *Parser) parseNormalDictLiteral() ast.Expression {
 func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	list := []ast.Expression{}
 
-	if p.peekTokenIs(end) {
+	if p.curTokenIs(end) {
 		p.nextToken()
 		return list
 	}
@@ -1689,6 +1688,12 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 			p.nextToken()
 			break
 		}
+	}
+
+	if !p.curTokenIs(end) && p.peekTokenIs(end) {
+		p.nextToken()
+	} else if p.curTokenIs(end) {
+		p.nextToken()
 	}
 
 	return list
