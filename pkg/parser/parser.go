@@ -1080,6 +1080,10 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		return nil
 	}
 
+	// Debug print current state
+	fmt.Printf("DEBUG parseListLiteral: after firstExpr, curToken=%v (%q), peekToken=%v (%q)\n", 
+		p.curToken.Type, p.curToken.Literal, p.peekToken.Type, p.peekToken.Literal)
+
 	// Now check if next token is FOR or ASYNC followed by FOR!
 	// Use peekN to look ahead without consuming
 	peekTokens := p.peekN(2)
