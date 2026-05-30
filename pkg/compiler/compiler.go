@@ -80,6 +80,9 @@ type Compiler struct {
 	instructions        Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+
+	lenIndex    int
+	appendIndex int
 }
 
 type Bytecode struct {
@@ -327,9 +330,9 @@ func (c *Compiler) registerBuiltins() {
 			}
 		},
 	}
-	lenIndex := len(c.constants)
+	c.lenIndex = len(c.constants)
 	c.constants = append(c.constants, lenBuiltin)
-	c.symbolTable.DefineBuiltin("len", lenIndex)
+	c.symbolTable.DefineBuiltin("len", c.lenIndex)
 
 	appendBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -344,9 +347,9 @@ func (c *Compiler) registerBuiltins() {
 			return objects.None_
 		},
 	}
-	appendIndex := len(c.constants)
+	c.appendIndex = len(c.constants)
 	c.constants = append(c.constants, appendBuiltin)
-	c.symbolTable.DefineBuiltin("append", appendIndex)
+	c.symbolTable.DefineBuiltin("append", c.appendIndex)
 
 	// setitem: set dict[key] = value
 	setitemBuiltin := &objects.Builtin{
@@ -940,19 +943,6 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.InfixExpression:
-		if node.Operator == "<" {
-			err := c.Compile(node.Right)
-			if err != nil {
-				return err
-			}
-			err = c.Compile(node.Left)
-			if err != nil {
-				return err
-			}
-			c.emit(OpGreaterThan)
-			return nil
-		}
-
 		err := c.Compile(node.Left)
 		if err != nil {
 			return err
@@ -979,6 +969,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpPower)
 		case ">":
 			c.emit(OpGreaterThan)
+		case "<":
+			c.emit(OpLessThan)
 		case "==":
 			c.emit(OpEqual)
 		case "!=":
@@ -1752,47 +1744,327 @@ func boolToInt(b bool) int {
 }
 
 func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
-	compilationScope := c.instructions
-	c.instructions = []byte{}
-	c.enterScope()
+	if node.IsAsync {
+		// 异步列表推导式：创建一个异步函数，在内部执行循环并返回结果
+		// 首先，保存当前的指令和符号表
+		outerInstructions := c.instructions
+		outerSymbolTable := c.symbolTable
 
-	iterSymbol := c.symbolTable.Define("__iter__")
-	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit1(OpCall, 0)
-	
-	loopStart := len(c.instructions)
+		c.instructions = make(Instructions, 0)
+		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 
-	c.emit(OpGetGlobal, iterSymbol.Index)
-	c.emit1(OpCall, 0)
-	c.emit(OpMakeGenerator)
+		// 创建空的结果列表
+		resultVar := c.symbolTable.Define("_result")
+		c.emit(OpArray, 0)
+		if resultVar.Scope == GlobalScope {
+			c.emit(OpSetGlobal, resultVar.Index)
+		} else {
+			c.emit1(OpSetLocal, resultVar.Index)
+		}
 
-	endPos := c.emit(OpJump, 0)
+		// 编译 iterable 并保存
+		iterVar := c.symbolTable.Define("_iterable")
+		if err := c.Compile(node.Iterable); err != nil {
+			return err
+		}
+		if iterVar.Scope == GlobalScope {
+			c.emit(OpSetGlobal, iterVar.Index)
+		} else {
+			c.emit1(OpSetLocal, iterVar.Index)
+		}
 
-	c.changeOperand(endPos, len(c.instructions))
+		// 初始化 _i = 0
+		indexVar := c.symbolTable.Define("_i")
+		c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+		if indexVar.Scope == GlobalScope {
+			c.emit(OpSetGlobal, indexVar.Index)
+		} else {
+			c.emit1(OpSetLocal, indexVar.Index)
+		}
 
-	c.exitScope()
-	compilationScope = append(compilationScope, c.instructions...)
+		// 循环开始
+		loopStart := len(c.instructions)
 
-	c.enterScope()
+		// 编译比较条件 _i < len(_iterable)
+		if indexVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, indexVar.Index)
+		} else {
+			c.emit1(OpGetLocal, indexVar.Index)
+		}
+		c.emit(OpConstant, c.lenIndex)
+		if iterVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, iterVar.Index)
+		} else {
+			c.emit1(OpGetLocal, iterVar.Index)
+		}
+		c.emit1(OpCall, 1)
+		c.emit(OpLessThan)
 
-	if err := c.Compile(node.Element); err != nil {
-		return err
+		// 不满足条件时跳出
+		jumpEnd := c.emit(OpJumpNotTruthy, 0)
+
+		// 给循环变量赋值
+		if iterVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, iterVar.Index)
+		} else {
+			c.emit1(OpGetLocal, iterVar.Index)
+		}
+		if indexVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, indexVar.Index)
+		} else {
+			c.emit1(OpGetLocal, indexVar.Index)
+		}
+		c.emit(OpIndex)
+		loopVar := c.symbolTable.Define(node.Variable.Value)
+		if loopVar.Scope == GlobalScope {
+			c.emit(OpSetGlobal, loopVar.Index)
+		} else {
+			c.emit1(OpSetLocal, loopVar.Index)
+		}
+
+		// 处理 filter
+		if node.Filter != nil {
+			if err := c.Compile(node.Filter); err != nil {
+				return err
+			}
+			jumpSkipAppend := c.emit(OpJumpNotTruthy, 0)
+
+			// append
+			c.emit(OpConstant, c.appendIndex)
+			if resultVar.Scope == GlobalScope {
+				c.emit(OpGetGlobal, resultVar.Index)
+			} else {
+				c.emit1(OpGetLocal, resultVar.Index)
+			}
+			if err := c.Compile(node.Element); err != nil {
+				return err
+			}
+			c.emit1(OpCall, 2)
+			c.emit(OpPop)
+
+			jumpAfterAppend := len(c.instructions)
+			c.changeOperand(jumpSkipAppend, jumpAfterAppend)
+		} else {
+			// append
+			c.emit(OpConstant, c.appendIndex)
+			if resultVar.Scope == GlobalScope {
+				c.emit(OpGetGlobal, resultVar.Index)
+			} else {
+				c.emit1(OpGetLocal, resultVar.Index)
+			}
+			if err := c.Compile(node.Element); err != nil {
+				return err
+			}
+			c.emit1(OpCall, 2)
+			c.emit(OpPop)
+		}
+
+		// _i +=1
+		if indexVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, indexVar.Index)
+		} else {
+			c.emit1(OpGetLocal, indexVar.Index)
+		}
+		c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
+		c.emit(OpAdd)
+		if indexVar.Scope == GlobalScope {
+			c.emit(OpSetGlobal, indexVar.Index)
+		} else {
+			c.emit1(OpSetLocal, indexVar.Index)
+		}
+
+		// 跳回循环开始
+		c.emit(OpJump, loopStart)
+
+		// 设置 jumpEnd 位置
+		endLoop := len(c.instructions)
+		c.changeOperand(jumpEnd, endLoop)
+
+		// 返回结果
+		if resultVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultVar.Index)
+		} else {
+			c.emit1(OpGetLocal, resultVar.Index)
+		}
+		c.emit(OpReturnValue)
+
+		fnInstructions := c.instructions
+		numLocals := c.symbolTable.numDefinitions
+
+		// 恢复外部
+		c.symbolTable = outerSymbolTable
+		c.instructions = outerInstructions
+
+		// 创建编译好的函数
+		compiledFn := &CompiledFunction{
+			Instructions:  fnInstructions,
+			NumLocals:     numLocals,
+			NumParameters: 0,
+			IsGenerator:   false,
+			IsAsync:       true,
+		}
+
+		// 发出这个函数常量，然后是 OpMakeAsync，然后调用它
+		c.emit(OpConstant, c.addConstant(compiledFn))
+		c.emit(OpMakeAsync)
+		c.emit1(OpCall, 0)
+		return nil
 	}
 
+	// 1. 创建一个空列表作为结果
+	// 2. 编译 iterable，存储到临时变量中
+	// 3. 初始化索引变量 _i = 0
+	// 4. 循环：while _i < len(iterable):
+	//    a. 取元素 iterable[_i] 赋值给 node.Variable
+	//    b. 如果有 filter，检查，不通过就跳过
+	//    c. 计算 element，append 到结果列表
+	//    d. _i += 1
+	// 5. 编译结束，返回结果列表
+
+	// 定义结果列表符号
+	resultVar := c.symbolTable.Define("_result")
+	// 创建空列表
+	c.emit(OpArray, 0)
+	// 保存结果列表
+	if resultVar.Scope == GlobalScope {
+		c.emit(OpSetGlobal, resultVar.Index)
+	} else {
+		c.emit1(OpSetLocal, resultVar.Index)
+	}
+
+	// 编译 iterable 并保存到临时变量
+	iterVar := c.symbolTable.Define("_iterable")
+	if err := c.Compile(node.Iterable); err != nil {
+		return err
+	}
+	if iterVar.Scope == GlobalScope {
+		c.emit(OpSetGlobal, iterVar.Index)
+	} else {
+		c.emit1(OpSetLocal, iterVar.Index)
+	}
+
+	// 初始化 _i 为 0
+	indexVar := c.symbolTable.Define("_i")
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 0}))
+	if indexVar.Scope == GlobalScope {
+		c.emit(OpSetGlobal, indexVar.Index)
+	} else {
+		c.emit1(OpSetLocal, indexVar.Index)
+	}
+
+	// 循环开始位置
+	loopStart := len(c.instructions)
+
+	// 编译比较条件: _i < len(_iterable)
+	// 首先编译左边 _i
+	if indexVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, indexVar.Index)
+	} else {
+		c.emit1(OpGetLocal, indexVar.Index)
+	}
+	// 然后编译右边 len(_iterable)：先 len 函数，然后参数 _iterable，然后调用
+	c.emit(OpConstant, c.lenIndex)
+	if iterVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterVar.Index)
+	} else {
+		c.emit1(OpGetLocal, iterVar.Index)
+	}
+	c.emit1(OpCall, 1)
+	// 比较 <
+	c.emit(OpLessThan)
+
+	// 如果条件不满足，跳出循环
+	jumpEnd := c.emit(OpJumpNotTruthy, 0)
+
+	// 赋值给循环变量: loopVar = _iterable[_i]
+	if iterVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, iterVar.Index)
+	} else {
+		c.emit1(OpGetLocal, iterVar.Index)
+	}
+	if indexVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, indexVar.Index)
+	} else {
+		c.emit1(OpGetLocal, indexVar.Index)
+	}
+	c.emit(OpIndex)
+	// 保存到 node.Variable
+	loopVar := c.symbolTable.Define(node.Variable.Value)
+	if loopVar.Scope == GlobalScope {
+		c.emit(OpSetGlobal, loopVar.Index)
+	} else {
+		c.emit1(OpSetLocal, loopVar.Index)
+	}
+
+	// 如果有 filter，先检查
 	if node.Filter != nil {
 		if err := c.Compile(node.Filter); err != nil {
 			return err
 		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
-		c.changeOperand(jumpNotTruthyPos, loopStart)
+		jumpSkipAppend := c.emit(OpJumpNotTruthy, 0)
+
+		// append 操作
+		// 顺序: append 函数 → list → element → call!
+		c.emit(OpConstant, c.appendIndex)
+		if resultVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultVar.Index)
+		} else {
+			c.emit1(OpGetLocal, resultVar.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit1(OpCall, 2)
+		// append 返回 None，pop 掉
+		c.emit(OpPop)
+
+		// 恢复跳过 append 的位置
+		jumpAfterAppend := len(c.instructions)
+		c.changeOperand(jumpSkipAppend, jumpAfterAppend)
+	} else {
+		// append 操作
+		// 顺序: append 函数 → list → element → call!
+		c.emit(OpConstant, c.appendIndex)
+		if resultVar.Scope == GlobalScope {
+			c.emit(OpGetGlobal, resultVar.Index)
+		} else {
+			c.emit1(OpGetLocal, resultVar.Index)
+		}
+		if err := c.Compile(node.Element); err != nil {
+			return err
+		}
+		c.emit1(OpCall, 2)
+		// append 返回 None，pop 掉
+		c.emit(OpPop)
 	}
 
-	c.emit(OpYieldValue)
-	c.emit(OpPop)
+	// _i += 1
+	if indexVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, indexVar.Index)
+	} else {
+		c.emit1(OpGetLocal, indexVar.Index)
+	}
+	c.emit(OpConstant, c.addConstant(&objects.Integer{Value: 1}))
+	c.emit(OpAdd)
+	if indexVar.Scope == GlobalScope {
+		c.emit(OpSetGlobal, indexVar.Index)
+	} else {
+		c.emit1(OpSetLocal, indexVar.Index)
+	}
 
-	c.exitScope()
+	// 跳回循环开始
+	c.emit(OpJump, loopStart)
 
-	c.instructions = append(c.instructions, compilationScope...)
+	// 设置 jumpEnd 的位置
+	endLoop := len(c.instructions)
+	c.changeOperand(jumpEnd, endLoop)
+
+	// 最后把结果列表压栈
+	if resultVar.Scope == GlobalScope {
+		c.emit(OpGetGlobal, resultVar.Index)
+	} else {
+		c.emit1(OpGetLocal, resultVar.Index)
+	}
 
 	return nil
 }

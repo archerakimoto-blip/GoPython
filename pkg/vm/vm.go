@@ -931,6 +931,42 @@ func (vm *VM) executeCall(numArgs int) error {
 	
 	calleeObj := vm.stack[calleeIndex]
 
+	// Handle Async objects
+	if asyncObj, ok := calleeObj.(*objects.Async); ok {
+		if asyncObj.Done {
+			// If already done, just return the result
+			vm.sp = calleeIndex
+			return vm.push(asyncObj.Result)
+		}
+
+		// Save current state
+		asyncObj.IP = vm.currentFrame().ip
+		asyncObj.StackPtr = vm.sp
+		asyncObj.BasePointer = vm.currentFrame().basePointer
+		copy(asyncObj.Locals, vm.stack[vm.currentFrame().basePointer:])
+
+		// Create a new frame for the async function
+		frame := NewFrame(&compiler.CompiledFunction{
+			Instructions: asyncObj.Instructions,
+			NumLocals:    len(asyncObj.Locals),
+		}, vm.sp)
+		vm.pushFrame(frame)
+
+		// Execute the async function synchronously for now (simple implementation)
+		err := vm.Run()
+		if err != nil {
+			return err
+		}
+
+		// Mark as done and set result
+		asyncObj.Done = true
+		asyncObj.Result = vm.lastPopped
+
+		// Restore our stack and push the result
+		vm.sp = calleeIndex
+		return vm.push(asyncObj.Result)
+	}
+
 	if classObj, ok := calleeObj.(*objects.Class); ok {
 		instance := &objects.Instance{
 			Class:  classObj,
@@ -1167,6 +1203,10 @@ func (vm *VM) executeBangOperator() error {
 func (vm *VM) executeComparison(op compiler.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
+
+	if left == nil || right == nil {
+		return fmt.Errorf("nil operand in comparison: left=%v, right=%v", left, right)
+	}
 
 	if left.Type() == objects.INTEGER_OBJ && right.Type() == objects.INTEGER_OBJ {
 		return vm.executeIntegerComparison(op, left, right)

@@ -357,6 +357,7 @@ type Error struct {
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
 func (e *Error) Inspect() string { return e.ErrorType + ": " + e.Message }
+func (e *Error) Error() string { return e.ErrorType + ": " + e.Message }
 
 type BuiltinFunction func(args ...Object) Object
 

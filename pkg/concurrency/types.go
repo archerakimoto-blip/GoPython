@@ -2,7 +2,6 @@ package concurrency
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/go-py/go-python/pkg/objects"
 )

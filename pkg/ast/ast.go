@@ -373,6 +373,7 @@ type ListComprehension struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (lc *ListComprehension) expressionNode()      {}
@@ -399,6 +400,7 @@ type SetComprehension struct {
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	IsAsync  bool
 }
 
 func (sc *SetComprehension) expressionNode()      {}

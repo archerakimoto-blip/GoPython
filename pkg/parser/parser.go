@@ -54,14 +54,18 @@ type Parser struct {
 	curToken  lexer.Token
 	peekToken lexer.Token
 
+	// Token buffer for lookahead
+	tokenBuf []lexer.Token
+
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
 }
 
 func New(l *lexer.Lexer) *Parser {
 	p := &Parser{
-		l:      l,
-		errors: []string{},
+		l:        l,
+		errors:   []string{},
+		tokenBuf: []lexer.Token{},
 	}
 
 	p.prefixParseFns = make(map[lexer.TokenType]prefixParseFn)
@@ -125,8 +129,33 @@ func New(l *lexer.Lexer) *Parser {
 }
 
 func (p *Parser) nextToken() {
-	p.curToken = p.peekToken
-	p.peekToken = p.l.NextToken()
+	if len(p.tokenBuf) > 0 {
+		p.curToken = p.peekToken
+		p.peekToken = p.tokenBuf[0]
+		p.tokenBuf = p.tokenBuf[1:]
+	} else {
+		p.curToken = p.peekToken
+		p.peekToken = p.l.NextToken()
+	}
+}
+
+// peekN returns the next n tokens without consuming them
+func (p *Parser) peekN(n int) []lexer.Token {
+	tokens := []lexer.Token{}
+
+	// Add current peek token
+	if n >= 1 {
+		tokens = append(tokens, p.peekToken)
+	}
+
+	// Add more tokens from lexer and save to buffer
+	for i := 1; i < n; i++ {
+		tok := p.l.NextToken()
+		tokens = append(tokens, tok)
+		p.tokenBuf = append(p.tokenBuf, tok)
+	}
+
+	return tokens
 }
 
 func (p *Parser) ParseProgram() *ast.Program {
@@ -1044,28 +1073,63 @@ func (p *Parser) parseListLiteral() ast.Expression {
 	}
 
 	// Now, check if it's a list comprehension or a normal list
-	// Let's try to parse an expression and see if next token is FOR
+	// Let's try to parse an expression and see if next token is FOR or ASYNC FOR
 	p.nextToken()
 	firstExpr := p.parseExpression(EQUALS)
 	if firstExpr == nil {
 		return nil
 	}
 
-	// Now check if next token is FOR! That means list comprehension!
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
-		comp := &ast.ListComprehension{Token: p.curToken.Literal}
-		comp.Element = firstExpr
+	// Now check if next token is FOR or ASYNC followed by FOR!
+	// Use peekN to look ahead without consuming
+	peekTokens := p.peekN(2)
+	isAsync := false
+	isComprehension := false
 
-		// Handle FOR token
-		if !p.curTokenIs(lexer.FOR) {
+	if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
+		isAsync = true
+		isComprehension = true
+	} else if p.curTokenIs(lexer.FOR) {
+		isComprehension = true
+	} else if p.peekTokenIs(lexer.FOR) {
+		isComprehension = true
+	} else if len(peekTokens) >= 2 && peekTokens[0].Type == lexer.ASYNC && peekTokens[1].Type == lexer.FOR {
+		isAsync = true
+		isComprehension = true
+	}
+
+	if isComprehension {
+		// Now move to the FOR token, checking for ASYNC along the way
+		if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
+			isAsync = true
+			p.nextToken() // skip async
+			p.nextToken() // skip for
+		} else if p.curTokenIs(lexer.FOR) {
+			p.nextToken() // skip for
+		} else if p.peekTokenIs(lexer.FOR) {
+			// Need to move to the next token first, then check if it's ASYNC
 			p.nextToken()
-		}
-		// Now curToken should be FOR
-		if !p.curTokenIs(lexer.FOR) {
+			if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
+				isAsync = true
+				p.nextToken() // skip async
+				p.nextToken() // skip for
+			} else if p.curTokenIs(lexer.FOR) {
+				p.nextToken() // skip for
+			} else {
+				p.errors = append(p.errors, "expected FOR in list comprehension")
+				return nil
+			}
+		} else if len(peekTokens) >= 2 && peekTokens[0].Type == lexer.ASYNC && peekTokens[1].Type == lexer.FOR {
+			// We already know this is the case, so consume the tokens
+			p.nextToken() // async
+			p.nextToken() // for
+		} else {
 			p.errors = append(p.errors, "expected FOR in list comprehension")
 			return nil
 		}
-		p.nextToken()
+
+		comp := &ast.ListComprehension{Token: p.curToken.Literal, IsAsync: isAsync}
+		comp.Element = firstExpr
 
 		// Parse variable
 		if !p.curTokenIs(lexer.IDENT) {
@@ -1082,6 +1146,15 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 		p.nextToken()
 		comp.Iterable = p.parseExpression(LOWEST)
+
+		// Parse optional IF condition
+		if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+			if !p.curTokenIs(lexer.IF) {
+				p.nextToken()
+			}
+			p.nextToken() // past IF
+			comp.Filter = p.parseExpression(LOWEST)
+		}
 
 		// Consume closing ]
 		if p.curTokenIs(lexer.RBRACKET) {
