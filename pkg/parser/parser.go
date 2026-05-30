@@ -1080,57 +1080,49 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		return nil
 	}
 
-	// Debug print current state
-	fmt.Printf("DEBUG parseListLiteral: after firstExpr, curToken=%v (%q), peekToken=%v (%q)\n", 
-		p.curToken.Type, p.curToken.Literal, p.peekToken.Type, p.peekToken.Literal)
-
 	// Now check if next token is FOR or ASYNC followed by FOR!
-	// Use peekN to look ahead without consuming
-	peekTokens := p.peekN(2)
 	isAsync := false
 	isComprehension := false
+	savedPeekTokens := p.peekN(2) // Peek ahead without consuming
 
+	// Check all possible cases
 	if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
 		isAsync = true
 		isComprehension = true
 	} else if p.curTokenIs(lexer.FOR) {
 		isComprehension = true
-	} else if p.peekTokenIs(lexer.FOR) {
-		isComprehension = true
-	} else if len(peekTokens) >= 2 && peekTokens[0].Type == lexer.ASYNC && peekTokens[1].Type == lexer.FOR {
+	} else if p.peekTokenIs(lexer.ASYNC) && len(savedPeekTokens) >= 2 && savedPeekTokens[1].Type == lexer.FOR {
 		isAsync = true
+		isComprehension = true
+	} else if p.peekTokenIs(lexer.FOR) {
 		isComprehension = true
 	}
 
 	if isComprehension {
-		// Now move to the FOR token, checking for ASYNC along the way
+		// fmt.Printf("DEBUG: before consuming FOR/ASYNC, cur=%v (%q), peek=%v (%q)\n",
+		// 	p.curToken.Type, p.curToken.Literal, p.peekToken.Type, p.peekToken.Literal)
+		// Now consume the tokens as needed
 		if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
-			isAsync = true
-			p.nextToken() // skip async
-			p.nextToken() // skip for
-		} else if p.curTokenIs(lexer.FOR) {
-			p.nextToken() // skip for
-		} else if p.peekTokenIs(lexer.FOR) {
-			// Need to move to the next token first, then check if it's ASYNC
-			p.nextToken()
-			if p.curTokenIs(lexer.ASYNC) && p.peekTokenIs(lexer.FOR) {
-				isAsync = true
-				p.nextToken() // skip async
-				p.nextToken() // skip for
-			} else if p.curTokenIs(lexer.FOR) {
-				p.nextToken() // skip for
-			} else {
-				p.errors = append(p.errors, "expected FOR in list comprehension")
-				return nil
-			}
-		} else if len(peekTokens) >= 2 && peekTokens[0].Type == lexer.ASYNC && peekTokens[1].Type == lexer.FOR {
-			// We already know this is the case, so consume the tokens
 			p.nextToken() // async
+			p.nextToken() // for
+		} else if p.curTokenIs(lexer.FOR) {
+			p.nextToken() // for
+		} else if p.peekTokenIs(lexer.ASYNC) && len(savedPeekTokens) >= 2 && savedPeekTokens[1].Type == lexer.FOR {
+			p.nextToken() // async → cur becomes ASYNC, peek becomes FOR
+			p.nextToken() // for → cur becomes FOR, peek becomes IDENT
+		} else if p.peekTokenIs(lexer.FOR) {
 			p.nextToken() // for
 		} else {
 			p.errors = append(p.errors, "expected FOR in list comprehension")
 			return nil
 		}
+		// At this point, curToken should be FOR, or we need to move past it!
+		// Wait, let's check if we're still at FOR, if yes, next again!
+		if p.curTokenIs(lexer.FOR) {
+			p.nextToken()
+		}
+		// fmt.Printf("DEBUG: after consuming FOR/ASYNC, cur=%v (%q), peek=%v (%q)\n",
+		// 	p.curToken.Type, p.curToken.Literal, p.peekToken.Type, p.peekToken.Literal)
 
 		comp := &ast.ListComprehension{Token: p.curToken.Literal, IsAsync: isAsync}
 		comp.Element = firstExpr

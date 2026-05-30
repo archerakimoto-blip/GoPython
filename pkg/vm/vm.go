@@ -375,6 +375,8 @@ func (vm *VM) Run() error {
 		case compiler.OpReturnValue:
 			returnValue := vm.pop()
 
+			fmt.Printf("DEBUG VM OpReturnValue: returnValue=%#v (%T)\n", returnValue, returnValue)
+
 			frame := vm.popFrame()
 			
 			if vm.framesIndex == 0 {
@@ -393,6 +395,7 @@ func (vm *VM) Run() error {
 			
 			vm.sp = frame.basePointer - 1
 
+			fmt.Printf("DEBUG VM OpReturnValue: pushing returnValue to stack\n")
 			err := vm.push(returnValue)
 			if err != nil {
 				return err
@@ -931,8 +934,10 @@ func (vm *VM) executeCall(numArgs int) error {
 	
 	calleeObj := vm.stack[calleeIndex]
 
+	// fmt.Printf("DEBUG executeCall: numArgs=%d, calleeObj=%#v (%T)\n", numArgs, calleeObj, calleeObj)
 	// Handle Async objects
 	if asyncObj, ok := calleeObj.(*objects.Async); ok {
+		fmt.Printf("DEBUG executeCall: found asyncObj, Done=%v\n", asyncObj.Done)
 		if asyncObj.Done {
 			// If already done, just return the result
 			vm.sp = calleeIndex
@@ -945,6 +950,12 @@ func (vm *VM) executeCall(numArgs int) error {
 		asyncObj.BasePointer = vm.currentFrame().basePointer
 		copy(asyncObj.Locals, vm.stack[vm.currentFrame().basePointer:])
 
+		// Save original vm.constants
+		originalConstants := vm.constants
+		// Set vm.constants to asyncObj's saved constants
+		vm.constants = asyncObj.Constants
+		fmt.Printf("DEBUG executeCall async: vm.constants len = %d, const[11]=%#v, const[12]=%#v\n", len(vm.constants), vm.constants[11], vm.constants[12])
+
 		// Create a new frame for the async function
 		frame := NewFrame(&compiler.CompiledFunction{
 			Instructions: asyncObj.Instructions,
@@ -952,15 +963,20 @@ func (vm *VM) executeCall(numArgs int) error {
 		}, vm.sp)
 		vm.pushFrame(frame)
 
+		fmt.Printf("DEBUG executeCall: about to run async function with instructions len=%d\n", len(asyncObj.Instructions))
 		// Execute the async function synchronously for now (simple implementation)
 		err := vm.Run()
 		if err != nil {
+			fmt.Printf("DEBUG executeCall: err=%v\n", err)
 			return err
 		}
 
+		fmt.Printf("DEBUG executeCall: async function returned, vm.lastPopped=%#v (%T)\n", vm.lastPopped, vm.lastPopped)
 		// Mark as done and set result
 		asyncObj.Done = true
 		asyncObj.Result = vm.lastPopped
+		// Restore original vm.constants
+		vm.constants = originalConstants
 
 		// Restore our stack and push the result
 		vm.sp = calleeIndex
@@ -1064,7 +1080,10 @@ func (vm *VM) executeCall(numArgs int) error {
 	if !ok {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
 			args := vm.stack[vm.sp-numArgs : vm.sp]
+			fmt.Printf("DEBUG executeCall Builtin: vm.stack[0:%d] = %#v\n", vm.sp, vm.stack[0:vm.sp])
+			fmt.Printf("DEBUG executeCall Builtin: builtin=%#v, args=%#v\n", builtin, args)
 			result := builtin.Fn(args...)
+			fmt.Printf("DEBUG executeCall Builtin result: %#v\n", result)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)
 		}

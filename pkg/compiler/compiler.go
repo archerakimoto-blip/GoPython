@@ -1784,19 +1784,24 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 
 		// 循环开始
 		loopStart := len(c.instructions)
+		fmt.Printf("DEBUG compileListComprehension async: Starting loop part at instruction index %d\n", loopStart)
 
 		// 编译比较条件 _i < len(_iterable)
 		if indexVar.Scope == GlobalScope {
 			c.emit(OpGetGlobal, indexVar.Index)
 		} else {
+			fmt.Printf("DEBUG compileListComprehension async: Emitting OpGetLocal idx=%d\n", indexVar.Index)
 			c.emit1(OpGetLocal, indexVar.Index)
 		}
+		fmt.Printf("DEBUG compileListComprehension async: Emitting OpConstant idx=%d (lenIndex=%d)\n", c.lenIndex, c.lenIndex)
 		c.emit(OpConstant, c.lenIndex)
 		if iterVar.Scope == GlobalScope {
 			c.emit(OpGetGlobal, iterVar.Index)
 		} else {
+			fmt.Printf("DEBUG compileListComprehension async: Emitting OpGetLocal idx=%d\n", iterVar.Index)
 			c.emit1(OpGetLocal, iterVar.Index)
 		}
+		fmt.Printf("DEBUG compileListComprehension async: Emitting OpCall 1\n")
 		c.emit1(OpCall, 1)
 		c.emit(OpLessThan)
 
@@ -1890,6 +1895,16 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 
 		fnInstructions := c.instructions
 		numLocals := c.symbolTable.numDefinitions
+
+		fmt.Printf("DEBUG compileListComprehension async: numLocals=%d\n", numLocals)
+		firstN := 20
+		if len(fnInstructions) < firstN {
+			firstN = len(fnInstructions)
+		}
+		fmt.Printf("DEBUG compileListComprehension async: first %d bytes of fnInstructions: %#v\n", firstN, fnInstructions[:firstN])
+		fmt.Printf("DEBUG compileListComprehension async: len(c.constants)=%d, c.lenIndex=%d, c.appendIndex=%d\n", len(c.constants), c.lenIndex, c.appendIndex)
+		fmt.Printf("DEBUG compileListComprehension async: constants[c.lenIndex] = %#v (%T)\n", c.constants[c.lenIndex], c.constants[c.lenIndex])
+		fmt.Printf("DEBUG compileListComprehension async: constants[c.appendIndex] = %#v (%T)\n", c.constants[c.appendIndex], c.constants[c.appendIndex])
 
 		// 恢复外部
 		c.symbolTable = outerSymbolTable
