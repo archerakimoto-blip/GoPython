@@ -224,6 +224,7 @@ func (p *Parser) registerInfix(tokenType lexer.TokenType, fn infixParseFn) {
 }
 
 func (p *Parser) parseStatement() ast.Statement {
+	fmt.Printf("parseStatement called, cur=%v\n", p.curToken)
 	for p.curTokenIs(lexer.SEMICOLON) {
 		p.nextToken()
 	}
@@ -1075,13 +1076,9 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 			return nil
 		}
 		p.parseFunctionParameters(lit)
-		if p.curTokenIs(lexer.RPAREN) {
-			p.nextToken()
-		}
 	}
 
-	if !p.curTokenIs(lexer.COLON) {
-		p.peekError(lexer.COLON)
+	if !p.expectPeek(lexer.COLON) {
 		return nil
 	}
 
@@ -1096,47 +1093,56 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 	lit.PositionalOnlyCount = -1
 	lit.KeywordOnlyStart = -1
 
-	p.nextToken() // move past '('
+	if p.peekTokenIs(lexer.RPAREN) {
+		p.nextToken()
+		return
+	}
 
-	for !p.curTokenIs(lexer.RPAREN) {
-		switch p.curToken.Type {
-		case lexer.IDENT:
-			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			lit.Parameters = append(lit.Parameters, ident)
+	for !p.peekTokenIs(lexer.RPAREN) {
+		if p.peekTokenIs(lexer.SLASH) {
 			p.nextToken()
-		case lexer.SLASH:
 			lit.PositionalOnlyCount = len(lit.Parameters)
+		} else if p.peekTokenIs(lexer.ASTERISK) {
 			p.nextToken()
-		case lexer.ASTERISK:
-			p.nextToken()
-			if p.curTokenIs(lexer.IDENT) {
+			if p.peekTokenIs(lexer.IDENT) {
+				p.nextToken()
 				lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.VarArgs)
-				p.nextToken()
 			} else {
 				if lit.KeywordOnlyStart == -1 {
 					lit.KeywordOnlyStart = len(lit.Parameters)
 				}
 			}
-		case lexer.POWER:
+		} else if p.peekTokenIs(lexer.POWER) {
 			p.nextToken()
-			if p.curTokenIs(lexer.IDENT) {
+			if p.peekTokenIs(lexer.IDENT) {
+				p.nextToken()
 				lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.KwArgs)
-				p.nextToken()
 			}
-		case lexer.COMMA:
+		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-		default:
+			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			lit.Parameters = append(lit.Parameters, ident)
+		}
+
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken()
+		} else if p.peekTokenIs(lexer.RPAREN) {
 			break
 		}
 	}
-	// don't move past ')' - that's handled by parseFunctionLiteral calling expectPeek(COLON), which expects : next
+
+	if !p.expectPeek(lexer.RPAREN) {
+		return
+	}
 }
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
+	fmt.Printf("parseCallExpression called! function=%v, cur=%v, peek=%v\n", function, p.curToken, p.peekToken)
 	exp := &ast.CallExpression{Token: p.curToken.Literal, Function: function}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
+	fmt.Printf("parseCallExpression returning! cur=%v, peek=%v\n", p.curToken, p.peekToken)
 	return exp
 }
 
