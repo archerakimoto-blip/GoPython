@@ -978,6 +978,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken.Literal}
 	block.Statements = []ast.Statement{}
 
+	fmt.Printf("parseBlockStatement starts cur=%v, peek=%v\n", p.curToken, p.peekToken)
+
 	// 检查是大括号语法还是缩进语法
 	if p.curTokenIs(lexer.LBRACE) {
 		// 大括号语法（向后兼容）
@@ -1054,16 +1056,19 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 			p.nextToken()
 		}
 
+		fmt.Printf("parseBlockStatement before consume dedent cur=%v, peek=%v\n", p.curToken, p.peekToken)
 		// Consume the DEDENT token if present
 		if p.curTokenIs(lexer.DEDENT) {
 			p.nextToken()
 		}
+		fmt.Printf("parseBlockStatement after consume dedent cur=%v, peek=%v\n", p.curToken, p.peekToken)
 	}
 
 	return block
 }
 
 func (p *Parser) parseFunctionLiteral() ast.Expression {
+	fmt.Printf("parseFunctionLiteral called, cur=%v, peek=%v\n", p.curToken, p.peekToken)
 	lit := &ast.FunctionLiteral{Token: p.curToken.Literal}
 
 	if p.peekTokenIs(lexer.IDENT) {
@@ -1085,6 +1090,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	p.nextToken()
 	lit.Body = p.parseBlockStatement()
 
+	fmt.Printf("parseFunctionLiteral finished, cur=%v, peek=%v\n", p.curToken, p.peekToken)
 	return lit
 }
 

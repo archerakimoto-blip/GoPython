@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/lexer"
 	"github.com/go-py/go-python/pkg/parser"
 )
@@ -47,4 +48,15 @@ func main() {
 
 	fmt.Println("\nProgram parsed successfully!")
 	fmt.Printf("Number of statements: %d\n", len(program.Statements))
+	for _, stmt := range program.Statements {
+		fmt.Printf("Stmt type: %T\n", stmt)
+		if exprStmt, ok := stmt.(*ast.ExpressionStatement); ok {
+			fmt.Printf("Expression type: %T\n", exprStmt.Expression)
+			if fnLit, ok := exprStmt.Expression.(*ast.FunctionLiteral); ok {
+				fmt.Printf("  FunctionLiteral: Name: %s\n", fnLit.Name)
+				fmt.Printf("  PositionalOnlyCount: %v\n", fnLit.PositionalOnlyCount)
+				fmt.Printf("  KeywordOnlyStart: %v\n", fnLit.KeywordOnlyStart)
+			}
+		}
+	}
 }
