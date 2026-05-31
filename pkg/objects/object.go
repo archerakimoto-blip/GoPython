@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type ObjectType string
@@ -68,10 +69,780 @@ type String struct {
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
 
+func GetStringMethod(s *String, name string) (*Builtin, bool) {
+	switch name {
+	case "upper":
+		return &Builtin{
+			Name: "upper",
+			Fn: func(args ...Object) Object {
+				return &String{Value: strings.ToUpper(s.Value)}
+			},
+		}, true
+	case "lower":
+		return &Builtin{
+			Name: "lower",
+			Fn: func(args ...Object) Object {
+				return &String{Value: strings.ToLower(s.Value)}
+			},
+		}, true
+	case "capitalize":
+		return &Builtin{
+			Name: "capitalize",
+			Fn: func(args ...Object) Object {
+				if len(s.Value) == 0 {
+					return s
+				}
+				capitalized := strings.ToUpper(string(s.Value[0])) + strings.ToLower(s.Value[1:])
+				return &String{Value: capitalized}
+			},
+		}, true
+	case "title":
+		return &Builtin{
+			Name: "title",
+			Fn: func(args ...Object) Object {
+				return &String{Value: strings.Title(s.Value)}
+			},
+		}, true
+	case "swapcase":
+		return &Builtin{
+			Name: "swapcase",
+			Fn: func(args ...Object) Object {
+				var result strings.Builder
+				for _, c := range s.Value {
+					if 'a' <= c && c <= 'z' {
+						result.WriteRune(c - 32)
+					} else if 'A' <= c && c <= 'Z' {
+						result.WriteRune(c + 32)
+					} else {
+						result.WriteRune(c)
+					}
+				}
+				return &String{Value: result.String()}
+			},
+		}, true
+	case "split":
+		return &Builtin{
+			Name: "split",
+			Fn: func(args ...Object) Object {
+				var sep string
+				if len(args) > 0 {
+					if sArg, ok := args[0].(*String); ok {
+						sep = sArg.Value
+					}
+				}
+				var parts []string
+				if sep == "" {
+					parts = strings.Fields(s.Value)
+				} else {
+					parts = strings.Split(s.Value, sep)
+				}
+				elements := make([]Object, len(parts))
+				for i, part := range parts {
+					elements[i] = &String{Value: part}
+				}
+				return NewList(elements)
+			},
+		}, true
+	case "join":
+		return &Builtin{
+			Name: "join",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("join() takes exactly 1 argument")
+				}
+				list, ok := args[0].(*List)
+				if !ok {
+					return NewTypeError("join() argument must be an iterable of strings")
+				}
+				var parts []string
+				for _, el := range list.Elements {
+					if sEl, ok := el.(*String); ok {
+						parts = append(parts, sEl.Value)
+					} else {
+						return NewTypeError("join() argument must be an iterable of strings")
+					}
+				}
+				return &String{Value: strings.Join(parts, s.Value)}
+			},
+		}, true
+	case "strip":
+		return &Builtin{
+			Name: "strip",
+			Fn: func(args ...Object) Object {
+				var cutset string
+				if len(args) > 0 {
+					if sArg, ok := args[0].(*String); ok {
+						cutset = sArg.Value
+					}
+				}
+				if cutset == "" {
+					return &String{Value: strings.TrimSpace(s.Value)}
+				}
+				return &String{Value: strings.Trim(s.Value, cutset)}
+			},
+		}, true
+	case "lstrip":
+		return &Builtin{
+			Name: "lstrip",
+			Fn: func(args ...Object) Object {
+				var cutset string
+				if len(args) > 0 {
+					if sArg, ok := args[0].(*String); ok {
+						cutset = sArg.Value
+					}
+				}
+				if cutset == "" {
+					return &String{Value: strings.TrimLeftFunc(s.Value, unicode.IsSpace)}
+				}
+				return &String{Value: strings.TrimLeft(s.Value, cutset)}
+			},
+		}, true
+	case "rstrip":
+		return &Builtin{
+			Name: "rstrip",
+			Fn: func(args ...Object) Object {
+				var cutset string
+				if len(args) > 0 {
+					if sArg, ok := args[0].(*String); ok {
+						cutset = sArg.Value
+					}
+				}
+				if cutset == "" {
+					return &String{Value: strings.TrimRightFunc(s.Value, unicode.IsSpace)}
+				}
+				return &String{Value: strings.TrimRight(s.Value, cutset)}
+			},
+		}, true
+	case "startswith":
+		return &Builtin{
+			Name: "startswith",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("startswith() takes exactly 1 argument")
+				}
+				sArg, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("startswith() argument must be a string")
+				}
+				if strings.HasPrefix(s.Value, sArg.Value) {
+					return True
+				}
+				return False
+			},
+		}, true
+	case "endswith":
+		return &Builtin{
+			Name: "endswith",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("endswith() takes exactly 1 argument")
+				}
+				sArg, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("endswith() argument must be a string")
+				}
+				if strings.HasSuffix(s.Value, sArg.Value) {
+					return True
+				}
+				return False
+			},
+		}, true
+	case "replace":
+		return &Builtin{
+			Name: "replace",
+			Fn: func(args ...Object) Object {
+				if len(args) < 2 {
+					return NewTypeError("replace() takes at least 2 arguments")
+				}
+				old, ok1 := args[0].(*String)
+				newStr, ok2 := args[1].(*String)
+				if !ok1 || !ok2 {
+					return NewTypeError("replace() arguments must be strings")
+				}
+				if len(args) >= 3 {
+					if n, ok := args[2].(*Integer); ok {
+						return &String{Value: strings.Replace(s.Value, old.Value, newStr.Value, int(n.Value))}
+					}
+				}
+				return &String{Value: strings.ReplaceAll(s.Value, old.Value, newStr.Value)}
+			},
+		}, true
+	case "find":
+		return &Builtin{
+			Name: "find",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("find() takes at least 1 argument")
+				}
+				sArg, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("find() argument must be a string")
+				}
+				start := 0
+				if len(args) >= 2 {
+					if n, ok := args[1].(*Integer); ok {
+						start = int(n.Value)
+					}
+				}
+				end := len(s.Value)
+				if len(args) >= 3 {
+					if n, ok := args[2].(*Integer); ok {
+						end = int(n.Value)
+					}
+				}
+				idx := strings.Index(s.Value[start:end], sArg.Value)
+				if idx == -1 {
+					return &Integer{Value: -1}
+				}
+				return &Integer{Value: int64(idx + start)}
+			},
+		}, true
+	case "count":
+		return &Builtin{
+			Name: "count",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("count() takes at least 1 argument")
+				}
+				sArg, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("count() argument must be a string")
+				}
+				start := 0
+				if len(args) >= 2 {
+					if n, ok := args[1].(*Integer); ok {
+						start = int(n.Value)
+					}
+				}
+				end := len(s.Value)
+				if len(args) >= 3 {
+					if n, ok := args[2].(*Integer); ok {
+						end = int(n.Value)
+					}
+				}
+				count := strings.Count(s.Value[start:end], sArg.Value)
+				return &Integer{Value: int64(count)}
+			},
+		}, true
+	case "isalpha":
+		return &Builtin{
+			Name: "isalpha",
+			Fn: func(args ...Object) Object {
+				for _, c := range s.Value {
+					if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z') {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "isdigit":
+		return &Builtin{
+			Name: "isdigit",
+			Fn: func(args ...Object) Object {
+				for _, c := range s.Value {
+					if !('0' <= c && c <= '9') {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "isalnum":
+		return &Builtin{
+			Name: "isalnum",
+			Fn: func(args ...Object) Object {
+				for _, c := range s.Value {
+					if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9') {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "isspace":
+		return &Builtin{
+			Name: "isspace",
+			Fn: func(args ...Object) Object {
+				for _, c := range s.Value {
+					if !(' ' == c || '\t' == c || '\n' == c || '\r' == c) {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "isupper":
+		return &Builtin{
+			Name: "isupper",
+			Fn: func(args ...Object) Object {
+				hasAlpha := false
+				for _, c := range s.Value {
+					if 'a' <= c && c <= 'z' {
+						return False
+					}
+					if 'A' <= c && c <= 'Z' {
+						hasAlpha = true
+					}
+				}
+				if hasAlpha {
+					return True
+				}
+				return False
+			},
+		}, true
+	case "islower":
+		return &Builtin{
+			Name: "islower",
+			Fn: func(args ...Object) Object {
+				hasAlpha := false
+				for _, c := range s.Value {
+					if 'A' <= c && c <= 'Z' {
+						return False
+					}
+					if 'a' <= c && c <= 'z' {
+						hasAlpha = true
+					}
+				}
+				if hasAlpha {
+					return True
+				}
+				return False
+			},
+		}, true
+	}
+	return nil, false
+}
+
 type None struct{}
 
 func (n *None) Type() ObjectType { return NONE_OBJ }
 func (n *None) Inspect() string  { return "None" }
+
+func GetListMethod(l *List, name string) (*Builtin, bool) {
+	switch name {
+	case "append":
+		return &Builtin{
+			Name: "append",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("append() takes exactly 1 argument")
+				}
+				l.Append(args[0])
+				return None_
+			},
+		}, true
+	case "extend":
+		return &Builtin{
+			Name: "extend",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("extend() takes exactly 1 argument")
+				}
+				if other, ok := args[0].(*List); ok {
+					l.Extend(other)
+				}
+				return None_
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "pop",
+			Fn: func(args ...Object) Object {
+				if len(args) > 1 {
+					return NewTypeError("pop() takes at most 1 argument")
+				}
+				if len(args) == 0 {
+					val, err := l.Pop()
+					if err != nil {
+						return NewIndexError(err.Error())
+					}
+					return val
+				}
+				if idx, ok := args[0].(*Integer); ok {
+					val, err := l.Pop(int(idx.Value))
+					if err != nil {
+						return NewIndexError(err.Error())
+					}
+					return val
+				}
+				return NewTypeError("pop() argument must be an integer")
+			},
+		}, true
+	case "insert":
+		return &Builtin{
+			Name: "insert",
+			Fn: func(args ...Object) Object {
+				if len(args) != 2 {
+					return NewTypeError("insert() takes exactly 2 arguments")
+				}
+				if idx, ok := args[0].(*Integer); ok {
+					l.Insert(int(idx.Value), args[1])
+				}
+				return None_
+			},
+		}, true
+	case "remove":
+		return &Builtin{
+			Name: "remove",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("remove() takes exactly 1 argument")
+				}
+				err := l.Remove(args[0])
+				if err != nil {
+					return NewValueError(err.Error())
+				}
+				return None_
+			},
+		}, true
+	case "reverse":
+		return &Builtin{
+			Name: "reverse",
+			Fn: func(args ...Object) Object {
+				l.Reverse()
+				return None_
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "clear",
+			Fn: func(args ...Object) Object {
+				l.Clear()
+				return None_
+			},
+		}, true
+	case "index":
+		return &Builtin{
+			Name: "index",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("index() takes at least 1 argument")
+				}
+				idx := l.Index(args[0])
+				if idx == -1 {
+					return NewValueError("value not in list")
+				}
+				return &Integer{Value: int64(idx)}
+			},
+		}, true
+	case "count":
+		return &Builtin{
+			Name: "count",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("count() takes exactly 1 argument")
+				}
+				count := 0
+				for _, el := range l.Elements {
+					if Equal(el, args[0]) {
+						count++
+					}
+				}
+				return &Integer{Value: int64(count)}
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func GetDictMethod(d *Dict, name string) (*Builtin, bool) {
+	switch name {
+	case "get":
+		return &Builtin{
+			Name: "get",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("get() takes at least 1 argument")
+				}
+				if val, ok := d.Get(args[0]); ok {
+					return val
+				}
+				if len(args) >= 2 {
+					return args[1]
+				}
+				return None_
+			},
+		}, true
+	case "set":
+		fallthrough
+	case "setdefault":
+		return &Builtin{
+			Name: "setdefault",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("setdefault() takes at least 1 argument")
+				}
+				if val, ok := d.Get(args[0]); ok {
+					return val
+				}
+				var defaultVal Object = None_
+				if len(args) >= 2 {
+					defaultVal = args[1]
+				}
+				d.Set(args[0], defaultVal)
+				return defaultVal
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "clear",
+			Fn: func(args ...Object) Object {
+				*d = *NewDict()
+				return None_
+			},
+		}, true
+	case "keys":
+		return &Builtin{
+			Name: "keys",
+			Fn: func(args ...Object) Object {
+				return NewList(d.KeysSlice())
+			},
+		}, true
+	case "values":
+		return &Builtin{
+			Name: "values",
+			Fn: func(args ...Object) Object {
+				return NewList(d.ValuesSlice())
+			},
+		}, true
+	case "items":
+		return &Builtin{
+			Name: "items",
+			Fn: func(args ...Object) Object {
+				elements := make([]Object, 0, len(d.Keys))
+				for _, key := range d.Keys {
+					value, _ := d.Get(key)
+					elements = append(elements, NewTuple([]Object{key, value}))
+				}
+				return NewList(elements)
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "pop",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("pop() takes at least 1 argument")
+				}
+				if val, ok := d.Get(args[0]); ok {
+					d.Delete(args[0])
+					return val
+				}
+				if len(args) >= 2 {
+					return args[1]
+				}
+				return NewKeyError("key not found")
+			},
+		}, true
+	case "popitem":
+		return &Builtin{
+			Name: "popitem",
+			Fn: func(args ...Object) Object {
+				if len(d.Keys) == 0 {
+					return NewKeyError("popitem(): dictionary is empty")
+				}
+				for keyStr, key := range d.Keys {
+					val := d.Pairs[keyStr]
+					d.Delete(key)
+					return NewTuple([]Object{key, val})
+				}
+				return None_
+			},
+		}, true
+	case "update":
+		return &Builtin{
+			Name: "update",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("update() takes exactly 1 argument")
+				}
+				if other, ok := args[0].(*Dict); ok {
+					for keyStr, key := range other.Keys {
+						d.Set(key, other.Pairs[keyStr])
+					}
+				}
+				return None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func GetSetMethod(s *Set, name string) (*Builtin, bool) {
+	switch name {
+	case "add":
+		return &Builtin{
+			Name: "add",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("add() takes exactly 1 argument")
+				}
+				s.Add(args[0])
+				return None_
+			},
+		}, true
+	case "remove":
+		return &Builtin{
+			Name: "remove",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("remove() takes exactly 1 argument")
+				}
+				if !s.Contains(args[0]) {
+					return NewKeyError("element not in set")
+				}
+				s.Remove(args[0])
+				return None_
+			},
+		}, true
+	case "discard":
+		return &Builtin{
+			Name: "discard",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("discard() takes exactly 1 argument")
+				}
+				s.Remove(args[0])
+				return None_
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "clear",
+			Fn: func(args ...Object) Object {
+				*s = *NewSet()
+				return None_
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "pop",
+			Fn: func(args ...Object) Object {
+				for _, val := range s.Elements {
+					s.Remove(val)
+					return val
+				}
+				return NewKeyError("pop from an empty set")
+			},
+		}, true
+	case "issubset":
+		return &Builtin{
+			Name: "issubset",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("issubset() takes exactly 1 argument")
+				}
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range s.Elements {
+						if !other.Contains(val) {
+							return False
+						}
+					}
+					return True
+				}
+				return False
+			},
+		}, true
+	case "issuperset":
+		return &Builtin{
+			Name: "issuperset",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("issuperset() takes exactly 1 argument")
+				}
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range other.Elements {
+						if !s.Contains(val) {
+							return False
+						}
+					}
+					return True
+				}
+				return False
+			},
+		}, true
+	case "union":
+		return &Builtin{
+			Name: "union",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("union() takes exactly 1 argument")
+				}
+				result := NewSet()
+				for _, val := range s.Elements {
+					result.Add(val)
+				}
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range other.Elements {
+						result.Add(val)
+					}
+				}
+				return result
+			},
+		}, true
+	case "intersection":
+		return &Builtin{
+			Name: "intersection",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("intersection() takes exactly 1 argument")
+				}
+				result := NewSet()
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range s.Elements {
+						if other.Contains(val) {
+							result.Add(val)
+						}
+					}
+				}
+				return result
+			},
+		}, true
+	case "difference":
+		return &Builtin{
+			Name: "difference",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("difference() takes exactly 1 argument")
+				}
+				result := NewSet()
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range s.Elements {
+						if !other.Contains(val) {
+							result.Add(val)
+						}
+					}
+				}
+				return result
+			},
+		}, true
+	case "symmetric_difference":
+		return &Builtin{
+			Name: "symmetric_difference",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("symmetric_difference() takes exactly 1 argument")
+				}
+				result := NewSet()
+				if other, ok := args[0].(*Set); ok {
+					for _, val := range s.Elements {
+						if !other.Contains(val) {
+							result.Add(val)
+						}
+					}
+					for _, val := range other.Elements {
+						if !s.Contains(val) {
+							result.Add(val)
+						}
+					}
+				}
+				return result
+			},
+		}, true
+	}
+	return nil, false
+}
 
 type List struct {
 	Elements []Object

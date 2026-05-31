@@ -21,18 +21,30 @@ func main() {
 	}
 
 	l := lexer.New(string(content))
+	// First print all tokens
+	fmt.Println("Tokens:")
+	for {
+		tok := l.NextToken()
+		fmt.Printf("Type: %-10s Literal: %q\n", tok.Type, tok.Literal)
+		if tok.Type == lexer.EOF {
+			break
+		}
+	}
+
+	// Recreate lexer and parser
+	l = lexer.New(string(content))
 	p := parser.New(l)
 
 	program := p.ParseProgram()
 
 	if len(p.Errors()) != 0 {
-		fmt.Println("Parser errors:")
+		fmt.Println("\nParser errors:")
 		for _, msg := range p.Errors() {
 			fmt.Printf("\t%s\n", msg)
 		}
 		return
 	}
 
-	fmt.Println("Program parsed successfully!")
+	fmt.Println("\nProgram parsed successfully!")
 	fmt.Printf("Number of statements: %d\n", len(program.Statements))
 }

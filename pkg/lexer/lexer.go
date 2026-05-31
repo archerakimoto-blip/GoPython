@@ -11,6 +11,7 @@ const (
 	FLOAT  = "FLOAT"
 	STRING = "STRING"
 	FSTRING = "FSTRING"
+	RSTRING = "RSTRING"
 
 	ASSIGN   = "="
 	PLUS     = "+"
@@ -78,6 +79,8 @@ const (
 	FROM     = "FROM"
 	ASYNC    = "ASYNC"
 	AWAIT    = "AWAIT"
+	MATCH    = "MATCH"
+	CASE     = "CASE"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -118,6 +121,8 @@ var keywords = map[string]TokenType{
 	"from":   FROM,
 	"async":  ASYNC,
 	"await":  AWAIT,
+	"match":  MATCH,
+	"case":   CASE,
 }
 
 type Lexer struct {
@@ -296,6 +301,17 @@ func (l *Lexer) NextToken() Token {
 		if l.peekChar() == '"' {
 			l.readChar()
 			tok.Type = FSTRING
+			tok.Literal = l.readString()
+			l.readChar()
+			return tok
+		}
+		tok.Literal = l.readIdentifier()
+		tok.Type = lookupIdent(tok.Literal)
+		return tok
+	case 'r':
+		if l.peekChar() == '"' {
+			l.readChar()
+			tok.Type = RSTRING
 			tok.Literal = l.readString()
 			l.readChar()
 			return tok

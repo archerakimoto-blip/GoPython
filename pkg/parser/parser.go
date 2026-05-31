@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/go-py/go-python/pkg/ast"
@@ -73,6 +74,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.INT, p.parseIntegerLiteral)
 	p.registerPrefix(lexer.FLOAT, p.parseFloatLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
+	p.registerPrefix(lexer.RSTRING, p.parseStringLiteral)
 	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
@@ -190,8 +192,8 @@ func (p *Parser) Errors() []string {
 }
 
 func (p *Parser) peekError(t lexer.TokenType) {
-	msg := fmt.Sprintf("expected next token to be %s, got %s instead",
-		t, p.peekToken.Type)
+	msg := fmt.Sprintf("expected next token to be %s, got %s instead (stack: %s)",
+		t, p.peekToken.Type, string(debug.Stack()))
 	p.errors = append(p.errors, msg)
 }
 
@@ -297,6 +299,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseImportStatement()
 	case lexer.FROM:
 		return p.parseFromImportStatement()
+	case lexer.MATCH:
+		return p.parseMatchStatement()
 	case lexer.IDENT:
 		switch p.peekToken.Type {
 		case lexer.ASSIGN:
@@ -782,6 +786,7 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
+	fmt.Printf("parseGroupedExpression called! cur=%v, peek=%v\n", p.curToken, p.peekToken)
 	p.nextToken()
 
 	exp := p.parseExpression(LOWEST)
@@ -832,6 +837,140 @@ func (p *Parser) parseIfExpression() ast.Expression {
 	}
 
 	return expression
+}
+
+func (p *Parser) parseMatchStatement() *ast.MatchStatement {
+	stmt := &ast.MatchStatement{Token: p.curToken.Literal}
+	p.nextToken()
+
+	stmt.Subject = p.parseExpression(LOWEST)
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+	p.nextToken() // consume colon
+
+	stmt.Cases = []*ast.CaseClause{}
+	for {
+		// Skip any leading indent/dedent
+		for p.curTokenIs(lexer.INDENT) || p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+
+		if !p.curTokenIs(lexer.CASE) {
+			break
+		}
+		caseClause := p.parseCaseClause()
+		if caseClause != nil {
+			stmt.Cases = append(stmt.Cases, caseClause)
+		}
+	}
+	return stmt
+}
+
+func (p *Parser) parseCaseClause() *ast.CaseClause {
+	cc := &ast.CaseClause{Token: p.curToken.Literal}
+	p.nextToken() // consume case
+
+	cc.Pattern = p.parsePattern()
+	if cc.Pattern == nil {
+		return nil
+	}
+	p.nextToken() // consume pattern token
+
+	// Check for guard condition (if expr)
+	if p.curTokenIs(lexer.IF) {
+		p.nextToken() // consume if
+		cc.Guard = p.parseExpression(LOWEST)
+		p.nextToken()
+	}
+
+	if !p.curTokenIs(lexer.COLON) {
+		if !p.expectPeek(lexer.COLON) {
+			return nil
+		}
+	} else {
+		p.nextToken()
+	}
+
+	cc.Body = p.parseBlockStatement()
+	return cc
+}
+
+func (p *Parser) parsePattern() ast.Pattern {
+	switch p.curToken.Type {
+	case lexer.INT, lexer.FLOAT, lexer.STRING, lexer.TRUE, lexer.FALSE, lexer.NONE:
+		// Literal pattern: parse as expression then wrap
+		tok := p.curToken
+		expr := p.parseExpression(LOWEST)
+		return &ast.LiteralPattern{Token: tok.Literal, Value: expr}
+	case lexer.LPAREN:
+		return p.parseTuplePattern()
+	case lexer.LBRACKET:
+		return p.parseListPattern()
+	case lexer.IDENT:
+		tok := p.curToken
+		if tok.Literal == "_" {
+			return &ast.WildcardPattern{Token: tok.Literal}
+		}
+		return &ast.IdentifierPattern{
+			Token: tok.Literal,
+			Name:  &ast.Identifier{Token: tok.Literal, Value: tok.Literal},
+		}
+	default:
+		// Try as literal
+		tok := p.curToken
+		expr := p.parseExpression(LOWEST)
+		if expr != nil {
+			return &ast.LiteralPattern{Token: tok.Literal, Value: expr}
+		}
+		return nil
+	}
+}
+
+func (p *Parser) parseTuplePattern() *ast.TuplePattern {
+	tp := &ast.TuplePattern{Token: p.curToken.Literal}
+	p.nextToken() // consume (
+	tp.Elements = []ast.Pattern{}
+
+	for !p.curTokenIs(lexer.RPAREN) && !p.curTokenIs(lexer.EOF) {
+		pat := p.parsePattern()
+		if pat != nil {
+			tp.Elements = append(tp.Elements, pat)
+			p.nextToken()
+		}
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+	if !p.expectPeek(lexer.RPAREN) {
+		return nil
+	}
+	return tp
+}
+
+func (p *Parser) parseListPattern() *ast.ListPattern {
+	lp := &ast.ListPattern{Token: p.curToken.Literal}
+	p.nextToken() // consume [
+	lp.Elements = []ast.Pattern{}
+
+	for !p.curTokenIs(lexer.RBRACKET) && !p.curTokenIs(lexer.EOF) {
+		pat := p.parsePattern()
+		if pat != nil {
+			lp.Elements = append(lp.Elements, pat)
+			p.nextToken()
+		}
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken()
+		} else {
+			break
+		}
+	}
+	if !p.expectPeek(lexer.RBRACKET) {
+		return nil
+	}
+	return lp
 }
 
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
@@ -936,9 +1075,13 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 			return nil
 		}
 		p.parseFunctionParameters(lit)
+		if p.curTokenIs(lexer.RPAREN) {
+			p.nextToken()
+		}
 	}
 
-	if !p.expectPeek(lexer.COLON) {
+	if !p.curTokenIs(lexer.COLON) {
+		p.peekError(lexer.COLON)
 		return nil
 	}
 
@@ -950,113 +1093,45 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 
 func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 	lit.Parameters = []*ast.Identifier{}
+	lit.PositionalOnlyCount = -1
+	lit.KeywordOnlyStart = -1
 
-	if p.peekTokenIs(lexer.RPAREN) {
-		p.nextToken()
-		return
-	}
+	p.nextToken() // move past '('
 
-	if p.peekTokenIs(lexer.ASTERISK) {
-		p.nextToken()
-		if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
-			lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			lit.Parameters = append(lit.Parameters, lit.VarArgs)
-		} else if p.peekTokenIs(lexer.COMMA) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.ASTERISK) {
-				p.nextToken()
-				if p.peekTokenIs(lexer.IDENT) {
-					p.nextToken()
-					lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				}
-			} else {
-				ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				lit.Parameters = append(lit.Parameters, ident)
-			}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-		if p.peekTokenIs(lexer.COMMA) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.ASTERISK) {
-				p.nextToken()
-				if p.peekTokenIs(lexer.IDENT) {
-					p.nextToken()
-					lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				}
-			}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-	}
-
-	if p.peekTokenIs(lexer.POWER) {
-		p.nextToken()
-		if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
-			lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-	}
-
-	for !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.COMMA) {
-		if p.peekTokenIs(lexer.ASTERISK) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
-				p.nextToken()
-				lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			}
-		} else if p.peekTokenIs(lexer.POWER) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
-				p.nextToken()
-				lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			}
-		} else if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
+	for !p.curTokenIs(lexer.RPAREN) {
+		switch p.curToken.Type {
+		case lexer.IDENT:
 			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 			lit.Parameters = append(lit.Parameters, ident)
-		} else {
-			break
-		}
-	}
-
-	for p.peekTokenIs(lexer.COMMA) {
-		p.nextToken()
-		if p.peekTokenIs(lexer.ASTERISK) {
 			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
-				p.nextToken()
+		case lexer.SLASH:
+			lit.PositionalOnlyCount = len(lit.Parameters)
+			p.nextToken()
+		case lexer.ASTERISK:
+			p.nextToken()
+			if p.curTokenIs(lexer.IDENT) {
 				lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.VarArgs)
-			}
-		} else if p.peekTokenIs(lexer.POWER) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
 				p.nextToken()
+			} else {
+				if lit.KeywordOnlyStart == -1 {
+					lit.KeywordOnlyStart = len(lit.Parameters)
+				}
+			}
+		case lexer.POWER:
+			p.nextToken()
+			if p.curTokenIs(lexer.IDENT) {
 				lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.KwArgs)
+				p.nextToken()
 			}
-		} else if p.peekTokenIs(lexer.IDENT) {
+		case lexer.COMMA:
 			p.nextToken()
-			ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			lit.Parameters = append(lit.Parameters, ident)
-		} else {
+		default:
 			break
 		}
 	}
-
-	if !p.expectPeek(lexer.RPAREN) {
-		return
-	}
+	// don't move past ')' - that's handled by parseFunctionLiteral calling expectPeek(COLON), which expects : next
 }
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
@@ -1505,6 +1580,7 @@ func (p *Parser) parseNormalDictLiteral() ast.Expression {
 
 func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	list := []ast.Expression{}
+	fmt.Printf("parseExpressionList called for end: %v, cur=%v, peek=%v\n", end, p.curToken, p.peekToken)
 
 	if p.peekTokenIs(end) {
 		p.nextToken()
@@ -1512,9 +1588,8 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 	}
 
 	p.nextToken()
-	exp := p.parseExpression(LOWEST)
-	
-	// Check if it's a keyword argument
+	fmt.Printf("parseExpressionList after first p.nextToken(): cur=%v, peek=%v\n", p.curToken, p.peekToken)
+	// FIRST check if this is a keyword argument!
 	if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
 		name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 		p.nextToken() // skip '='
@@ -1526,13 +1601,17 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 			Value: value,
 		}
 		list = append(list, keywordArg)
-	} else if exp != nil {
-		list = append(list, exp)
+	} else {
+		exp := p.parseExpression(LOWEST)
+		if exp != nil {
+			list = append(list, exp)
+		}
 	}
 
 	for p.peekTokenIs(lexer.COMMA) {
 		p.nextToken()
 		p.nextToken()
+		fmt.Printf("parseExpressionList after comma p.nextToken(): cur=%v, peek=%v\n", p.curToken, p.peekToken)
 		
 		// Check if this is a keyword argument
 		if p.curTokenIs(lexer.IDENT) && p.peekTokenIs(lexer.ASSIGN) {
@@ -1547,7 +1626,7 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 			}
 			list = append(list, keywordArg)
 		} else {
-			exp = p.parseExpression(LOWEST)
+			exp := p.parseExpression(LOWEST)
 			if exp != nil {
 				list = append(list, exp)
 			}
@@ -1561,6 +1640,7 @@ func (p *Parser) parseExpressionList(end lexer.TokenType) []ast.Expression {
 		p.nextToken()
 	}
 
+	fmt.Printf("parseExpressionList returning %d elements\n", len(list))
 	return list
 }
 

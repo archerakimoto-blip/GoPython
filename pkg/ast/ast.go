@@ -157,6 +157,115 @@ func (ie *IfExpression) String() string {
 	return "if " + ie.Condition.String() + " {\n" + ie.Consequence.String() + "\n}"
 }
 
+// Pattern Matching: MatchStatement and CaseClause
+type MatchStatement struct {
+	Token       string // 'match'
+	Subject     Expression
+	Cases       []*CaseClause
+}
+
+func (ms *MatchStatement) statementNode()       {}
+func (ms *MatchStatement) TokenLiteral() string { return ms.Token }
+func (ms *MatchStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("match " + ms.Subject.String() + ":\n")
+	for _, c := range ms.Cases {
+		out.WriteString(c.String())
+	}
+	return out.String()
+}
+
+type CaseClause struct {
+	Token       string // 'case'
+	Pattern     Pattern
+	Guard       Expression // Optional guard condition
+	Body        *BlockStatement
+}
+
+func (cc *CaseClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("case ")
+	out.WriteString(cc.Pattern.String())
+	if cc.Guard != nil {
+		out.WriteString(" if ")
+		out.WriteString(cc.Guard.String())
+	}
+	out.WriteString(":\n")
+	out.WriteString(cc.Body.String())
+	return out.String()
+}
+
+type Pattern interface {
+	Node
+	patternNode()
+}
+
+type WildcardPattern struct {
+	Token string // '_'
+}
+
+func (wp *WildcardPattern) patternNode()       {}
+func (wp *WildcardPattern) TokenLiteral() string { return wp.Token }
+func (wp *WildcardPattern) String() string { return "_" }
+
+type IdentifierPattern struct {
+	Token string
+	Name  *Identifier
+}
+
+func (ip *IdentifierPattern) patternNode()       {}
+func (ip *IdentifierPattern) TokenLiteral() string { return ip.Token }
+func (ip *IdentifierPattern) String() string { return ip.Name.String() }
+
+type LiteralPattern struct {
+	Token string
+	Value Expression
+}
+
+func (lp *LiteralPattern) patternNode()       {}
+func (lp *LiteralPattern) TokenLiteral() string { return lp.Token }
+func (lp *LiteralPattern) String() string { return lp.Value.String() }
+
+type TuplePattern struct {
+	Token string
+	Elements []Pattern
+}
+
+func (tp *TuplePattern) patternNode()       {}
+func (tp *TuplePattern) TokenLiteral() string { return tp.Token }
+func (tp *TuplePattern) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	for i, el := range tp.Elements {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(el.String())
+	}
+	out.WriteString(")")
+	return out.String()
+}
+
+type ListPattern struct {
+	Token string
+	Elements []Pattern
+}
+
+func (lsp *ListPattern) patternNode()       {}
+func (lsp *ListPattern) TokenLiteral() string { return lsp.Token }
+func (lsp *ListPattern) String() string {
+	var out bytes.Buffer
+	out.WriteString("[")
+	for i, el := range lsp.Elements {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(el.String())
+	}
+	out.WriteString("]")
+	return out.String()
+}
+
 type BlockStatement struct {
 	Token      string
 	Statements []Statement
@@ -173,14 +282,16 @@ func (bs *BlockStatement) String() string {
 }
 
 type FunctionLiteral struct {
-	Token      string
-	Name       string
-	Parameters []*Identifier
-	Body       *BlockStatement
-	VarArgs    *Identifier
-	KwArgs     *Identifier
-	Decorators []Expression // 装饰器列表
-	IsAsync    bool         // 是否为 async 函数
+	Token              string
+	Name               string
+	Parameters         []*Identifier
+	Body               *BlockStatement
+	VarArgs            *Identifier
+	KwArgs             *Identifier
+	Decorators         []Expression // 装饰器列表
+	IsAsync            bool         // 是否为 async 函数
+	PositionalOnlyCount int         // 位置参数的数量（在 / 之前的参数）
+	KeywordOnlyStart    int         // 关键字参数的起始索引（在 * 之后的参数）
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -188,13 +299,43 @@ func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token }
 func (fl *FunctionLiteral) String() string {
 	var out bytes.Buffer
 	params := []string{}
-	for _, p := range fl.Parameters {
+	for i, p := range fl.Parameters {
+		if i > 0 {
+			params = append(params, ", ")
+		}
+		if i == fl.PositionalOnlyCount {
+			params = append(params, "/")
+			if len(fl.Parameters) > i {
+				params = append(params, ", ")
+			}
+		}
+		if i == fl.KeywordOnlyStart {
+			params = append(params, "*")
+			if len(fl.Parameters) > i {
+				params = append(params, ", ")
+			}
+		}
 		params = append(params, p.String())
 	}
+	if fl.PositionalOnlyCount == len(fl.Parameters) {
+		params = append(params, "/")
+	}
+	if fl.KeywordOnlyStart == len(fl.Parameters) {
+		if len(params) > 0 {
+			params = append(params, ", ")
+		}
+		params = append(params, "*")
+	}
 	if fl.VarArgs != nil {
+		if len(params) > 0 {
+			params = append(params, ", ")
+		}
 		params = append(params, "*"+fl.VarArgs.String())
 	}
 	if fl.KwArgs != nil {
+		if len(params) > 0 {
+			params = append(params, ", ")
+		}
 		params = append(params, "**"+fl.KwArgs.String())
 	}
 	if fl.IsAsync {
@@ -204,7 +345,7 @@ func (fl *FunctionLiteral) String() string {
 	if fl.Name != "" {
 		out.WriteString("<" + fl.Name + ">")
 	}
-	out.WriteString("(" + strings.Join(params, ", ") + ") ")
+	out.WriteString("(" + strings.Join(params, "") + ") ")
 	out.WriteString(fl.Body.String())
 	return out.String()
 }

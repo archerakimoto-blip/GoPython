@@ -309,6 +309,8 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
 		}
+	case *ast.MatchStatement:
+		return desugarMatchStatement(s)
 	case *ast.ClassStatement:
 		desugaredClass := &ast.ClassStatement{
 			Token:       s.Token,
@@ -718,4 +720,164 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 	}
 
 	return block
+}
+
+func desugarMatchStatement(matchStmt *ast.MatchStatement) ast.Statement {
+	// 首先，创建一个临时变量保存 subject
+	tempIdent := &ast.Identifier{Token: "_match_subject", Value: "_match_subject"}
+	letStmt := &ast.LetStatement{
+		Token: matchStmt.Token,
+		Names: []*ast.Identifier{tempIdent},
+		Value: desugarExpression(matchStmt.Subject),
+	}
+
+	stmts := []ast.Statement{letStmt}
+
+	// 现在，构建 if-elif 链
+	var currentIf ast.Statement
+	for i := len(matchStmt.Cases) - 1; i >= 0; i-- {
+		caseClause := matchStmt.Cases[i]
+		// 构建条件表达式
+		condition, bindingStmts := buildPatternCondition(tempIdent, caseClause.Pattern)
+		if caseClause.Guard != nil {
+			condition = &ast.InfixExpression{
+				Token:    "and",
+				Left:     condition,
+				Operator: "and",
+				Right:    desugarExpression(caseClause.Guard),
+			}
+		}
+		// 构建 body，包括绑定语句
+		bodyStmts := make([]ast.Statement, 0, len(bindingStmts)+len(caseClause.Body.Statements))
+		bodyStmts = append(bodyStmts, bindingStmts...)
+		bodyStmts = append(bodyStmts, desugarBlockStatement(caseClause.Body).Statements...)
+		bodyBlock := &ast.BlockStatement{
+			Token:      caseClause.Token,
+			Statements: bodyStmts,
+		}
+
+		// 构建 if 语句
+		ifStmt := &ast.IfExpression{
+			Token:       caseClause.Token,
+			Condition:   condition,
+			Consequence: bodyBlock,
+		}
+		if currentIf != nil {
+			ifStmt.Alternative = &ast.BlockStatement{
+				Token:      caseClause.Token,
+				Statements: []ast.Statement{currentIf},
+			}
+		}
+		currentIf = &ast.ExpressionStatement{
+			Token:      caseClause.Token,
+			Expression: ifStmt,
+		}
+	}
+
+	if currentIf != nil {
+		stmts = append(stmts, currentIf)
+	}
+
+	return &ast.BlockStatement{
+		Token:      matchStmt.Token,
+		Statements: stmts,
+	}
+}
+
+func buildPatternCondition(subject *ast.Identifier, pattern ast.Pattern) (ast.Expression, []ast.Statement) {
+	bindings := []ast.Statement{}
+
+	switch p := pattern.(type) {
+	case *ast.WildcardPattern:
+		return &ast.Boolean{Token: "true", Value: true}, bindings
+	case *ast.IdentifierPattern:
+		// 绑定变量
+		bindStmt := &ast.LetStatement{
+			Token: p.Token,
+			Names: []*ast.Identifier{p.Name},
+			Value: subject,
+		}
+		bindings = append(bindings, bindStmt)
+		return &ast.Boolean{Token: "true", Value: true}, bindings
+	case *ast.LiteralPattern:
+		// 相等比较
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     subject,
+			Operator: "==",
+			Right:    desugarExpression(p.Value),
+		}, bindings
+	case *ast.TuplePattern:
+		// 检查长度，然后逐个匹配元素
+		checkLen := &ast.InfixExpression{
+			Token:    "==",
+			Left: &ast.CallExpression{
+				Token:    "len",
+				Function: &ast.Identifier{Token: "len", Value: "len"},
+				Arguments: []ast.Expression{subject},
+			},
+			Operator: "==",
+			Right:    &ast.IntegerLiteral{Token: string(rune(len(p.Elements) + '0')), Value: int64(len(p.Elements))},
+		}
+		condition := checkLen
+		for i, elemPattern := range p.Elements {
+			elemSubject := &ast.IndexExpression{
+				Token: "[",
+				Left:  subject,
+				Index: &ast.IntegerLiteral{Token: string(rune(i + '0')), Value: int64(i)},
+			}
+			// 使用临时变量保存元素，避免多次计算
+			elemTemp := &ast.Identifier{Token: "_match_elem", Value: "_match_elem"}
+			bindings = append(bindings, &ast.LetStatement{
+				Token: "_match_elem",
+				Names: []*ast.Identifier{elemTemp},
+				Value: elemSubject,
+			})
+			elemCond, elemBindings := buildPatternCondition(elemTemp, elemPattern)
+			bindings = append(bindings, elemBindings...)
+			condition = &ast.InfixExpression{
+				Token:    "and",
+				Left:     condition,
+				Operator: "and",
+				Right:    elemCond,
+			}
+		}
+		return condition, bindings
+	case *ast.ListPattern:
+		// 与 tuple 类似
+		checkLen := &ast.InfixExpression{
+			Token:    "==",
+			Left: &ast.CallExpression{
+				Token:    "len",
+				Function: &ast.Identifier{Token: "len", Value: "len"},
+				Arguments: []ast.Expression{subject},
+			},
+			Operator: "==",
+			Right:    &ast.IntegerLiteral{Token: string(rune(len(p.Elements) + '0')), Value: int64(len(p.Elements))},
+		}
+		condition := checkLen
+		for i, elemPattern := range p.Elements {
+			elemSubject := &ast.IndexExpression{
+				Token: "[",
+				Left:  subject,
+				Index: &ast.IntegerLiteral{Token: string(rune(i + '0')), Value: int64(i)},
+			}
+			elemTemp := &ast.Identifier{Token: "_match_elem", Value: "_match_elem"}
+			bindings = append(bindings, &ast.LetStatement{
+				Token: "_match_elem",
+				Names: []*ast.Identifier{elemTemp},
+				Value: elemSubject,
+			})
+			elemCond, elemBindings := buildPatternCondition(elemTemp, elemPattern)
+			bindings = append(bindings, elemBindings...)
+			condition = &ast.InfixExpression{
+				Token:    "and",
+				Left:     condition,
+				Operator: "and",
+				Right:    elemCond,
+			}
+		}
+		return condition, bindings
+	}
+	return &ast.Boolean{Token: "true", Value: true}, bindings
 }

@@ -837,6 +837,38 @@ func (vm *VM) Run() error {
 			continue
 		}
 			
+			if strObj, ok := obj.(*objects.String); ok {
+				if method, ok := objects.GetStringMethod(strObj, attrName); ok {
+					vm.push(method)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if listObj, ok := obj.(*objects.List); ok {
+				if method, ok := objects.GetListMethod(listObj, attrName); ok {
+					vm.push(method)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if dictObj, ok := obj.(*objects.Dict); ok {
+				if method, ok := objects.GetDictMethod(dictObj, attrName); ok {
+					vm.push(method)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
+			if setObj, ok := obj.(*objects.Set); ok {
+				if method, ok := objects.GetSetMethod(setObj, attrName); ok {
+					vm.push(method)
+					continue
+				}
+				return vm.push(objects.None_)
+			}
+			
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
