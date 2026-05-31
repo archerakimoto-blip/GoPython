@@ -75,6 +75,22 @@ func (s *SymbolTable) DefineBuiltin(name string, index int) {
 	s.store[name] = symbol
 }
 
+func (s *SymbolTable) DefineGlobal(name string) Symbol {
+	globalTable := s
+	for globalTable.outer != nil {
+		globalTable = globalTable.outer
+	}
+
+	if existing, ok := globalTable.store[name]; ok {
+		s.store[name] = existing
+		return existing
+	}
+
+	symbol := globalTable.Define(name)
+	s.store[name] = symbol
+	return symbol
+}
+
 func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 	obj, ok := s.store[name]
 	if ok {

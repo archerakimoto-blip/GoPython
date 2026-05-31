@@ -4,14 +4,26 @@ import (
 	"github.com/go-py/go-python/pkg/ast"
 )
 
-// Desugar 对整个程序进行脱糖转换
+var walrusStmts []ast.Statement
+
+func collectWalrusStmts() []ast.Statement {
+	stmts := walrusStmts
+	walrusStmts = nil
+	return stmts
+}
+
 func Desugar(program *ast.Program) *ast.Program {
+	walrusStmts = nil
 	desugared := &ast.Program{
 		Statements: make([]ast.Statement, 0, len(program.Statements)),
 	}
 
 	for _, stmt := range program.Statements {
 		desugaredStmt := desugarStatement(stmt)
+		collected := collectWalrusStmts()
+		if len(collected) > 0 {
+			desugared.Statements = append(desugared.Statements, collected...)
+		}
 		if desugaredStmt != nil {
 			desugared.Statements = append(desugared.Statements, desugaredStmt)
 		}
@@ -30,27 +42,25 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		if s == nil || s.Expression == nil {
 			return nil
 		}
-		// 检查是否是带装饰器的函数
+		if walrus, ok := s.Expression.(*ast.WalrusExpression); ok {
+			return &ast.LetStatement{
+				Token: ":=",
+				Names: []*ast.Identifier{walrus.Name},
+				Value: desugarExpression(walrus.Value),
+			}
+		}
 		if fnLit, ok := s.Expression.(*ast.FunctionLiteral); ok && len(fnLit.Decorators) > 0 {
-			// 脱糖子表达式
 			desugaredFn := desugarExpression(fnLit).(*ast.FunctionLiteral)
 			desugaredDecorators := make([]ast.Expression, len(desugaredFn.Decorators))
 			for i, dec := range desugaredFn.Decorators {
 				desugaredDecorators[i] = desugarExpression(dec)
 			}
 
-			// 创建一个块语句，包含：
-			// 1. 定义原始函数（临时名称）
-			// 2. 用装饰器包装它
-			// 3. 将结果赋值回原函数名
 			stmts := []ast.Statement{}
 
-			// 原始函数名
 			funcIdent := &ast.Identifier{Token: desugaredFn.Token, Value: desugaredFn.Name}
-			// 临时函数名
 			tempIdent := &ast.Identifier{Token: desugaredFn.Token, Value: "_temp_" + desugaredFn.Name}
 
-			// 1. 把原始函数定义赋值给临时变量
 			tempFn := &ast.FunctionLiteral{
 				Token:      desugaredFn.Token,
 				Name:       "",
@@ -67,19 +77,15 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			}
 			stmts = append(stmts, letStmt)
 
-			// 2. 应用装饰器，从最后一个装饰器开始（因为装饰器是从下往上应用的）
 			currentValue := tempIdent
 			for i := len(desugaredDecorators) - 1; i >= 0; i-- {
 				decorator := desugaredDecorators[i]
-				// 调用装饰器
 				callExpr := &ast.CallExpression{
 					Token:     decorator.TokenLiteral(),
 					Function:  decorator,
 					Arguments: []ast.Expression{currentValue},
 				}
-				// 赋值给临时变量或最终变量
 				if i == 0 {
-					// 最后一个装饰器，赋值回原函数名
 					assignStmt := &ast.AssignStatement{
 						Token: desugaredFn.Token,
 						Names: []*ast.Identifier{funcIdent},
@@ -87,7 +93,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					}
 					stmts = append(stmts, assignStmt)
 				} else {
-					// 中间步骤，赋值给临时变量
 					letStmt = &ast.LetStatement{
 						Token: desugaredFn.Token,
 						Names: []*ast.Identifier{tempIdent},
@@ -97,7 +102,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				}
 			}
 
-			// 如果只有一个装饰器，直接赋值
 			if len(desugaredDecorators) == 1 {
 				decorator := desugaredDecorators[0]
 				callExpr := &ast.CallExpression{
@@ -105,7 +109,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					Function:  decorator,
 					Arguments: []ast.Expression{tempFn},
 				}
-				// 清空 stmts，用更简单的方式
 				stmts = []ast.Statement{
 					&ast.LetStatement{
 						Token: desugaredFn.Token,
@@ -115,14 +118,12 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				}
 			}
 
-			// 返回块语句
 			return &ast.BlockStatement{
 				Token:      s.Token,
 				Statements: stmts,
 			}
 		}
 
-		// 普通表达式语句处理
 		desugaredExpr := desugarExpression(s.Expression)
 		if desugaredExpr == nil {
 			return nil
@@ -228,10 +229,23 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	case *ast.BlockStatement:
 		return desugarBlockStatement(s)
 	case *ast.WhileStatement:
-		return &ast.WhileStatement{
+		condition := desugarExpression(s.Condition)
+		collected := collectWalrusStmts()
+		body := desugarBlockStatement(s.Body)
+		if len(collected) > 0 && body != nil {
+			body.Statements = append(collected, body.Statements...)
+		}
+		whileStmt := &ast.WhileStatement{
 			Token:     s.Token,
-			Condition: desugarExpression(s.Condition),
-			Body:      desugarBlockStatement(s.Body),
+			Condition: condition,
+			Body:      body,
+		}
+		if len(collected) == 0 {
+			return whileStmt
+		}
+		return &ast.BlockStatement{
+			Token:      s.Token,
+			Statements: append(collected, whileStmt),
 		}
 	case *ast.ForStatement:
 		return desugarForToWhile(s)
@@ -320,6 +334,18 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Methods:     s.Methods,
 		}
 		return desugaredClass
+	case *ast.DelStatement:
+		return &ast.DelStatement{
+			Token:  s.Token,
+			Target: desugarExpression(s.Target),
+		}
+	case *ast.AssertStatement:
+		return desugarAssertStatement(s)
+	case *ast.GlobalStatement:
+		return &ast.GlobalStatement{
+			Token: s.Token,
+			Names: s.Names,
+		}
 	default:
 		return stmt
 	}
@@ -336,7 +362,14 @@ func desugarBlockStatement(block *ast.BlockStatement) *ast.BlockStatement {
 	}
 
 	for _, stmt := range block.Statements {
+		saved := walrusStmts
+		walrusStmts = nil
 		desugaredStmt := desugarStatement(stmt)
+		collected := collectWalrusStmts()
+		walrusStmts = saved
+		if len(collected) > 0 {
+			desugared.Statements = append(desugared.Statements, collected...)
+		}
 		if desugaredStmt != nil {
 			desugared.Statements = append(desugared.Statements, desugaredStmt)
 		}
@@ -631,7 +664,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		}
 		return ge
 	case *ast.FStringLiteral:
-		// Keep f-string as-is, the compiler will handle it
 		desugaredParts := make([]ast.Expression, 0, len(e.Parts))
 		for _, part := range e.Parts {
 			desugaredParts = append(desugaredParts, desugarExpression(part))
@@ -640,6 +672,15 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Token: e.Token,
 			Parts: desugaredParts,
 		}
+	case *ast.WalrusExpression:
+		desugaredValue := desugarExpression(e.Value)
+		letStmt := &ast.LetStatement{
+			Token: ":=",
+			Names: []*ast.Identifier{e.Name},
+			Value: desugaredValue,
+		}
+		walrusStmts = append(walrusStmts, letStmt)
+		return &ast.Identifier{Token: e.Name.Token, Value: e.Name.Value}
 	default:
 		return expr
 	}
@@ -880,4 +921,45 @@ func buildPatternCondition(subject *ast.Identifier, pattern ast.Pattern) (ast.Ex
 		return condition, bindings
 	}
 	return &ast.Boolean{Token: "true", Value: true}, bindings
+}
+
+func desugarAssertStatement(s *ast.AssertStatement) ast.Statement {
+	notTest := &ast.PrefixExpression{
+		Token:    "not",
+		Operator: "not",
+		Right:    desugarExpression(s.Test),
+	}
+
+	var raiseExpr ast.Expression
+	if s.Message != nil {
+		raiseExpr = &ast.InfixExpression{
+			Token:    "+",
+			Left:     &ast.StringLiteral{Token: "AssertionError", Value: "AssertionError: "},
+			Operator: "+",
+			Right:    desugarExpression(s.Message),
+		}
+	} else {
+		raiseExpr = &ast.StringLiteral{Token: "AssertionError", Value: "AssertionError"}
+	}
+
+	raiseStmt := &ast.RaiseStatement{
+		Token:      "raise",
+		Expression: raiseExpr,
+	}
+
+	consequence := &ast.BlockStatement{
+		Token: s.Token,
+		Statements: []ast.Statement{
+			raiseStmt,
+		},
+	}
+
+	return &ast.ExpressionStatement{
+		Token: s.Token,
+		Expression: &ast.IfExpression{
+			Token:       s.Token,
+			Condition:   notTest,
+			Consequence: consequence,
+		},
+	}
 }

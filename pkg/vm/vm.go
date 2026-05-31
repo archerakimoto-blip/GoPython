@@ -909,33 +909,24 @@ func (vm *VM) Run() error {
 			}
 		case compiler.OpYieldValue:
 			frame := vm.currentFrame()
-			// 获取要产出的值
 			yieldValue := vm.pop()
-			
-			// 找到生成器对象（它应该在 basePointer-1 位置）
+
 			genIndex := frame.basePointer - 1
 			if gen, ok := vm.stack[genIndex].(*objects.Generator); ok {
-				// 保存当前状态到生成器对象
 				gen.IP = frame.ip + 1
 				gen.StackPtr = vm.sp
 				gen.BasePointer = frame.basePointer
-				
-				// 保存局部变量
+
 				copy(gen.Locals, vm.stack[frame.basePointer:])
-				// 保存当前栈的完整状态
 				copy(gen.Stack[:vm.sp], vm.stack[:vm.sp])
-				
-				// 恢复调用者栈
+
 				vm.sp = genIndex
-				
-				// 弹出当前帧
+
 				vm.popFrame()
-				
-				// 把产出值压到调用者栈上
+
 				return vm.push(yieldValue)
 			}
-			
-			// 如果找不到生成器对象，回退到旧行为（创建新生成器）
+
 			vm.currentFrame().ip--
 			gen := &objects.Generator{
 				Instructions: vm.currentFrame().fn.Instructions,
@@ -952,7 +943,29 @@ func (vm *VM) Run() error {
 			vm.sp = vm.currentFrame().basePointer - 1
 			vm.popFrame()
 			vm.push(gen)
-	}
+		case compiler.OpDelete:
+			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+
+			if globalIndex < len(vm.globals) {
+				vm.globals[globalIndex] = nil
+			}
+		case compiler.OpDeleteIndex:
+			index := vm.pop()
+			left := vm.pop()
+
+			switch collection := left.(type) {
+			case *objects.Dict:
+				collection.Delete(index)
+			case *objects.List:
+				if idx, ok := index.(*objects.Integer); ok {
+					i := int(idx.Value)
+					if i >= 0 && i < len(collection.Elements) {
+						collection.Elements = append(collection.Elements[:i], collection.Elements[i+1:]...)
+					}
+				}
+			}
+		}
 	}
 
 	return nil

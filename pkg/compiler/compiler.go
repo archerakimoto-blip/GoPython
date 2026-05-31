@@ -66,6 +66,8 @@ const (
 	OpFormatString
 	OpMakeAsync
 	OpAwait
+	OpDelete
+	OpDeleteIndex
 )
 
 type EmittedInstruction struct {
@@ -990,6 +992,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 		switch node.Operator {
 		case "!":
 			c.emit(OpBang)
+		case "not":
+			c.emit(OpBang)
 		case "-":
 			c.emit(OpMinus)
 		}
@@ -1459,6 +1463,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return nil
 	case *ast.ClassStatement:
 		return c.compileClassStatement(node)
+	case *ast.DelStatement:
+		return c.compileDelStatement(node)
+	case *ast.GlobalStatement:
+		for _, name := range node.Names {
+			c.symbolTable.DefineGlobal(name.Value)
+		}
 	case *ast.MemberAccess:
 		return c.compileMemberAccess(node)
 	case *ast.MethodCall:
@@ -2128,5 +2138,39 @@ func (c *Compiler) compileDictComprehension(node *ast.DictComprehension) error {
 
 	c.instructions = append(c.instructions, compilationScope...)
 
+	return nil
+}
+
+func (c *Compiler) compileDelStatement(node *ast.DelStatement) error {
+	switch target := node.Target.(type) {
+	case *ast.Identifier:
+		symbol, ok := c.symbolTable.Resolve(target.Value)
+		if !ok {
+			return fmt.Errorf("undefined variable %s", target.Value)
+		}
+		if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
+			c.emit(OpDelete, symbol.Index)
+		} else if symbol.Scope == FreeScope {
+			c.emit1(OpDelete, symbol.Index)
+		} else {
+			c.emit1(OpDelete, symbol.Index)
+		}
+	case *ast.IndexExpression:
+		if err := c.Compile(target.Left); err != nil {
+			return err
+		}
+		if err := c.Compile(target.Index); err != nil {
+			return err
+		}
+		c.emit(OpDeleteIndex)
+	case *ast.MemberAccess:
+		if err := c.Compile(target.Object); err != nil {
+			return err
+		}
+		c.emit(OpGetAttribute, c.addConstant(&objects.String{Value: target.Member.Value}))
+		c.emit(OpDeleteIndex)
+	default:
+		return fmt.Errorf("cannot delete target of type %T", node.Target)
+	}
 	return nil
 }

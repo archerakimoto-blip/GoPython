@@ -39,6 +39,7 @@ const (
 
 	COMMA     = ","
 	COLON     = ":"
+	WALRUS    = ":="
 	SEMICOLON = ";"
 	DOT       = "."
 	AT        = "@"
@@ -81,6 +82,9 @@ const (
 	AWAIT    = "AWAIT"
 	MATCH    = "MATCH"
 	CASE     = "CASE"
+	DEL      = "DEL"
+	ASSERT   = "ASSERT"
+	GLOBAL   = "GLOBAL"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -123,6 +127,9 @@ var keywords = map[string]TokenType{
 	"await":  AWAIT,
 	"match":  MATCH,
 	"case":   CASE,
+	"del":    DEL,
+	"assert": ASSERT,
+	"global": GLOBAL,
 }
 
 type Lexer struct {
@@ -271,7 +278,13 @@ func (l *Lexer) NextToken() Token {
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
 	case ':':
-		tok = newToken(COLON, l.ch)
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: WALRUS, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(COLON, l.ch)
+		}
 	case '.':
 		tok = newToken(DOT, l.ch)
 	case '@':

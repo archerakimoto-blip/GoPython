@@ -118,7 +118,7 @@ func (pe *PrefixExpression) String() string {
 }
 
 type AwaitExpression struct {
-	Token string // 'await'
+	Token string
 	Value Expression
 }
 
@@ -126,6 +126,18 @@ func (ae *AwaitExpression) expressionNode()      {}
 func (ae *AwaitExpression) TokenLiteral() string { return ae.Token }
 func (ae *AwaitExpression) String() string {
 	return "(await " + ae.Value.String() + ")"
+}
+
+type WalrusExpression struct {
+	Token string
+	Name  *Identifier
+	Value Expression
+}
+
+func (we *WalrusExpression) expressionNode()      {}
+func (we *WalrusExpression) TokenLiteral() string { return we.Token }
+func (we *WalrusExpression) String() string {
+	return "(" + we.Name.String() + " := " + we.Value.String() + ")"
 }
 
 type InfixExpression struct {
@@ -974,6 +986,51 @@ func (ws *WithStatement) String() string {
 	out.WriteString(" {\n")
 	out.WriteString(ws.Body.String())
 	out.WriteString("\n}")
+	return out.String()
+}
+
+type DelStatement struct {
+	Token  string
+	Target Expression
+}
+
+func (ds *DelStatement) statementNode()       {}
+func (ds *DelStatement) TokenLiteral() string { return ds.Token }
+func (ds *DelStatement) String() string {
+	return "del " + ds.Target.String()
+}
+
+type AssertStatement struct {
+	Token   string
+	Test    Expression
+	Message Expression
+}
+
+func (as *AssertStatement) statementNode()       {}
+func (as *AssertStatement) TokenLiteral() string { return as.Token }
+func (as *AssertStatement) String() string {
+	if as.Message != nil {
+		return "assert " + as.Test.String() + ", " + as.Message.String()
+	}
+	return "assert " + as.Test.String()
+}
+
+type GlobalStatement struct {
+	Token string
+	Names []*Identifier
+}
+
+func (gs *GlobalStatement) statementNode()       {}
+func (gs *GlobalStatement) TokenLiteral() string { return gs.Token }
+func (gs *GlobalStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("global ")
+	for i, name := range gs.Names {
+		if i > 0 {
+			out.WriteString(", ")
+		}
+		out.WriteString(name.String())
+	}
 	return out.String()
 }
 

@@ -410,6 +410,90 @@ func GetStringMethod(s *String, name string) (*Builtin, bool) {
 				return False
 			},
 		}, true
+	case "format":
+		return &Builtin{
+			Name: "format",
+			Fn: func(args ...Object) Object {
+				kwargs := make(map[string]Object)
+				if len(args) > 0 {
+					if last, ok := args[len(args)-1].(*Dict); ok {
+						kwargs = make(map[string]Object, len(last.Keys))
+						for keyStr, key := range last.Keys {
+							kwargs[keyStr] = last.Pairs[keyStr]
+							if sKey, ok := key.(*String); ok {
+								kwargs[sKey.Value] = last.Pairs[keyStr]
+							}
+						}
+						args = args[:len(args)-1]
+					}
+				}
+				var result strings.Builder
+				i := 0
+				argIdx := 0
+				for i < len(s.Value) {
+					if s.Value[i] == '{' {
+						if i+1 < len(s.Value) && s.Value[i+1] == '{' {
+							result.WriteByte('{')
+							i += 2
+							continue
+						}
+						j := i + 1
+						for j < len(s.Value) && s.Value[j] != '}' {
+							j++
+						}
+						if j >= len(s.Value) {
+							result.WriteByte(s.Value[i])
+							i++
+							continue
+						}
+						field := s.Value[i+1 : j]
+						var replacement string
+						if field == "" {
+							if argIdx < len(args) {
+								replacement = args[argIdx].Inspect()
+								argIdx++
+							} else {
+								replacement = ""
+							}
+						} else if field[0] >= '0' && field[0] <= '9' {
+							idx := 0
+							for _, c := range field {
+								if c >= '0' && c <= '9' {
+									idx = idx*10 + int(c-'0')
+								} else {
+									break
+								}
+							}
+							if idx < len(args) {
+								replacement = args[idx].Inspect()
+							} else {
+								replacement = ""
+							}
+						} else {
+							if val, ok := kwargs[field]; ok {
+								replacement = val.Inspect()
+							} else {
+								replacement = ""
+							}
+						}
+						result.WriteString(replacement)
+						i = j + 1
+					} else if s.Value[i] == '}' {
+						if i+1 < len(s.Value) && s.Value[i+1] == '}' {
+							result.WriteByte('}')
+							i += 2
+							continue
+						}
+						result.WriteByte(s.Value[i])
+						i++
+					} else {
+						result.WriteByte(s.Value[i])
+						i++
+					}
+				}
+				return &String{Value: result.String()}
+			},
+		}, true
 	}
 	return nil, false
 }
@@ -613,7 +697,7 @@ func GetDictMethod(d *Dict, name string) (*Builtin, bool) {
 				elements := make([]Object, 0, len(d.Keys))
 				for _, key := range d.Keys {
 					value, _ := d.Get(key)
-					elements = append(elements, NewTuple([]Object{key, value}))
+					elements = append(elements, NewList([]Object{key, value}))
 				}
 				return NewList(elements)
 			},
