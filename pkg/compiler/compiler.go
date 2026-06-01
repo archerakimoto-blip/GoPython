@@ -906,6 +906,89 @@ func (c *Compiler) registerBuiltins() {
 	zipIndex := len(c.constants)
 	c.constants = append(c.constants, zipBuiltin)
 	c.symbolTable.DefineBuiltin("zip", zipIndex)
+
+	// __get_class__
+	getClassBuiltin := &objects.Builtin{
+		Name: "__get_class__",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("__get_class__ takes exactly 1 argument")
+			}
+			if instance, ok := args[0].(*objects.Instance); ok {
+				return instance.Class
+			}
+			if class, ok := args[0].(*objects.Class); ok {
+				return class
+			}
+			return objects.None_
+		},
+	}
+	getClassIndex := len(c.constants)
+	c.constants = append(c.constants, getClassBuiltin)
+	c.symbolTable.DefineBuiltin("__get_class__", getClassIndex)
+
+	// __bind_method__
+	bindMethodBuiltin := &objects.Builtin{
+		Name: "__bind_method__",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__bind_method__ takes exactly 2 arguments")
+			}
+			return &objects.BoundMethod{
+				Fn:   args[0],
+				Self: args[1],
+			}
+		},
+	}
+	bindMethodIndex := len(c.constants)
+	c.constants = append(c.constants, bindMethodBuiltin)
+	c.symbolTable.DefineBuiltin("__bind_method__", bindMethodIndex)
+
+	// __set_field__
+	setFieldBuiltin := &objects.Builtin{
+		Name: "__set_field__",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 3 {
+				return objects.NewTypeError("__set_field__ takes exactly 3 arguments")
+			}
+			instance, ok := args[0].(*objects.Instance)
+			if !ok {
+				return objects.NewTypeError("__set_field__ first argument must be an instance")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("__set_field__ second argument must be a string")
+			}
+			instance.SetAttr(name.Value, args[2])
+			return objects.None_
+		},
+	}
+	setFieldOffset := len(c.constants)
+	c.constants = append(c.constants, setFieldBuiltin)
+	c.symbolTable.DefineBuiltin("__set_field__", setFieldOffset)
+
+	// __del_field__
+	delFieldBuiltin := &objects.Builtin{
+		Name: "__del_field__",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("__del_field__ takes exactly 2 arguments")
+			}
+			instance, ok := args[0].(*objects.Instance)
+			if !ok {
+				return objects.NewTypeError("__del_field__ first argument must be an instance")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("__del_field__ second argument must be a string")
+			}
+			delete(instance.Fields, name.Value)
+			return objects.None_
+		},
+	}
+	delFieldOffset := len(c.constants)
+	c.constants = append(c.constants, delFieldBuiltin)
+	c.symbolTable.DefineBuiltin("__del_field__", delFieldOffset)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {

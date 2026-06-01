@@ -33,11 +33,530 @@ func Desugar(program *ast.Program) *ast.Program {
 }
 
 // desugarStatement 脱糖单个语句
+type propDetail struct {
+	getter *ast.FunctionLiteral
+	setter *ast.FunctionLiteral
+	deleter *ast.FunctionLiteral
+}
+
+func desugarClassStatement(s *ast.ClassStatement) ast.Statement {
+	properties := make(map[string]*propDetail)
+	classmethods := make(map[string]*ast.FunctionLiteral)
+	staticmethods := make(map[string]*ast.FunctionLiteral)
+	var slots []string
+	var slotsAssignStmt ast.Statement
+	var existingGetattr *ast.FunctionLiteral
+	var existingSetattr *ast.FunctionLiteral
+	var existingDelattr *ast.FunctionLiteral
+
+	for _, method := range s.Methods {
+		for _, dec := range method.Decorators {
+			if ident, ok := dec.(*ast.Identifier); ok {
+				if ident.Value == "property" {
+					if properties[method.Name] == nil {
+						properties[method.Name] = &propDetail{}
+					}
+					properties[method.Name].getter = method
+					break
+				}
+				if ident.Value == "classmethod" {
+					classmethods[method.Name] = method
+					break
+				}
+				if ident.Value == "staticmethod" {
+					staticmethods[method.Name] = method
+					break
+				}
+			}
+			if ma, ok := dec.(*ast.MemberAccess); ok {
+				propName := ""
+				if objIdent, ok := ma.Object.(*ast.Identifier); ok {
+					propName = objIdent.Value
+				}
+				if propName != "" && ma.Member.Value == "setter" {
+					if properties[propName] == nil {
+						properties[propName] = &propDetail{}
+					}
+					properties[propName].setter = method
+					break
+				}
+				if propName != "" && ma.Member.Value == "deleter" {
+					if properties[propName] == nil {
+						properties[propName] = &propDetail{}
+					}
+					properties[propName].deleter = method
+					break
+				}
+			}
+		}
+
+		switch method.Name {
+		case "__getattr__":
+			existingGetattr = method
+		case "__setattr__":
+			existingSetattr = method
+		case "__delattr__":
+			existingDelattr = method
+		}
+	}
+
+	if s.Body != nil {
+		for _, stmt := range s.Body.Statements {
+			if assign, ok := stmt.(*ast.AssignStatement); ok {
+				if len(assign.Names) == 1 && assign.Names[0].Value == "__slots__" {
+					if listLit, ok := assign.Value.(*ast.ListLiteral); ok {
+						for _, elem := range listLit.Elements {
+							if str, ok := elem.(*ast.StringLiteral); ok {
+								slots = append(slots, str.Value)
+							}
+						}
+						slotsAssignStmt = stmt
+					}
+				}
+			}
+		}
+	}
+
+	if len(properties) == 0 && len(classmethods) == 0 && len(staticmethods) == 0 && len(slots) == 0 {
+		return &ast.ClassStatement{
+			Token:        s.Token,
+			Name:         s.Name,
+			SuperClass:   s.SuperClass,
+			Body:         desugarBlockStatement(s.Body),
+			Methods:      s.Methods,
+		}
+	}
+
+	decoratedMethods := make(map[*ast.FunctionLiteral]string)
+
+	for propName, detail := range properties {
+		if detail.getter != nil {
+			decoratedMethods[detail.getter] = "_desugar_prop_get_" + propName
+		}
+		if detail.setter != nil {
+			decoratedMethods[detail.setter] = "_desugar_prop_set_" + propName
+		}
+		if detail.deleter != nil {
+			decoratedMethods[detail.deleter] = "_desugar_prop_del_" + propName
+		}
+	}
+	for cmName, method := range classmethods {
+		decoratedMethods[method] = "_desugar_cm_" + cmName
+	}
+	for smName, method := range staticmethods {
+		decoratedMethods[method] = "_desugar_sm_" + smName
+	}
+
+	newMethods := []*ast.FunctionLiteral{}
+	for _, method := range s.Methods {
+		if method == existingGetattr || method == existingSetattr || method == existingDelattr {
+			continue
+		}
+		if mangledName, ok := decoratedMethods[method]; ok {
+			newBody := desugarBlockStatement(method.Body)
+			newMethods = append(newMethods, &ast.FunctionLiteral{
+				Token:      method.Token,
+				Name:       mangledName,
+				Parameters: method.Parameters,
+				Body:       newBody,
+				VarArgs:    method.VarArgs,
+				KwArgs:     method.KwArgs,
+				IsAsync:    method.IsAsync,
+			})
+		} else {
+			newMethods = append(newMethods, method)
+		}
+	}
+
+	needGetattr := len(properties) > 0 || len(classmethods) > 0 || len(staticmethods) > 0
+	hasPropertySetters := false
+	for _, detail := range properties {
+		if detail.setter != nil {
+			hasPropertySetters = true
+			break
+		}
+	}
+	hasPropertyDeleters := false
+	for _, detail := range properties {
+		if detail.deleter != nil {
+			hasPropertyDeleters = true
+			break
+		}
+	}
+	needSetattr := hasPropertySetters || len(slots) > 0
+	needDelattr := hasPropertyDeleters
+
+	if needGetattr {
+		getattrStmts := []ast.Statement{}
+
+		propNames := make([]string, 0, len(properties))
+		for name := range properties {
+			propNames = append(propNames, name)
+		}
+		for _, propName := range propNames {
+			detail := properties[propName]
+			if detail.getter != nil {
+				condition := &ast.InfixExpression{
+					Token:    "==",
+					Left:     &ast.Identifier{Token: "name", Value: "name"},
+					Operator: "==",
+					Right:    &ast.StringLiteral{Token: propName, Value: propName},
+				}
+				methodCall := &ast.MethodCall{
+					Token:     ".",
+					Object:    &ast.Identifier{Token: "self", Value: "self"},
+					Method:    &ast.Identifier{Token: "_desugar_prop_get_" + propName, Value: "_desugar_prop_get_" + propName},
+					Arguments: []ast.Expression{},
+				}
+				returnStmt := &ast.ReturnStatement{
+					Token:       "return",
+					ReturnValue: methodCall,
+				}
+				getattrStmts = append(getattrStmts, &ast.ExpressionStatement{
+					Token: "if",
+					Expression: &ast.IfExpression{
+						Token:       "if",
+						Condition:   condition,
+						Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{returnStmt}},
+						Alternative: nil,
+					},
+				})
+			}
+		}
+
+		cmNames := make([]string, 0, len(classmethods))
+		for name := range classmethods {
+			cmNames = append(cmNames, name)
+		}
+		for _, cmName := range cmNames {
+			condition := &ast.InfixExpression{
+				Token:    "==",
+				Left:     &ast.Identifier{Token: "name", Value: "name"},
+				Operator: "==",
+				Right:    &ast.StringLiteral{Token: cmName, Value: cmName},
+			}
+			getClassCall := &ast.CallExpression{
+				Token:     "(",
+				Function:  &ast.Identifier{Token: "__get_class__", Value: "__get_class__"},
+				Arguments: []ast.Expression{&ast.Identifier{Token: "self", Value: "self"}},
+			}
+			methodAccess := &ast.MemberAccess{
+				Token:  ".",
+				Object: getClassCall,
+				Member: &ast.Identifier{Token: "_desugar_cm_" + cmName, Value: "_desugar_cm_" + cmName},
+			}
+			getClassCall2 := &ast.CallExpression{
+				Token:     "(",
+				Function:  &ast.Identifier{Token: "__get_class__", Value: "__get_class__"},
+				Arguments: []ast.Expression{&ast.Identifier{Token: "self", Value: "self"}},
+			}
+			bindMethodCall := &ast.CallExpression{
+				Token:     "(",
+				Function:  &ast.Identifier{Token: "__bind_method__", Value: "__bind_method__"},
+				Arguments: []ast.Expression{methodAccess, getClassCall2},
+			}
+			returnStmt := &ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: bindMethodCall,
+			}
+			getattrStmts = append(getattrStmts, &ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:       "if",
+					Condition:   condition,
+					Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{returnStmt}},
+					Alternative: nil,
+				},
+			})
+		}
+
+		smNames := make([]string, 0, len(staticmethods))
+		for name := range staticmethods {
+			smNames = append(smNames, name)
+		}
+		for _, smName := range smNames {
+			condition := &ast.InfixExpression{
+				Token:    "==",
+				Left:     &ast.Identifier{Token: "name", Value: "name"},
+				Operator: "==",
+				Right:    &ast.StringLiteral{Token: smName, Value: smName},
+			}
+			getClassCall := &ast.CallExpression{
+				Token:     "(",
+				Function:  &ast.Identifier{Token: "__get_class__", Value: "__get_class__"},
+				Arguments: []ast.Expression{&ast.Identifier{Token: "self", Value: "self"}},
+			}
+			methodAccess := &ast.MemberAccess{
+				Token:  ".",
+				Object: getClassCall,
+				Member: &ast.Identifier{Token: "_desugar_sm_" + smName, Value: "_desugar_sm_" + smName},
+			}
+			returnStmt := &ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: methodAccess,
+			}
+			getattrStmts = append(getattrStmts, &ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:       "if",
+					Condition:   condition,
+					Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{returnStmt}},
+					Alternative: nil,
+				},
+			})
+		}
+
+		if existingGetattr != nil {
+			desugaredBody := desugarBlockStatement(existingGetattr.Body)
+			getattrStmts = append(getattrStmts, desugaredBody.Statements...)
+			newMethods = append(newMethods, &ast.FunctionLiteral{
+				Token:      existingGetattr.Token,
+				Name:       "__getattr__",
+				Parameters: existingGetattr.Parameters,
+				Body:       &ast.BlockStatement{Token: "if", Statements: getattrStmts},
+				VarArgs:    existingGetattr.VarArgs,
+				KwArgs:     existingGetattr.KwArgs,
+			})
+		} else {
+			newMethods = append(newMethods, &ast.FunctionLiteral{
+				Token:      "def",
+				Name:       "__getattr__",
+				Parameters: []*ast.Identifier{{Token: "self", Value: "self"}, {Token: "name", Value: "name"}},
+				Body:       &ast.BlockStatement{Token: ":", Statements: getattrStmts},
+			})
+		}
+	}
+
+	if needSetattr {
+		setattrStmts := []ast.Statement{}
+
+		for propName, detail := range properties {
+		if detail.setter != nil {
+			condition := &ast.InfixExpression{
+				Token:    "==",
+				Left:     &ast.Identifier{Token: "name", Value: "name"},
+				Operator: "==",
+				Right:    &ast.StringLiteral{Token: propName, Value: propName},
+			}
+			methodCall := &ast.MethodCall{
+				Token:     ".",
+				Object:    &ast.Identifier{Token: "self", Value: "self"},
+				Method:    &ast.Identifier{Token: "_desugar_prop_set_" + propName, Value: "_desugar_prop_set_" + propName},
+				Arguments: []ast.Expression{&ast.Identifier{Token: "value", Value: "value"}},
+			}
+			callStmt := &ast.ExpressionStatement{
+				Token:      "(",
+				Expression: methodCall,
+			}
+			returnStmt := &ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: &ast.IntegerLiteral{Token: "0", Value: 0},
+			}
+			setattrStmts = append(setattrStmts, &ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:       "if",
+					Condition:   condition,
+					Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{callStmt, returnStmt}},
+					Alternative: nil,
+				},
+			})
+		}
+	}
+
+	if len(slots) > 0 {
+		for _, slotName := range slots {
+			condition := &ast.InfixExpression{
+				Token:    "==",
+				Left:     &ast.Identifier{Token: "name", Value: "name"},
+				Operator: "==",
+				Right:    &ast.StringLiteral{Token: slotName, Value: slotName},
+			}
+			setFieldCall := &ast.CallExpression{
+				Token:     "(",
+				Function:  &ast.Identifier{Token: "__set_field__", Value: "__set_field__"},
+				Arguments: []ast.Expression{
+					&ast.Identifier{Token: "self", Value: "self"},
+					&ast.Identifier{Token: "name", Value: "name"},
+					&ast.Identifier{Token: "value", Value: "value"},
+				},
+			}
+			callStmt := &ast.ExpressionStatement{
+				Token:      "(",
+				Expression: setFieldCall,
+			}
+			returnStmt := &ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: &ast.IntegerLiteral{Token: "0", Value: 0},
+			}
+			setattrStmts = append(setattrStmts, &ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:       "if",
+					Condition:   condition,
+					Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{callStmt, returnStmt}},
+					Alternative: nil,
+				},
+			})
+		}
+
+		errorMsg := &ast.InfixExpression{
+			Token: "+",
+			Left: &ast.InfixExpression{
+				Token:    "+",
+				Left:     &ast.StringLiteral{Token: "", Value: "AttributeError: '" + s.Name.Value + "' object has no attribute '"},
+				Operator: "+",
+				Right:    &ast.Identifier{Token: "name", Value: "name"},
+			},
+			Operator: "+",
+			Right:    &ast.StringLiteral{Token: "", Value: "'"},
+		}
+		setattrStmts = append(setattrStmts, &ast.RaiseStatement{
+			Token:      "raise",
+			Expression: errorMsg,
+		})
+	} else {
+		setFieldCall := &ast.CallExpression{
+			Token:     "(",
+			Function:  &ast.Identifier{Token: "__set_field__", Value: "__set_field__"},
+			Arguments: []ast.Expression{
+				&ast.Identifier{Token: "self", Value: "self"},
+				&ast.Identifier{Token: "name", Value: "name"},
+				&ast.Identifier{Token: "value", Value: "value"},
+			},
+		}
+		setattrStmts = append(setattrStmts, &ast.ExpressionStatement{
+			Token:      "(",
+			Expression: setFieldCall,
+		})
+	}
+
+	if existingSetattr != nil {
+		desugaredBody := desugarBlockStatement(existingSetattr.Body)
+		setattrStmts = append(setattrStmts, desugaredBody.Statements...)
+		newMethods = append(newMethods, &ast.FunctionLiteral{
+			Token:      existingSetattr.Token,
+			Name:       "__setattr__",
+			Parameters: existingSetattr.Parameters,
+			Body:       &ast.BlockStatement{Token: "if", Statements: setattrStmts},
+			VarArgs:    existingSetattr.VarArgs,
+			KwArgs:     existingSetattr.KwArgs,
+		})
+	} else {
+		newMethods = append(newMethods, &ast.FunctionLiteral{
+			Token:      "def",
+			Name:       "__setattr__",
+			Parameters: []*ast.Identifier{
+				{Token: "self", Value: "self"},
+				{Token: "name", Value: "name"},
+				{Token: "value", Value: "value"},
+			},
+			Body: &ast.BlockStatement{Token: ":", Statements: setattrStmts},
+		})
+	}
+	}
+
+	if needDelattr {
+		delattrStmts := []ast.Statement{}
+
+		for propName, detail := range properties {
+		if detail.deleter != nil {
+			condition := &ast.InfixExpression{
+				Token:    "==",
+				Left:     &ast.Identifier{Token: "name", Value: "name"},
+				Operator: "==",
+				Right:    &ast.StringLiteral{Token: propName, Value: propName},
+			}
+			methodCall := &ast.MethodCall{
+				Token:     ".",
+				Object:    &ast.Identifier{Token: "self", Value: "self"},
+				Method:    &ast.Identifier{Token: "_desugar_prop_del_" + propName, Value: "_desugar_prop_del_" + propName},
+				Arguments: []ast.Expression{},
+			}
+			callStmt := &ast.ExpressionStatement{
+				Token:      "(",
+				Expression: methodCall,
+			}
+			returnStmt := &ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: &ast.IntegerLiteral{Token: "0", Value: 0},
+			}
+			delattrStmts = append(delattrStmts, &ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:       "if",
+					Condition:   condition,
+					Consequence: &ast.BlockStatement{Token: "if", Statements: []ast.Statement{callStmt, returnStmt}},
+					Alternative: nil,
+				},
+			})
+		}
+	}
+
+	delFieldCall := &ast.CallExpression{
+		Token:     "(",
+		Function:  &ast.Identifier{Token: "__del_field__", Value: "__del_field__"},
+		Arguments: []ast.Expression{
+			&ast.Identifier{Token: "self", Value: "self"},
+			&ast.Identifier{Token: "name", Value: "name"},
+		},
+	}
+	delattrStmts = append(delattrStmts, &ast.ExpressionStatement{
+		Token:      "(",
+		Expression: delFieldCall,
+	})
+
+	if existingDelattr != nil {
+		desugaredBody := desugarBlockStatement(existingDelattr.Body)
+		delattrStmts = append(delattrStmts, desugaredBody.Statements...)
+		newMethods = append(newMethods, &ast.FunctionLiteral{
+			Token:      existingDelattr.Token,
+			Name:       "__delattr__",
+			Parameters: existingDelattr.Parameters,
+			Body:       &ast.BlockStatement{Token: "if", Statements: delattrStmts},
+			VarArgs:    existingDelattr.VarArgs,
+			KwArgs:     existingDelattr.KwArgs,
+		})
+	} else {
+		newMethods = append(newMethods, &ast.FunctionLiteral{
+			Token:      "def",
+			Name:       "__delattr__",
+			Parameters: []*ast.Identifier{
+				{Token: "self", Value: "self"},
+				{Token: "name", Value: "name"},
+			},
+			Body: &ast.BlockStatement{Token: ":", Statements: delattrStmts},
+		})
+	}
+	}
+
+	var newBodyStmts []ast.Statement
+	if s.Body != nil {
+		for _, stmt := range s.Body.Statements {
+			if stmt == slotsAssignStmt {
+				continue
+			}
+			desugaredStmt := desugarStatement(stmt)
+			newBodyStmts = append(newBodyStmts, desugaredStmt)
+		}
+	}
+
+	return &ast.ClassStatement{
+		Token:        s.Token,
+		Name:         s.Name,
+		SuperClass:   s.SuperClass,
+		Body:         &ast.BlockStatement{Token: s.Token, Statements: newBodyStmts},
+		Methods:      newMethods,
+	}
+}
+
 func desugarStatement(stmt ast.Statement) ast.Statement {
 	if stmt == nil {
 		return nil
 	}
 	switch s := stmt.(type) {
+	case *ast.ClassStatement:
+		return desugarClassStatement(s)
 	case *ast.ExpressionStatement:
 		if s == nil || s.Expression == nil {
 			return nil
@@ -325,15 +844,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 	case *ast.MatchStatement:
 		return desugarMatchStatement(s)
-	case *ast.ClassStatement:
-		desugaredClass := &ast.ClassStatement{
-			Token:       s.Token,
-			Name:        s.Name,
-			SuperClass:  s.SuperClass,
-			Body:        desugarBlockStatement(s.Body),
-			Methods:     s.Methods,
-		}
-		return desugaredClass
+
 	case *ast.DelStatement:
 		return &ast.DelStatement{
 			Token:  s.Token,

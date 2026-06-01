@@ -34,6 +34,7 @@ const (
 	MODULE_OBJ       ObjectType = "MODULE"
 	ASYNC_OBJ         ObjectType = "ASYNC"
 	FUTURE_OBJ         ObjectType = "FUTURE"
+	BOUNDMETHOD_OBJ   ObjectType = "BOUNDMETHOD"
 )
 
 type Object interface {
@@ -1333,6 +1334,14 @@ func (i *Instance) GetAttr(name string) (Object, bool) {
 func (i *Instance) SetAttr(name string, value Object) {
 	i.Fields[name] = value
 }
+
+type BoundMethod struct {
+	Fn   Object
+	Self Object
+}
+
+func (bm *BoundMethod) Type() ObjectType { return BOUNDMETHOD_OBJ }
+func (bm *BoundMethod) Inspect() string  { return "<bound method>" }
 
 type Module struct {
 	Name   string

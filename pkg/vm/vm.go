@@ -976,6 +976,22 @@ func (vm *VM) executeCall(numArgs int) error {
 	
 	calleeObj := vm.stack[calleeIndex]
 
+	// Handle BoundMethod
+	if bm, ok := calleeObj.(*objects.BoundMethod); ok {
+		// Stack: ..., bm, arg1, arg2, ...
+		// New stack: ..., bm.Fn, bm.Self, arg1, arg2, ...
+		vm.stack[calleeIndex] = bm.Fn
+		// Insert self at calleeIndex + 1
+		// First, shift arguments right by 1
+		for i := vm.sp - 1; i >= calleeIndex + 1; i-- {
+			vm.stack[i+1] = vm.stack[i]
+		}
+		vm.stack[calleeIndex + 1] = bm.Self
+		vm.sp += 1
+		numArgs += 1
+		calleeObj = bm.Fn
+	}
+
 	// Handle Async objects
 	if asyncObj, ok := calleeObj.(*objects.Async); ok {
 		if asyncObj.Done {
