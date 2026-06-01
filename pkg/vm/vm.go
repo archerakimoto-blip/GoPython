@@ -37,6 +37,17 @@ type Frame struct {
 	freeVars    []objects.Object   // 闭包的自由变量值
 }
 
+type AttrCacheKey struct {
+	IP      int
+	ObjType objects.ObjectType
+}
+
+type AttrCacheEntry struct {
+	Value     objects.Object
+	IsMethod  bool
+	ClassName string
+}
+
 type VM struct {
 	constants    []objects.Object
 	instructions compiler.Instructions
@@ -56,6 +67,8 @@ type VM struct {
 	gcEnabled      bool              // 是否启用垃圾回收
 	gcThreshold    int64             // 垃圾回收阈值（字节）
 	allocatedBytes int64             // 当前已分配字节数
+
+	attrCache map[AttrCacheKey]AttrCacheEntry
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -79,8 +92,9 @@ func New(bytecode *compiler.Bytecode) *VM {
 		framesIndex: 1,
 
 		gcEnabled:      true,
-		gcThreshold:    1024 * 1024, // 1MB
+		gcThreshold:    1024 * 1024,
 		allocatedBytes: 0,
+		attrCache:      make(map[AttrCacheKey]AttrCacheEntry),
 	}
 }
 
@@ -779,13 +793,12 @@ func (vm *VM) Run() error {
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			class := vm.constants[idx].(*objects.Class)
 			vm.currentFrame().ip += 2
-			
-			// Pop super class from stack
+
 			superClass := vm.pop()
 			if superClass != nil {
 				if superCls, ok := superClass.(*objects.Class); ok {
 					class.SuperClass = superCls
-					// Inherit methods from super class
+					class.SuperClasses = []*objects.Class{superCls}
 					for name, method := range superCls.Methods {
 						if _, exists := class.Methods[name]; !exists {
 							class.Methods[name] = method
@@ -793,7 +806,46 @@ func (vm *VM) Run() error {
 					}
 				}
 			}
-			
+
+			err := vm.push(class)
+			if err != nil {
+				return err
+			}
+		case compiler.OpCreateClassWithMultiSuper:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			class := vm.constants[idx].(*objects.Class)
+			vm.currentFrame().ip += 2
+
+			numParents := int(ins[ip+1])
+			vm.currentFrame().ip += 1
+
+			parents := make([]*objects.Class, 0, numParents)
+			for i := 0; i < numParents; i++ {
+				superObj := vm.pop()
+				if superObj != nil {
+					if superCls, ok := superObj.(*objects.Class); ok {
+						parents = append(parents, superCls)
+					}
+				}
+			}
+
+			for i, j := 0, len(parents)-1; i < j; i, j = i+1, j-1 {
+				parents[i], parents[j] = parents[j], parents[i]
+			}
+
+			class.SuperClasses = parents
+			if len(parents) > 0 {
+				class.SuperClass = parents[0]
+				for _, parent := range parents {
+					for name, method := range parent.Methods {
+						if _, exists := class.Methods[name]; !exists {
+							class.Methods[name] = method
+						}
+					}
+				}
+				class.ComputeMRO()
+			}
+
 			err := vm.push(class)
 			if err != nil {
 				return err
@@ -804,39 +856,85 @@ func (vm *VM) Run() error {
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
-			
+
 			if instance, ok := obj.(*objects.Instance); ok {
+				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.INSTANCE_OBJ}
+				if entry, hit := vm.attrCache[cacheKey]; hit {
+					if entry.ClassName == instance.Class.Name {
+						if entry.IsMethod {
+							vm.push(instance)
+							vm.push(entry.Value)
+							continue
+						}
+						err := vm.push(entry.Value)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+				}
+
 				if val, ok := instance.GetAttr(attrName); ok {
 					if method, ok := val.(*compiler.CompiledFunction); ok {
+						vm.attrCache[cacheKey] = AttrCacheEntry{
+							Value:     method,
+							IsMethod:  true,
+							ClassName: instance.Class.Name,
+						}
 						vm.push(instance)
 						vm.push(method)
 						continue
 					}
+					vm.attrCache[cacheKey] = AttrCacheEntry{
+						Value:     val,
+						IsMethod:  false,
+						ClassName: instance.Class.Name,
+					}
 					return vm.push(val)
 				}
 				if classMethod, ok := instance.Class.Methods[attrName]; ok {
+					vm.attrCache[cacheKey] = AttrCacheEntry{
+						Value:     classMethod,
+						IsMethod:  true,
+						ClassName: instance.Class.Name,
+					}
 					vm.push(instance)
 					vm.push(classMethod)
 					continue
 				}
 				return vm.push(objects.None_)
 			}
-			
+
 			if module, ok := obj.(*objects.Module); ok {
-			if val, ok := module.GetAttr(attrName); ok {
-				err := vm.push(val)
+				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.MODULE_OBJ}
+				if entry, hit := vm.attrCache[cacheKey]; hit {
+					if entry.ClassName == module.Name {
+						err := vm.push(entry.Value)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+				}
+				if val, ok := module.GetAttr(attrName); ok {
+					vm.attrCache[cacheKey] = AttrCacheEntry{
+						Value:     val,
+						IsMethod:  false,
+						ClassName: module.Name,
+					}
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
 				if err != nil {
 					return err
 				}
 				continue
 			}
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
-			}
-			continue
-		}
-			
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))

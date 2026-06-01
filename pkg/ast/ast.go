@@ -581,6 +581,7 @@ type ClassStatement struct {
 	Token       string
 	Name        *Identifier
 	SuperClass  *Identifier
+	SuperClasses []*Identifier
 	Body        *BlockStatement
 	Methods     []*FunctionLiteral
 }
@@ -1050,3 +1051,40 @@ func (aws *AsyncWithStatement) String() string {
 }
 
 type Map map[string]Expression
+
+type MatchStatement struct {
+	Token    string
+	Subject  Expression
+	Cases    []*CaseClause
+}
+
+func (ms *MatchStatement) statementNode()       {}
+func (ms *MatchStatement) TokenLiteral() string { return ms.Token }
+func (ms *MatchStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("match " + ms.Subject.String() + ":\n")
+	for _, c := range ms.Cases {
+		out.WriteString(c.String())
+	}
+	return out.String()
+}
+
+type CaseClause struct {
+	Token   string
+	Pattern Expression
+	Guard   Expression
+	Body    *BlockStatement
+}
+
+func (cc *CaseClause) statementNode()       {}
+func (cc *CaseClause) TokenLiteral() string { return cc.Token }
+func (cc *CaseClause) String() string {
+	var out bytes.Buffer
+	out.WriteString("case " + cc.Pattern.String())
+	if cc.Guard != nil {
+		out.WriteString(" if " + cc.Guard.String())
+	}
+	out.WriteString(":\n")
+	out.WriteString(cc.Body.String())
+	return out.String()
+}

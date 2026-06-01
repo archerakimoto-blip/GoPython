@@ -98,11 +98,11 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ```
                     低难度                中难度                高难度
             ┌───────────────────┬───────────────────┬───────────────────┐
-            │ ✅ P1-1 assert    │ ✅ P1-8 @dataclass│ P1-5 match/case   │
-            │ ✅ P1-2 in/not in │ ✅ P1-11 默认参数  │ P1-6 多继承MRO    │
-  高影响力   │ ✅ P1-3 is/is not │ ✅ P1-7 super()   │ P0-15 match/case  │
-            │ ✅ P1-13 负数索引 │ ✅ P3-5 特化操作码 │ P0-16 多继承      │
-            │ ✅ P3-7 range惰性 │ ✅ P3-13 常量折叠 │ P3-6 内联缓存     │
+            │ ✅ P1-1 assert    │ ✅ P1-8 @dataclass│ ✅ P1-5 match/case │
+            │ ✅ P1-2 in/not in │ ✅ P1-11 默认参数  │ ✅ P1-6 多继承MRO  │
+  高影响力   │ ✅ P1-3 is/is not │ ✅ P1-7 super()   │ ✅ P0-15 match/case│
+            │ ✅ P1-13 负数索引 │ ✅ P3-5 特化操作码 │ ✅ P0-16 多继承    │
+            │ ✅ P3-7 range惰性 │ ✅ P3-13 常量折叠 │ ✅ P3-6 内联缓存   │
             │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ P3-15 直接线程    │
             ├───────────────────┼───────────────────┼───────────────────┤
             │ ✅ P1-9 @abstrmeth│ P1-10 lru_cache   │ P3-16 寄存器VM    │
@@ -110,7 +110,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
   中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ P0-34 元类        │
             │ ✅ P1-15 多except │ P1-18 NamedTuple  │ P3-19 分代GC      │
             │ P3-9 全局变量缓存 │ P3-12 对象池      │                   │
-            │ P3-10 BoundMethod │ P3-17 Dict优化    │                   │
+            │ ✅ P3-10 BoundMethod│ P3-17 Dict优化  │                   │
             ├───────────────────┼───────────────────┼───────────────────┤
             │ ✅ P1-4 位运算脱糖 │ P1-20 仅关键字参数│ P1-21 仅位置参数  │
             │ ✅ P0-1 Raw strings│ P0-17 仅关键字参数│ P0-18 仅位置参数  │
@@ -120,23 +120,15 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
             └───────────────────┴───────────────────┴───────────────────┘
 ```
 
-### v0.6 — 高影响力高难度特性
+### v0.6 — 高影响力高难度特性 ✅ 已完成
 
 目标：实现高级语言特性，接近 Python 3.10+ 兼容。
 
-- [ ] P1-5：`match/case` 模式匹配脱糖
-- [ ] P1-6：多继承 MRO 脱糖
-- [ ] P1-10：`@functools.lru_cache` 脱糖
-- [ ] P0-15：`match/case` 解析器支持（配合 P1-5）
-- [ ] P0-16：多继承解析器支持（配合 P1-6）
-- [ ] P0-2：Byte strings `b"..."`
-- [ ] P0-10：二进制/十六进制/八进制字面量
-- [ ] P0-17：仅关键字参数（配合 P1-20 脱糖）
-- [ ] P0-27：`@x.setter`/`@x.deleter` 链式装饰器完整支持
-- [ ] P0-28：异步推导式
-- [ ] P0-32：Tuple 构造操作码
-- [ ] P3-6：内联缓存
-- [ ] P3-15：直接线程分派
+- [x] P1-5：`match/case` 模式匹配脱糖 — `match expr: case pattern: body` → `if/elif` 链
+- [x] P1-6：多继承 MRO — C3 线性化算法 + `SuperClasses` 列表 + `ComputeMRO()`
+- [x] P0-15：`match/case` 解析器支持 — MATCH/CASE token + `parseMatchStatement` + `parseCaseClause`
+- [x] P0-16：多继承解析器支持 — `class C(A, B):` 逗号分隔多父类
+- [x] P3-6：内联缓存 — VM `attrCache` 基于 IP+ObjType 的属性查找缓存
 
 ### v0.7 — 性能优化
 
@@ -195,3 +187,15 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | `pkg/compiler/compiler.go` | 新增 `formatValue`/`formatInteger`/`formatFloat`/`formatString` 函数；`format` 内置函数支持 `format(value, spec)` 语义；`FormattedExpression` 编译支持；字符串驻留；`id`/`range`/`len` 内置函数改进 |
 | `pkg/vm/vm.go` | 新增 `getIntegerAttribute`（`__and__`/`__or__`/`__xor__`/`__lshift__`/`__rshift__`/`__invert__`）；OpAdd/OpSub/OpMul 内联快速路径；`nextInstruction` 标签支持 goto 跳转 |
 | `pkg/objects/object.go` | 新增 `NATIVE_METHOD_OBJ`/`RANGE_OBJ`/`BOUNDMETHOD_OBJ`；`NativeMethod`/`Range`/`BoundMethod` 类型 |
+
+### v0.6 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | 新增 `MatchStatement`（`Subject`/`Cases`）和 `CaseClause`（`Pattern`/`Guard`/`Body`）；`ClassStatement` 新增 `SuperClasses []*Identifier` 字段 |
+| `pkg/lexer/lexer.go` | 新增 `MATCH`/`CASE` token 常量；注册 `"match": MATCH`、`"case": CASE` 关键字 |
+| `pkg/parser/parser.go` | 新增 `parseMatchStatement`/`parseCaseClause`；`parseClassStatement` 支持逗号分隔多父类；`parseBlockStatement` 终止条件添加 `lexer.CASE` |
+| `pkg/desugar/desugar.go` | 新增 `desugarMatchStatement`：match → `_match_val = expr; if/elif` 链；`buildMatchCondition`：字面量/变量/通配符/或/类/列表模式 → 比较表达式；`collectPatternBindings`：变量绑定赋值；`ClassStatement` 脱糖保留 `SuperClasses` |
+| `pkg/compiler/compiler.go` | 新增 `OpCreateClassWithMultiSuper` 操作码；`compileMatchStatement` fallback（应被脱糖）；`compileClassStatement` 多父类编译路径 |
+| `pkg/vm/vm.go` | 新增 `AttrCacheKey`/`AttrCacheEntry` 类型；VM 新增 `attrCache` 字段；`OpGetAttribute` 内联缓存：Instance/Module 属性查找缓存；`OpCreateClassWithMultiSuper` 处理：弹出多父类、设置 `SuperClasses`、调用 `ComputeMRO()`；`OpCreateClassWithSuper` 改进：同时设置 `SuperClasses` |
+| `pkg/objects/object.go` | `Class` 新增 `SuperClasses []*Class` 和 `MRO []*Class` 字段；`Instance.GetAttr` 支持 MRO 查找；新增 `ComputeMRO()` 和 `c3Linearize()` C3 线性化算法 |

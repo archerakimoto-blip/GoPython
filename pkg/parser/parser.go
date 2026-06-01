@@ -280,6 +280,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseNonlocalStatement()
 	case lexer.DEL:
 		return p.parseDeleteStatement()
+	case lexer.MATCH:
+		return p.parseMatchStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -842,7 +844,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		for {
 			if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -852,7 +854,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.RBRACE) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -863,7 +865,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.RBRACE) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -882,7 +884,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		for {
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -892,7 +895,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.EOF) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -903,7 +907,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 
 			if p.curTokenIs(lexer.EOF) || p.curTokenIs(lexer.DEDENT) ||
 				p.curTokenIs(lexer.EXCEPT) || p.curTokenIs(lexer.FINALLY) ||
-				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) {
+				p.curTokenIs(lexer.ELSE) || p.curTokenIs(lexer.COLON) ||
+				p.curTokenIs(lexer.CASE) {
 				break
 			}
 
@@ -1891,15 +1896,29 @@ func (p *Parser) parseClassStatement() ast.Statement {
 	name := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	var superClass *ast.Identifier
+	var superClasses []*ast.Identifier
 	if p.peekTokenIs(lexer.LPAREN) {
 		p.nextToken() // consume '('
-		// Now we expect a single identifier for the super class
-		if !p.expectPeek(lexer.IDENT) {
-			return nil
-		}
-		superClass = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		if !p.expectPeek(lexer.RPAREN) {
-			return nil
+		if p.peekTokenIs(lexer.RPAREN) {
+			p.nextToken() // consume ')'
+		} else {
+			for {
+				if !p.expectPeek(lexer.IDENT) {
+					return nil
+				}
+				parent := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+				superClasses = append(superClasses, parent)
+				if superClass == nil {
+					superClass = parent
+				}
+				if !p.peekTokenIs(lexer.COMMA) {
+					break
+				}
+				p.nextToken() // consume ','
+			}
+			if !p.expectPeek(lexer.RPAREN) {
+				return nil
+			}
 		}
 	}
 
@@ -1926,11 +1945,75 @@ func (p *Parser) parseClassStatement() ast.Statement {
 	}
 
 	return &ast.ClassStatement{
-		Token:       token.Literal,
-		Name:        name,
-		SuperClass:  superClass,
-		Body:        body,
-		Methods:     methods,
+		Token:        token.Literal,
+		Name:         name,
+		SuperClass:   superClass,
+		SuperClasses: superClasses,
+		Body:         body,
+		Methods:      methods,
+	}
+}
+
+func (p *Parser) parseMatchStatement() ast.Statement {
+	token := p.curToken
+
+	subject := p.parseExpression(LOWEST)
+	if subject == nil {
+		return nil
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+
+	var cases []*ast.CaseClause
+	for p.curTokenIs(lexer.CASE) {
+		cc := p.parseCaseClause()
+		if cc != nil {
+			cases = append(cases, cc)
+		}
+		if p.curTokenIs(lexer.EOF) {
+			break
+		}
+	}
+
+	return &ast.MatchStatement{
+		Token:   token.Literal,
+		Subject: subject,
+		Cases:   cases,
+	}
+}
+
+func (p *Parser) parseCaseClause() *ast.CaseClause {
+	token := p.curToken
+
+	p.nextToken()
+
+	pattern := p.parseExpression(LOWEST)
+	if pattern == nil {
+		return nil
+	}
+
+	var guard ast.Expression
+	if p.curTokenIs(lexer.IF) {
+		p.nextToken()
+		guard = p.parseExpression(LOWEST)
+	}
+
+	if !p.expectPeek(lexer.COLON) {
+		return nil
+	}
+
+	p.nextToken()
+	body := p.parseBlockStatement()
+
+	return &ast.CaseClause{
+		Token:   token.Literal,
+		Pattern: pattern,
+		Guard:   guard,
+		Body:    body,
 	}
 }
 

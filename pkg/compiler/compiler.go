@@ -61,6 +61,7 @@ const (
 	OpYieldValue
 	OpCreateClass
 	OpCreateClassWithSuper
+	OpCreateClassWithMultiSuper
 	OpGetAttribute
 	OpSetAttribute
 	OpFormatString
@@ -1561,6 +1562,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return c.compileImportStatement(node)
 	case *ast.FromImportStatement:
 		return c.compileFromImportStatement(node)
+	case *ast.MatchStatement:
+		return c.compileMatchStatement(node)
+	case *ast.CaseClause:
+		return nil
 	}
 
 	return nil
@@ -1732,6 +1737,10 @@ func (c *Compiler) compileFromImportStatement(node *ast.FromImportStatement) err
 	return nil
 }
 
+func (c *Compiler) compileMatchStatement(node *ast.MatchStatement) error {
+	return fmt.Errorf("match statement should be desugared before compilation")
+}
+
 func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 	class := &objects.Class{
 		Name:    node.Name.Value,
@@ -1746,20 +1755,26 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 		}
 	}
 
-	// Handle inheritance
-	if node.SuperClass != nil {
-		// First, emit instruction to get the super class
+	if len(node.SuperClasses) > 1 {
+		for _, sc := range node.SuperClasses {
+			superClassIdx, ok := c.symbolTable.Resolve(sc.Value)
+			if ok && superClassIdx.Scope == GlobalScope {
+				c.emit(OpGetGlobal, superClassIdx.Index)
+			}
+		}
+		numParents := len(node.SuperClasses)
+		c.emit(OpCreateClassWithMultiSuper, c.addConstant(class))
+		c.emit(Opcode(numParents))
+	} else if node.SuperClass != nil {
 		superClassIdx, ok := c.symbolTable.Resolve(node.SuperClass.Value)
 		if ok && superClassIdx.Scope == GlobalScope {
 			c.emit(OpGetGlobal, superClassIdx.Index)
 		}
-		// Emit OpCreateClass with inheritance
 		c.emit(OpCreateClassWithSuper, c.addConstant(class))
 	} else {
 		c.emit(OpCreateClass, c.addConstant(class))
 	}
 
-	// Define class name in symbol table (after OpCreateClass so stack has the value)
 	symbol := c.symbolTable.Define(node.Name.Value)
 	c.emit(OpSetGlobal, symbol.Index)
 	

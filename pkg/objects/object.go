@@ -440,10 +440,12 @@ func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
 func (c *Closure) Inspect() string  { return "closure" }
 
 type Class struct {
-	Name       string
-	Methods    map[string]Object
-	Fields     map[string]Object
-	SuperClass *Class
+	Name        string
+	Methods     map[string]Object
+	Fields      map[string]Object
+	SuperClass  *Class
+	SuperClasses []*Class
+	MRO         []*Class
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }
@@ -465,9 +467,22 @@ func (i *Instance) GetAttr(name string) (Object, bool) {
 		if method, ok := i.Class.Methods[name]; ok {
 			return method, true
 		}
-		if i.Class.SuperClass != nil {
+		if len(i.Class.MRO) > 0 {
+			for _, cls := range i.Class.MRO {
+				if method, ok := cls.Methods[name]; ok {
+					return method, true
+				}
+			}
+		} else if i.Class.SuperClass != nil {
 			if method, ok := i.Class.SuperClass.Methods[name]; ok {
 				return method, true
+			}
+		}
+		if len(i.Class.SuperClasses) > 0 {
+			for _, sc := range i.Class.SuperClasses {
+				if method, ok := sc.Methods[name]; ok {
+					return method, true
+				}
 			}
 		}
 	}
@@ -476,6 +491,96 @@ func (i *Instance) GetAttr(name string) (Object, bool) {
 
 func (i *Instance) SetAttr(name string, value Object) {
 	i.Fields[name] = value
+}
+
+func (c *Class) ComputeMRO() []*Class {
+	if len(c.SuperClasses) == 0 {
+		if c.SuperClass != nil {
+			c.MRO = []*Class{c.SuperClass}
+		}
+		return c.MRO
+	}
+
+	result := c3Linearize(c)
+	c.MRO = result
+	return result
+}
+
+func c3Linearize(cls *Class) []*Class {
+	result := []*Class{cls}
+
+	if len(cls.SuperClasses) == 0 {
+		if cls.SuperClass != nil {
+			result = append(result, cls.SuperClass)
+		}
+		return result
+	}
+
+	var linearizations [][]*Class
+	for _, parent := range cls.SuperClasses {
+		parentMRO := parent.ComputeMRO()
+		parentL := make([]*Class, 0, len(parentMRO)+1)
+		parentL = append(parentL, parent)
+		parentL = append(parentL, parentMRO...)
+		linearizations = append(linearizations, parentL)
+	}
+
+	parentsList := make([]*Class, len(cls.SuperClasses))
+	copy(parentsList, cls.SuperClasses)
+	linearizations = append(linearizations, parentsList)
+
+	for {
+		allEmpty := true
+		for _, l := range linearizations {
+			if len(l) > 0 {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			break
+		}
+
+		var candidate *Class
+		found := false
+		for _, l := range linearizations {
+			if len(l) == 0 {
+				continue
+			}
+			c := l[0]
+			inTail := false
+			for _, l2 := range linearizations {
+				for j := 1; j < len(l2); j++ {
+					if l2[j] == c {
+						inTail = true
+						break
+					}
+				}
+				if inTail {
+					break
+				}
+			}
+			if !inTail {
+				candidate = c
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			break
+		}
+
+		result = append(result, candidate)
+
+		for i, l := range linearizations {
+			if len(l) > 0 && l[0] == candidate {
+				linearizations[i] = l[1:]
+			}
+		}
+	}
+
+	return result
 }
 
 type Module struct {

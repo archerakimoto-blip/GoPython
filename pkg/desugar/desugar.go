@@ -1,6 +1,8 @@
 package desugar
 
 import (
+	"fmt"
+
 	"github.com/go-py/go-python/pkg/ast"
 )
 
@@ -327,13 +329,16 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		return desugarAsyncWithStatement(s)
 	case *ast.ClassStatement:
 		desugaredClass := &ast.ClassStatement{
-			Token:       s.Token,
-			Name:        s.Name,
-			SuperClass:  s.SuperClass,
-			Body:        desugarBlockStatement(s.Body),
-			Methods:     s.Methods,
+			Token:        s.Token,
+			Name:         s.Name,
+			SuperClass:   s.SuperClass,
+			SuperClasses: s.SuperClasses,
+			Body:         desugarBlockStatement(s.Body),
+			Methods:      s.Methods,
 		}
 		return desugaredClass
+	case *ast.MatchStatement:
+		return desugarMatchStatement(s)
 	default:
 		return stmt
 	}
@@ -1070,4 +1075,287 @@ func desugarAsyncWithStatement(stmt *ast.AsyncWithStatement) ast.Statement {
 	}
 
 	return nestedStatement
+}
+
+func desugarMatchStatement(ms *ast.MatchStatement) ast.Statement {
+	matchVar := &ast.Identifier{Token: "_match_val", Value: "_match_val"}
+
+	stmts := []ast.Statement{
+		&ast.LetStatement{
+			Token: ms.Token,
+			Names: []*ast.Identifier{matchVar},
+			Value: desugarExpression(ms.Subject),
+		},
+	}
+
+	var chain ast.Expression
+	for i := len(ms.Cases) - 1; i >= 0; i-- {
+		cc := ms.Cases[i]
+		condition := buildMatchCondition(matchVar, cc.Pattern)
+		if cc.Guard != nil {
+			condition = &ast.InfixExpression{
+				Token:    "and",
+				Left:     condition,
+				Operator: "and",
+				Right:    desugarExpression(cc.Guard),
+			}
+		}
+
+		bindings := collectPatternBindings(matchVar, cc.Pattern)
+		desugaredBody := desugarBlockStatement(cc.Body)
+
+		bodyStmts := make([]ast.Statement, 0, len(bindings)+len(desugaredBody.Statements))
+		bodyStmts = append(bodyStmts, bindings...)
+		bodyStmts = append(bodyStmts, desugaredBody.Statements...)
+
+		body := &ast.BlockStatement{
+			Token:      cc.Token,
+			Statements: bodyStmts,
+		}
+
+		if chain == nil {
+			chain = &ast.IfExpression{
+				Token:       "if",
+				Condition:   condition,
+				Consequence: body,
+			}
+		} else {
+			chain = &ast.IfExpression{
+				Token:       "if",
+				Condition:   condition,
+				Consequence: body,
+				Alternative: &ast.BlockStatement{
+					Token:      "else",
+					Statements: []ast.Statement{&ast.ExpressionStatement{Token: "else", Expression: chain}},
+				},
+			}
+		}
+	}
+
+	if chain != nil {
+		stmts = append(stmts, &ast.ExpressionStatement{
+			Token:      ms.Token,
+			Expression: chain,
+		})
+	}
+
+	if len(stmts) == 1 {
+		return &ast.ExpressionStatement{Token: ms.Token, Expression: &ast.Boolean{Token: "True", Value: true}}
+	}
+
+	return &ast.BlockStatement{
+		Token:      ms.Token,
+		Statements: stmts,
+	}
+}
+
+func buildMatchCondition(matchVar ast.Expression, pattern ast.Expression) ast.Expression {
+	if pattern == nil {
+		return &ast.Boolean{Token: "True", Value: true}
+	}
+
+	switch p := pattern.(type) {
+	case *ast.IntegerLiteral:
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     matchVar,
+			Operator: "==",
+			Right:    p,
+		}
+	case *ast.FloatLiteral:
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     matchVar,
+			Operator: "==",
+			Right:    p,
+		}
+	case *ast.StringLiteral:
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     matchVar,
+			Operator: "==",
+			Right:    p,
+		}
+	case *ast.Boolean:
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     matchVar,
+			Operator: "==",
+			Right:    p,
+		}
+	case *ast.Identifier:
+		if p.Value == "_" {
+			return &ast.Boolean{Token: "True", Value: true}
+		}
+		if p.Value == "None" {
+			return &ast.InfixExpression{
+				Token:    "==",
+				Left:     matchVar,
+				Operator: "==",
+				Right:    &ast.Identifier{Token: "None", Value: "None"},
+			}
+		}
+		if p.Value == "True" {
+			return &ast.InfixExpression{
+				Token:    "==",
+				Left:     matchVar,
+				Operator: "==",
+				Right:    &ast.Boolean{Token: "True", Value: true},
+			}
+		}
+		if p.Value == "False" {
+			return &ast.InfixExpression{
+				Token:    "==",
+				Left:     matchVar,
+				Operator: "==",
+				Right:    &ast.Boolean{Token: "False", Value: false},
+			}
+		}
+		return &ast.Boolean{Token: "True", Value: true}
+	case *ast.InfixExpression:
+		if p.Operator == "|" {
+			left := buildMatchCondition(matchVar, p.Left)
+			right := buildMatchCondition(matchVar, p.Right)
+			return &ast.InfixExpression{
+				Token:    "or",
+				Left:     left,
+				Operator: "or",
+				Right:    right,
+			}
+		}
+	case *ast.CallExpression:
+		if ident, ok := p.Function.(*ast.Identifier); ok {
+			isInstanceCall := &ast.CallExpression{
+				Token: "isinstance",
+				Function: &ast.Identifier{Token: "isinstance", Value: "isinstance"},
+				Arguments: []ast.Expression{matchVar, ident},
+			}
+			if len(p.Arguments) > 0 {
+				argConditions := []ast.Expression{isInstanceCall}
+				for i, arg := range p.Arguments {
+					idx := &ast.IntegerLiteral{Token: fmt.Sprintf("%d", i), Value: int64(i)}
+					getItem := &ast.IndexExpression{
+						Token: "[",
+						Left:  matchVar,
+						Index: idx,
+					}
+					argCond := &ast.InfixExpression{
+						Token: "and",
+						Left: &ast.InfixExpression{
+							Token:    ">=",
+							Left: &ast.CallExpression{
+								Token:    "len",
+								Function: &ast.Identifier{Token: "len", Value: "len"},
+								Arguments: []ast.Expression{matchVar},
+							},
+							Operator: ">=",
+							Right:    idx,
+						},
+						Operator: "and",
+						Right:    buildMatchCondition(getItem, arg),
+					}
+					argConditions = append(argConditions, argCond)
+				}
+				result := argConditions[0]
+				for _, cond := range argConditions[1:] {
+					result = &ast.InfixExpression{
+						Token:    "and",
+						Left:     result,
+						Operator: "and",
+						Right:    cond,
+					}
+				}
+				return result
+			}
+			return isInstanceCall
+		}
+	case *ast.ListLiteral:
+		conditions := []ast.Expression{
+			&ast.InfixExpression{
+				Token: "==",
+				Left: &ast.CallExpression{
+					Token:    "len",
+					Function: &ast.Identifier{Token: "len", Value: "len"},
+					Arguments: []ast.Expression{matchVar},
+				},
+				Operator: "==",
+				Right:    &ast.IntegerLiteral{Token: fmt.Sprintf("%d", len(p.Elements)), Value: int64(len(p.Elements))},
+			},
+		}
+		for i, elem := range p.Elements {
+			idx := &ast.IntegerLiteral{Token: fmt.Sprintf("%d", i), Value: int64(i)}
+			getItem := &ast.IndexExpression{
+				Token: "[",
+				Left:  matchVar,
+				Index: idx,
+			}
+			elemCond := buildMatchCondition(getItem, elem)
+			conditions = append(conditions, elemCond)
+		}
+		result := conditions[0]
+		for _, cond := range conditions[1:] {
+			result = &ast.InfixExpression{
+				Token:    "and",
+				Left:     result,
+				Operator: "and",
+				Right:    cond,
+			}
+		}
+		return result
+	}
+
+	return &ast.Boolean{Token: "True", Value: true}
+}
+
+func collectPatternBindings(matchVar ast.Expression, pattern ast.Expression) []ast.Statement {
+	if pattern == nil {
+		return nil
+	}
+
+	var bindings []ast.Statement
+
+	switch p := pattern.(type) {
+	case *ast.Identifier:
+		if p.Value != "_" {
+			bindings = append(bindings, &ast.AssignStatement{
+				Token: p.Token,
+				Names: []*ast.Identifier{p},
+				Value: matchVar,
+			})
+		}
+	case *ast.InfixExpression:
+		if p.Operator == "|" {
+			bindings = append(bindings, collectPatternBindings(matchVar, p.Left)...)
+		}
+	case *ast.CallExpression:
+		if _, ok := p.Function.(*ast.Identifier); ok {
+			for i, arg := range p.Arguments {
+				if ident, ok := arg.(*ast.Identifier); ok && ident.Value != "_" {
+					idx := &ast.IntegerLiteral{Token: fmt.Sprintf("%d", i), Value: int64(i)}
+					getItem := &ast.IndexExpression{
+						Token: "[",
+						Left:  matchVar,
+						Index: idx,
+					}
+					bindings = append(bindings, &ast.AssignStatement{
+						Token: ident.Token,
+						Names: []*ast.Identifier{ident},
+						Value: getItem,
+					})
+				}
+			}
+		}
+	case *ast.ListLiteral:
+		for i, elem := range p.Elements {
+			idx := &ast.IntegerLiteral{Token: fmt.Sprintf("%d", i), Value: int64(i)}
+			getItem := &ast.IndexExpression{
+				Token: "[",
+				Left:  matchVar,
+				Index: idx,
+			}
+			bindings = append(bindings, collectPatternBindings(getItem, elem)...)
+		}
+	}
+
+	return bindings
 }

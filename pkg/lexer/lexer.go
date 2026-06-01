@@ -83,6 +83,8 @@ const (
 	NONLOCAL = "NONLOCAL"
 	RETURN_TYPE = "RETURN_TYPE"
 	DEL      = "DEL"
+	MATCH    = "MATCH"
+	CASE     = "CASE"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -126,6 +128,8 @@ var keywords = map[string]TokenType{
 	"global": GLOBAL,
 	"nonlocal": NONLOCAL,
 	"del":    DEL,
+	"match":  MATCH,
+	"case":   CASE,
 }
 
 type Lexer struct {
