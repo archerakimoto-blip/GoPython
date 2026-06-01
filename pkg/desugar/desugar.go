@@ -329,6 +329,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	case *ast.AsyncWithStatement:
 		return desugarAsyncWithStatement(s)
 	case *ast.ClassStatement:
+		if isEnumClass(s) {
+			return desugarEnum(s)
+		}
 		desugaredClass := &ast.ClassStatement{
 			Token:        s.Token,
 			Name:         s.Name,
@@ -342,6 +345,67 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		return desugarMatchStatement(s)
 	default:
 		return stmt
+	}
+}
+
+func isEnumClass(s *ast.ClassStatement) bool {
+	if s.SuperClass != nil && s.SuperClass.Value == "Enum" {
+		return true
+	}
+	for _, sc := range s.SuperClasses {
+		if sc.Value == "Enum" {
+			return true
+		}
+	}
+	return false
+}
+
+func desugarEnum(s *ast.ClassStatement) ast.Statement {
+	enumName := s.Name.Value
+	members := make(map[string]ast.Expression)
+	autoCounter := int64(1)
+
+	if s.Body != nil {
+		for _, stmt := range s.Body.Statements {
+			if assign, ok := stmt.(*ast.AssignStatement); ok && len(assign.Names) == 1 {
+				fieldName := assign.Names[0].Value
+				if assign.Value != nil {
+					members[fieldName] = desugarExpression(assign.Value)
+				} else {
+					members[fieldName] = &ast.IntegerLiteral{Token: string(rune('0' + autoCounter)), Value: autoCounter}
+					autoCounter++
+				}
+			}
+			if let, ok := stmt.(*ast.LetStatement); ok && len(let.Names) == 1 {
+				fieldName := let.Names[0].Value
+				if let.Value != nil {
+					members[fieldName] = desugarExpression(let.Value)
+				} else {
+					members[fieldName] = &ast.IntegerLiteral{Token: string(rune('0' + autoCounter)), Value: autoCounter}
+					autoCounter++
+				}
+			}
+		}
+	}
+
+	dictPairs := make(map[ast.Expression]ast.Expression)
+	for k, v := range members {
+		dictPairs[&ast.StringLiteral{Token: k, Value: k}] = v
+	}
+
+	enumCall := &ast.CallExpression{
+		Token:    "__enum__",
+		Function: &ast.Identifier{Token: "__enum__", Value: "__enum__"},
+		Arguments: []ast.Expression{
+			&ast.StringLiteral{Token: enumName, Value: enumName},
+			&ast.HashLiteral{Token: "{", Pairs: dictPairs},
+		},
+	}
+
+	return &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{{Token: enumName, Value: enumName}},
+		Value: enumCall,
 	}
 }
 

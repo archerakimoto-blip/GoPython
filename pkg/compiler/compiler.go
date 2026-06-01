@@ -333,6 +333,8 @@ func (c *Compiler) registerBuiltins() {
 					return objects.NewError("cannot determine length of zip with non-sequence argument")
 				}
 				return &objects.Integer{Value: l}
+			case *objects.Bytes:
+				return &objects.Integer{Value: int64(len(arg.Value))}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -591,6 +593,11 @@ func (c *Compiler) registerBuiltins() {
 				return objects.False
 			case *objects.Dict:
 				if len(arg.Pairs) > 0 {
+					return objects.True
+				}
+				return objects.False
+			case *objects.Bytes:
+				if len(arg.Value) > 0 {
 					return objects.True
 				}
 				return objects.False
@@ -886,6 +893,30 @@ func (c *Compiler) registerBuiltins() {
 	zipIndex := len(c.constants)
 	c.constants = append(c.constants, zipBuiltin)
 	c.symbolTable.DefineBuiltin("zip", zipIndex)
+
+	enumBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 2 {
+				return objects.NewError("__enum__ requires 2 arguments: name and members")
+			}
+			nameObj, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewError("__enum__ first argument must be a string")
+			}
+			membersDict, ok := args[1].(*objects.Dict)
+			if !ok {
+				return objects.NewError("__enum__ second argument must be a dict")
+			}
+			members := make(map[string]objects.Object)
+			for k, v := range membersDict.Pairs {
+				members[k] = v
+			}
+			return objects.NewEnum(nameObj.Value, members)
+		},
+	}
+	enumIndex := len(c.constants)
+	c.constants = append(c.constants, enumBuiltin)
+	c.symbolTable.DefineBuiltin("__enum__", enumIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -1026,6 +1057,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 		str := &objects.String{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(str))
 
+	case *ast.ByteStringLiteral:
+		bts := &objects.Bytes{Value: []byte(node.Value)}
+		c.emit(OpConstant, c.addConstant(bts))
+
 	case *ast.KeywordArgument:
 		// For simplicity, we'll just compile the value - we'll handle keyword arguments
 		// by creating a hash/dictionary to pass them
@@ -1144,7 +1179,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if symbol.Scope == GlobalScope {
 			c.emit(OpSetGlobal, symbol.Index)
 		} else {
-			c.emit(OpSetLocal, symbol.Index)
+			c.emit1(OpSetLocal, symbol.Index)
 		}
 
 	case *ast.Identifier:

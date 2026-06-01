@@ -35,6 +35,9 @@ const (
 	ZIP_OBJ         ObjectType = "ZIP"
 	ASYNC_OBJ         ObjectType = "ASYNC"
 	FUTURE_OBJ         ObjectType = "FUTURE"
+	ENUM_OBJ           ObjectType = "ENUM"
+	ENUM_MEMBER_OBJ    ObjectType = "ENUM_MEMBER"
+	BYTES_OBJ          ObjectType = "BYTES"
 )
 
 type Object interface {
@@ -114,6 +117,17 @@ type String struct {
 
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
+
+type Bytes struct {
+	Value []byte
+}
+
+func NewBytes(data []byte) *Bytes {
+	return &Bytes{Value: data}
+}
+
+func (b *Bytes) Type() ObjectType { return BYTES_OBJ }
+func (b *Bytes) Inspect() string  { return fmt.Sprintf("b'%s'", string(b.Value)) }
 
 type None struct{}
 
@@ -854,6 +868,41 @@ func NewAttributeError(format string, a ...interface{}) *Error {
 	return newErrorWithType("AttributeError", format, a...)
 }
 
+type EnumMember struct {
+	Name  string
+	Value Object
+	Enum  *Enum
+}
+
+func (em *EnumMember) Type() ObjectType { return ENUM_MEMBER_OBJ }
+func (em *EnumMember) Inspect() string  { return fmt.Sprintf("<%s.%s: %s>", em.Enum.Name, em.Name, em.Value.Inspect()) }
+
+type Enum struct {
+	Name    string
+	Members map[string]*EnumMember
+}
+
+func NewEnum(name string, members map[string]Object) *Enum {
+	e := &Enum{
+		Name:    name,
+		Members: make(map[string]*EnumMember),
+	}
+	for k, v := range members {
+		e.Members[k] = &EnumMember{Name: k, Value: v, Enum: e}
+	}
+	return e
+}
+
+func (e *Enum) Type() ObjectType { return ENUM_OBJ }
+func (e *Enum) Inspect() string  { return fmt.Sprintf("<enum %s>", e.Name) }
+
+func (e *Enum) GetAttr(name string) (Object, bool) {
+	if member, ok := e.Members[name]; ok {
+		return member, true
+	}
+	return nil, false
+}
+
 func NewNameError(format string, a ...interface{}) *Error {
 	return newErrorWithType("NameError", format, a...)
 }
@@ -887,6 +936,17 @@ func Equal(a, b Object) bool {
 	case *Boolean:
 		b := b.(*Boolean)
 		return a.Value == b.Value
+	case *Bytes:
+		b := b.(*Bytes)
+		if len(a.Value) != len(b.Value) {
+			return false
+		}
+		for i := range a.Value {
+			if a.Value[i] != b.Value[i] {
+				return false
+			}
+		}
+		return true
 	default:
 		return false
 	}

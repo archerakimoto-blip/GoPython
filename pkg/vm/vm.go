@@ -388,9 +388,12 @@ func (vm *VM) Run() error {
 				return err
 			}
 		case compiler.OpSlice:
+			step := vm.pop()
 			end := vm.pop()
 			start := vm.pop()
 			left := vm.pop()
+
+			_ = step
 
 			err := vm.executeSliceExpression(left, start, end)
 			if err != nil {
@@ -955,6 +958,36 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			if enumObj, ok := obj.(*objects.Enum); ok {
+				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.ENUM_OBJ}
+				if entry, hit := vm.attrCache[cacheKey]; hit {
+					if entry.ClassName == enumObj.Name {
+						err := vm.push(entry.Value)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+				}
+				if val, ok := enumObj.GetAttr(attrName); ok {
+					vm.attrCache[cacheKey] = AttrCacheEntry{
+						Value:     val,
+						IsMethod:  false,
+						ClassName: enumObj.Name,
+					}
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -1290,6 +1323,8 @@ func isTruthy(obj objects.Object) bool {
 		return obj.Value
 	case *objects.None:
 		return false
+	case *objects.Bytes:
+		return len(obj.Value) > 0
 	default:
 		return true
 	}
@@ -1325,12 +1360,23 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
 
+	if leftEm, ok := left.(*objects.EnumMember); ok {
+		left = leftEm.Value
+	}
+	if rightEm, ok := right.(*objects.EnumMember); ok {
+		right = rightEm.Value
+	}
+
 	if left.Type() == objects.INTEGER_OBJ && right.Type() == objects.INTEGER_OBJ {
 		return vm.executeIntegerComparison(op, left, right)
 	}
 
 	if left.Type() == objects.FLOAT_OBJ && right.Type() == objects.FLOAT_OBJ {
 		return vm.executeFloatComparison(op, left, right)
+	}
+
+	if left.Type() == objects.BYTES_OBJ && right.Type() == objects.BYTES_OBJ {
+		return vm.executeBytesComparison(op, left, right)
 	}
 
 	switch op {
@@ -1380,6 +1426,24 @@ func (vm *VM) executeFloatComparison(op compiler.Opcode, left, right objects.Obj
 		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
+	}
+}
+
+func (vm *VM) executeBytesComparison(op compiler.Opcode, left, right objects.Object) error {
+	leftBytes := left.(*objects.Bytes).Value
+	rightBytes := right.(*objects.Bytes).Value
+
+	switch op {
+	case compiler.OpEqual:
+		return vm.push(nativeBoolToBooleanObject(objects.Equal(left, right)))
+	case compiler.OpNotEqual:
+		return vm.push(nativeBoolToBooleanObject(!objects.Equal(left, right)))
+	case compiler.OpGreaterThan:
+		return vm.push(nativeBoolToBooleanObject(string(leftBytes) > string(rightBytes)))
+	case compiler.OpLessThan:
+		return vm.push(nativeBoolToBooleanObject(string(leftBytes) < string(rightBytes)))
+	default:
+		return fmt.Errorf("unknown operator for bytes: %d", op)
 	}
 }
 
@@ -1689,6 +1753,8 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 		return vm.executeRangeIndex(left, index)
 	case left.Type() == objects.STRING_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeStringIndex(left, index)
+	case left.Type() == objects.BYTES_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeBytesIndex(left, index)
 	default:
 		return fmt.Errorf("index operator not supported: %s", left.Type())
 	}
@@ -1744,6 +1810,19 @@ func (vm *VM) executeStringIndex(left, index objects.Object) error {
 	return vm.push(&objects.String{Value: string(str.Value[idx])})
 }
 
+func (vm *VM) executeBytesIndex(left, index objects.Object) error {
+	bts := left.(*objects.Bytes)
+	idx := index.(*objects.Integer).Value
+	length := int64(len(bts.Value))
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
+		return vm.push(objects.None_)
+	}
+	return vm.push(objects.GetCachedInteger(int64(bts.Value[idx])))
+}
+
 func (vm *VM) executeHashIndex(hash, index objects.Object) error {
 	hashObject := hash.(*objects.Dict)
 
@@ -1761,6 +1840,8 @@ func (vm *VM) executeSliceExpression(left, start, end objects.Object) error {
 		return vm.executeListSlice(left, start, end)
 	case left.Type() == objects.STRING_OBJ:
 		return vm.executeStringSlice(left, start, end)
+	case left.Type() == objects.BYTES_OBJ:
+		return vm.executeBytesSlice(left, start, end)
 	default:
 		return fmt.Errorf("slice operator not supported: %s", left.Type())
 	}
@@ -1867,6 +1948,57 @@ func (vm *VM) executeStringSlice(left, start, end objects.Object) error {
 	}
 
 	return vm.push(&objects.String{Value: str.Value[startIdx:endIdx]})
+}
+
+func (vm *VM) executeBytesSlice(left, start, end objects.Object) error {
+	bts := left.(*objects.Bytes)
+	length := len(bts.Value)
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+		if startIdx < 0 {
+			startIdx = int64(length) + startIdx
+		}
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		if startIdx > int64(length) {
+			startIdx = int64(length)
+		}
+	default:
+		startIdx = 0
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		if e.Value == -1 {
+			endIdx = int64(length)
+		} else {
+			endIdx = e.Value
+			if endIdx < 0 {
+				endIdx = int64(length) + endIdx
+			}
+			if endIdx < 0 {
+				endIdx = 0
+			}
+			if endIdx > int64(length) {
+				endIdx = int64(length)
+			}
+		}
+	default:
+		endIdx = int64(length)
+	}
+
+	if startIdx > endIdx {
+		return vm.push(&objects.Bytes{Value: []byte{}})
+	}
+
+	sliced := make([]byte, endIdx-startIdx)
+	copy(sliced, bts.Value[startIdx:endIdx])
+	return vm.push(&objects.Bytes{Value: sliced})
 }
 
 func matchesException(errObj objects.Object, exceptionType string) bool {

@@ -75,6 +75,15 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token }
 func (sl *StringLiteral) String() string       { return "\"" + sl.Value + "\"" }
 
+type ByteStringLiteral struct {
+	Token string
+	Value string
+}
+
+func (bsl *ByteStringLiteral) expressionNode()      {}
+func (bsl *ByteStringLiteral) TokenLiteral() string { return bsl.Token }
+func (bsl *ByteStringLiteral) String() string       { return "b\"" + bsl.Value + "\"" }
+
 type FStringLiteral struct {
 	Token string
 	Parts []Expression

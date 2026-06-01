@@ -9,8 +9,9 @@ const (
 	IDENT  = "IDENT"
 	INT    = "INT"
 	FLOAT  = "FLOAT"
-	STRING = "STRING"
-	FSTRING = "FSTRING"
+	STRING     = "STRING"
+	FSTRING    = "FSTRING"
+	BYTESTRING = "BYTESTRING"
 
 	ASSIGN   = "="
 	PLUS     = "+"
@@ -309,7 +310,10 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(RBRACKET, l.ch)
 	case '"':
 		tok.Type = STRING
-		tok.Literal = l.readString()
+		tok.Literal = l.readStringWithQuote('"')
+	case '\'':
+		tok.Type = STRING
+		tok.Literal = l.readStringWithQuote('\'')
 	case '#':
 		// Skip comment until end of line
 		l.skipComment()
@@ -318,7 +322,26 @@ func (l *Lexer) NextToken() Token {
 		if l.peekChar() == '"' {
 			l.readChar()
 			tok.Type = FSTRING
-			tok.Literal = l.readString()
+			tok.Literal = l.readStringWithQuote('"')
+			l.readChar()
+			return tok
+		}
+		if l.peekChar() == '\'' {
+			l.readChar()
+			tok.Type = FSTRING
+			tok.Literal = l.readStringWithQuote('\'')
+			l.readChar()
+			return tok
+		}
+		tok.Literal = l.readIdentifier()
+		tok.Type = lookupIdent(tok.Literal)
+		return tok
+	case 'b':
+		if l.peekChar() == '"' || l.peekChar() == '\'' {
+			quote := l.peekChar()
+			l.readChar()
+			tok.Type = BYTESTRING
+			tok.Literal = l.readStringWithQuote(quote)
 			l.readChar()
 			return tok
 		}
@@ -426,6 +449,17 @@ func (l *Lexer) readString() string {
 	for {
 		l.readChar()
 		if l.ch == '"' || l.ch == 0 {
+			break
+		}
+	}
+	return l.input[position:l.position]
+}
+
+func (l *Lexer) readStringWithQuote(quote byte) string {
+	position := l.position + 1
+	for {
+		l.readChar()
+		if l.ch == quote || l.ch == 0 {
 			break
 		}
 	}
