@@ -112,11 +112,11 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
             │ ✅ P3-9 全局变量缓存│ ✅ P3-12 对象池  │                   │
             │ ✅ P3-10 BoundMethod│ ✅ P3-17 Dict优化│                   │
             ├───────────────────┼───────────────────┼───────────────────┤
-            │ ✅ P1-4 位运算脱糖 │ P1-20 仅关键字参数│ P1-21 仅位置参数  │
-            │ ✅ P0-1 Raw strings│ P0-17 仅关键字参数│ P0-18 仅位置参数  │
-  低影响力   │ ✅ P0-10 0x/0b/0o │ P1-19 Enum        │ P0-12 复数        │
-            │ ✅ P0-11 数字下划线│ P0-2 Byte strings │ P0-14 Ellipsis    │
-            │ ✅ P3-11 字符串驻留│ P3-14 死代码消除  │ P0-34 元类        │
+            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ P1-21 仅位置参数  │
+            │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ P0-18 仅位置参数  │
+  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ P0-12 复数        │
+            │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ P0-14 Ellipsis    │
+            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ P0-34 元类        │
             └───────────────────┴───────────────────┴───────────────────┘
 ```
 
@@ -200,3 +200,35 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | 模块 | 变更 |
 |------|------|
 | `pkg/lexer/lexer.go` | `readNumber` 新增 `0x`/`0X`/`0b`/`0B`/`0o`/`0O` 前缀检测分支，分别读取十六进制/二进制/八进制数字；`0o` 前缀自动转换为 Go 兼容的 `0` 前缀；所有数字读取循环支持 `_` 字符；新增 `stripUnderscores` 辅助函数在返回前剥离下划线；新增 `isHexDigit`/`isBinaryDigit`/`isOctalDigit` 辅助函数 |
+
+### v0.9 — 低影响力中难度特性 ✅ 已完成
+
+目标：实现低影响力中难度象限特性，完善语言兼容性和运行时优化。
+
+- [x] P1-20/P0-17：仅关键字参数 + 默认参数值 — 解析器 `*` 分隔符支持 + `KeywordOnly` 标记 + VM kwargs 字典处理 + 默认值填充
+- [x] P1-19：Enum 脱糖 — `class Color(Enum): RED=1, GREEN=2` → 类属性 + `_members_` 字典 + 枚举值对象
+- [x] P0-2：Byte strings `b"..."` — Lexer BYTESTRING token + `Bytes` 对象 + VM 索引/切片/比较/len/bool
+- [x] P3-14：死代码消除 — `EliminateDeadCode` BFS 可达性分析 + 跳转目标重写 + 函数内 DCE
+
+### v0.9 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | 新增 `BYTESTRING` token；`case 'b':` 处理 `b"..."`/`b'...'` 前缀；`readStringWithQuote(quote byte)` 支持引号类型参数；`case '\'':` 单引号字符串处理 |
+| `pkg/ast/ast.go` | 新增 `ByteStringLiteral` 结构体（`Token`/`Value` 字段） |
+| `pkg/parser/parser.go` | 新增 `parseByteStringLiteral`；注册 `BYTESTRING` 前缀解析器 |
+| `pkg/desugar/desugar.go` | 默认参数值脱糖：`if param == None: param = default` + `None` 表达式确保 IfExpression 栈一致性；Enum 脱糖：`class E(Enum):` → 类属性 + `_members_` 字典 |
+| `pkg/compiler/compiler.go` | `ByteStringLiteral` 编译为 `OpConstant` + `Bytes` 常量；`None` 常量修复（从 Builtin 改为 `objects.None_`）；`OpSetLocal` 编码修复（`emit` → `emit1`）；`len`/`bool` 内置函数支持 `Bytes` 类型；`Bytecode()` 启用 `EliminateDeadCodeInFunctions` |
+| `pkg/compiler/optimize.go` | 新增 `EliminateDeadCode`：BFS 从指令 0 开始可达性分析，terminator（OpReturn/OpReturnValue/OpJump/OpRaise）不跟随 fall-through，重写跳转目标；`EliminateDeadCodeInFunctions`：递归优化 CompiledFunction 常量中的指令；`instructionSize`/`isTerminator`/`readOperand` 辅助函数 |
+| `pkg/vm/vm.go` | `executeBytesIndex`/`executeBytesSlice`/`executeBytesComparison`：Bytes 索引/切片/比较；`OpSlice` 修复：弹出 step 值；VarArgs 修复：`posArgsCount == minParams` 时 `vm.push` 替代 `vm.stack` 赋值；Closure 默认参数支持：`NumKeywordOnly`/`NumDefaults`/`NumPositionalDefaults`/`ParameterNames` 字段 + kwargs 字典处理；`isTruthy` 支持 `Bytes` |
+| `pkg/objects/object.go` | 新增 `BYTES_OBJ` 类型；`Bytes` 结构体（`Value []byte`）+ `NewBytes` 构造函数 + `Inspect` 输出 `b'...'` 格式；`Equal` 支持 `Bytes` 逐字节比较；`Closure` 新增 `NumKeywordOnly`/`NumDefaults`/`NumPositionalDefaults`/`ParameterNames` 字段 |
+
+### v0.9 Bug 修复
+
+- [x] OpSetLocal 编码错误：`c.emit(OpSetLocal, ...)` 使用 2 字节操作数编码但 OpSetLocal 期望 1 字节 → 改为 `c.emit1(OpSetLocal, ...)`
+- [x] None 常量注册为 Builtin 函数：`b == None` 始终返回 false → 改为存储 `objects.None_` 常量
+- [x] OpSlice step 值栈泄漏：编译器推送 4 值但 VM 只弹出 3 个 → 添加 `step := vm.pop()`
+- [x] IfExpression 栈不一致：默认参数脱糖生成的 `if b == None: b = 10` 中 AssignStatement 不留值 → 添加 None 表达式确保栈一致
+- [x] OpGetLocal 读取超出 sp：默认参数 IfExpression 的 OpPop 弹出了错误栈位 → 根因是 IfExpression 栈不一致（已修复）
+- [x] Closure 不支持默认参数：`make_adder(n=10)` 调用报错 → Closure 结构体新增默认参数字段 + VM 闭包调用路径支持
+- [x] VarArgs 空参数覆盖：`greet("Alice")` 中 `args` 覆盖了 `name` → 改用 `vm.push` 替代 `vm.stack` 赋值

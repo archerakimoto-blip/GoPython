@@ -213,10 +213,10 @@ func (c *Compiler) exitScope() {
 }
 
 func (c *Compiler) Bytecode() *Bytecode {
-	return &Bytecode{
+	return EliminateDeadCodeInFunctions(&Bytecode{
 		Instructions: c.instructions,
 		Constants:    c.constants,
-	}
+	})
 }
 
 func (c *Compiler) SymbolTable() *SymbolTable {
@@ -344,13 +344,8 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, lenBuiltin)
 	c.symbolTable.DefineBuiltin("len", lenIndex)
 
-	noneBuiltin := &objects.Builtin{
-		Fn: func(args ...objects.Object) objects.Object {
-			return objects.None_
-		},
-	}
 	noneIndex := len(c.constants)
-	c.constants = append(c.constants, noneBuiltin)
+	c.constants = append(c.constants, objects.None_)
 	c.symbolTable.DefineBuiltin("None", noneIndex)
 
 	appendBuiltin := &objects.Builtin{

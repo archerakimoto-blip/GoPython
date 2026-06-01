@@ -1,5 +1,7 @@
 package compiler
 
+import "github.com/go-py/go-python/pkg/objects"
+
 func instructionSize(op Opcode) int {
 	switch op {
 	case OpConstant,
@@ -46,10 +48,6 @@ func isTerminator(op Opcode) bool {
 	}
 }
 
-func isJump(op Opcode) bool {
-	return op == OpJump || op == OpJumpNotTruthy
-}
-
 func readOperand(ins Instructions, pos int, op Opcode) (int, int) {
 	switch op {
 	case OpConstant, OpJump, OpJumpNotTruthy, OpSetGlobal, OpGetGlobal,
@@ -78,20 +76,6 @@ func EliminateDeadCode(ins Instructions) Instructions {
 	}
 
 	reachable := make([]bool, len(ins))
-	jumpTargets := make(map[int]bool)
-
-	pos := 0
-	for pos < len(ins) {
-		op := Opcode(ins[pos])
-		size := instructionSize(op)
-
-		if op == OpJump || op == OpJumpNotTruthy {
-			target, _ := readOperand(ins, pos, op)
-			jumpTargets[target] = true
-		}
-
-		pos += size
-	}
 
 	queue := []int{0}
 	reachable[0] = true
@@ -128,12 +112,6 @@ func EliminateDeadCode(ins Instructions) Instructions {
 			}
 
 		case op == OpReturnValue || op == OpReturn || op == OpRaise:
-			for t := range jumpTargets {
-				if t > current && t < len(ins) && !reachable[t] {
-					reachable[t] = true
-					queue = append(queue, t)
-				}
-			}
 
 		default:
 			if nextInst < len(ins) && !reachable[nextInst] {
@@ -150,11 +128,10 @@ func EliminateDeadCode(ins Instructions) Instructions {
 		op := Opcode(ins[oldPos])
 		size := instructionSize(op)
 
+		posMap[oldPos] = newPos
+
 		if reachable[oldPos] {
-			posMap[oldPos] = newPos
 			newPos += size
-		} else {
-			posMap[oldPos] = newPos
 		}
 
 		oldPos += size
@@ -171,13 +148,10 @@ func EliminateDeadCode(ins Instructions) Instructions {
 			copy(chunk, ins[oldPos:oldPos+size])
 
 			if op == OpJump || op == OpJumpNotTruthy {
-				oldTarget, operandSize := readOperand(ins, oldPos, op)
+				oldTarget, _ := readOperand(ins, oldPos, op)
 				if newTarget, ok := posMap[oldTarget]; ok {
 					chunk[1] = byte(newTarget >> 8)
 					chunk[2] = byte(newTarget & 0xFF)
-				} else {
-					chunk[1] = byte(operandSize)
-					_ = operandSize
 				}
 			}
 
@@ -188,4 +162,23 @@ func EliminateDeadCode(ins Instructions) Instructions {
 	}
 
 	return result
+}
+
+func EliminateDeadCodeInFunctions(bytecode *Bytecode) *Bytecode {
+	newConstants := make([]objects.Object, len(bytecode.Constants))
+	for i, c := range bytecode.Constants {
+		if fn, ok := c.(*CompiledFunction); ok {
+			optimized := EliminateDeadCode(fn.Instructions)
+			newFn := *fn
+			newFn.Instructions = optimized
+			newConstants[i] = &newFn
+		} else {
+			newConstants[i] = c
+		}
+	}
+
+	return &Bytecode{
+		Instructions: EliminateDeadCode(bytecode.Instructions),
+		Constants:    newConstants,
+	}
 }

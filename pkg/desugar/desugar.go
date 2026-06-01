@@ -758,6 +758,10 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 									Names: []*ast.Identifier{{Token: paramName, Value: paramName}},
 									Value: desugarExpression(def),
 								},
+								&ast.ExpressionStatement{
+									Token:      "None",
+									Expression: &ast.Identifier{Token: "None", Value: "None"},
+								},
 							},
 						},
 					},

@@ -512,11 +512,15 @@ func (f *Future) Inspect() string {
 }
 
 type Closure struct {
-	Instructions  []byte
-	NumLocals     int
-	NumParameters int
-	IsGenerator   bool
-	Free          []Object
+	Instructions          []byte
+	NumLocals             int
+	NumParameters         int
+	NumKeywordOnly        int
+	NumDefaults           int
+	NumPositionalDefaults int
+	ParameterNames        []string
+	IsGenerator           bool
+	Free                  []Object
 }
 
 func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }

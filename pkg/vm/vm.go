@@ -230,11 +230,15 @@ func (vm *VM) Run() error {
 			}
 
 			closure := &objects.Closure{
-				Instructions:  fn.Instructions,
-				NumLocals:     fn.NumLocals,
-				NumParameters: fn.NumParameters,
-				IsGenerator:   fn.IsGenerator,
-				Free:          free,
+				Instructions:          fn.Instructions,
+				NumLocals:             fn.NumLocals,
+				NumParameters:         fn.NumParameters,
+				NumKeywordOnly:        fn.NumKeywordOnly,
+				NumDefaults:           fn.NumDefaults,
+				NumPositionalDefaults: fn.NumPositionalDefaults,
+				ParameterNames:        fn.ParameterNames,
+				IsGenerator:           fn.IsGenerator,
+				Free:                  free,
 			}
 
 			err := vm.push(closure)
@@ -467,14 +471,15 @@ func (vm *VM) Run() error {
 			vm.stack[frame.basePointer+localIndex] = vm.pop()
 
 		case compiler.OpGetLocal:
-			localIndex := int(ins[ip+1])
-			vm.currentFrame().ip += 1
+		localIndex := int(ins[ip+1])
+		vm.currentFrame().ip += 1
 
-			frame := vm.currentFrame()
-			err := vm.push(vm.stack[frame.basePointer+localIndex])
-			if err != nil {
-				return err
-			}
+		frame := vm.currentFrame()
+		val := vm.stack[frame.basePointer+localIndex]
+		err := vm.push(val)
+		if err != nil {
+			return err
+		}
 
 		case compiler.OpGetFree:
 			freeIndex := int(ins[ip+1])
@@ -1149,26 +1154,72 @@ func (vm *VM) executeCall(numArgs int) error {
 
 	// Check if it's a closure
 	if closure, ok := calleeObj.(*objects.Closure); ok {
-		if numArgs != closure.NumParameters {
+		posArgsCount := numArgs
+		var kwargsDict *objects.Dict = nil
+
+		if numArgs > 0 {
+			lastArgIdx := vm.sp - 1
+			if dict, ok := vm.stack[lastArgIdx].(*objects.Dict); ok {
+				kwargsDict = dict
+				posArgsCount = numArgs - 1
+			}
+		}
+
+		if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 {
+			maxPosArgs := closure.NumParameters - closure.NumKeywordOnly
+			minPosArgs := maxPosArgs - closure.NumPositionalDefaults
+			if posArgsCount < minPosArgs {
+				return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
+					minPosArgs, maxPosArgs, posArgsCount)
+			}
+			if posArgsCount > maxPosArgs {
+				return fmt.Errorf("takes %d positional arguments but %d were given",
+					maxPosArgs, posArgsCount)
+			}
+
+			if kwargsDict != nil {
+				vm.sp--
+				for i := posArgsCount; i < closure.NumParameters; i++ {
+					if i < maxPosArgs {
+						vm.push(objects.None_)
+					} else {
+						paramName := closure.ParameterNames[i]
+						key := &objects.String{Value: paramName}
+						if val, ok := kwargsDict.Get(key); ok {
+							vm.push(val)
+						} else {
+							vm.push(objects.None_)
+						}
+					}
+				}
+				numArgs = closure.NumParameters
+			} else {
+				for i := posArgsCount; i < closure.NumParameters; i++ {
+					vm.push(objects.None_)
+				}
+				numArgs = closure.NumParameters
+			}
+		} else if numArgs != closure.NumParameters {
 			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
 				closure.NumParameters, numArgs)
 		}
 
-		// Create a CompiledFunction from the closure
 		fn := &compiler.CompiledFunction{
-			Instructions:  closure.Instructions,
-			NumLocals:     closure.NumLocals,
-			NumParameters: closure.NumParameters,
-			IsGenerator:   closure.IsGenerator,
+			Instructions:          closure.Instructions,
+			NumLocals:             closure.NumLocals,
+			NumParameters:         closure.NumParameters,
+			NumKeywordOnly:        closure.NumKeywordOnly,
+			NumDefaults:           closure.NumDefaults,
+			NumPositionalDefaults: closure.NumPositionalDefaults,
+			ParameterNames:        closure.ParameterNames,
+			IsGenerator:           closure.IsGenerator,
 		}
 
-		// Store a copy of free variables for OpGetFree to use
 		freeVarsCopy := make([]objects.Object, len(closure.Free))
 		copy(freeVarsCopy, closure.Free)
 
-		// basePointer points to the first argument
-		// Free variables are stored before basePointer
-		frame := NewFrameWithFreeVars(fn, vm.sp-numArgs, freeVarsCopy)
+		basePointer := vm.sp - numArgs
+		frame := NewFrameWithFreeVars(fn, basePointer, freeVarsCopy)
 		vm.pushFrame(frame)
 		vm.sp = frame.basePointer + closure.NumLocals
 
@@ -1243,7 +1294,7 @@ func (vm *VM) executeCall(numArgs int) error {
 				numArgs = minParams + 1
 				posArgsCount = numArgs
 			} else if posArgsCount == minParams {
-				vm.stack[vm.sp-numArgs] = &objects.List{Elements: []objects.Object{}}
+				vm.push(&objects.List{Elements: []objects.Object{}})
 				numArgs = minParams + 1
 				posArgsCount = numArgs
 			}
@@ -1270,26 +1321,29 @@ func (vm *VM) executeCall(numArgs int) error {
 				maxPosArgs, posArgsCount)
 		}
 
-		if kwargsDict != nil && callee.NumKeywordOnly > 0 {
-			for i := 0; i < callee.NumParameters; i++ {
+		if kwargsDict != nil {
+			vm.sp--
+			for i := posArgsCount; i < callee.NumParameters; i++ {
 				if i < maxPosArgs {
-					continue
-				}
-				paramName := callee.ParameterNames[i]
-				key := &objects.String{Value: paramName}
-				if val, ok := kwargsDict.Get(key); ok {
-					vm.stack[vm.sp-numArgs+i] = val
+					vm.push(objects.None_)
 				} else {
-					vm.stack[vm.sp-numArgs+i] = objects.None_
+					paramName := callee.ParameterNames[i]
+					key := &objects.String{Value: paramName}
+					if val, ok := kwargsDict.Get(key); ok {
+						vm.push(val)
+					} else {
+						vm.push(objects.None_)
+					}
 				}
+			}
+			numArgs = callee.NumParameters
+		} else {
+			for i := posArgsCount; i < callee.NumParameters; i++ {
+				vm.push(objects.None_)
 			}
 			numArgs = callee.NumParameters
 		}
 
-		for i := posArgsCount; i < callee.NumParameters; i++ {
-			vm.push(objects.None_)
-		}
-		numArgs = callee.NumParameters
 		basePointer = vm.sp - numArgs
 	} else if callee.NumDefaults > 0 {
 		minArgs := callee.NumParameters - callee.NumDefaults
