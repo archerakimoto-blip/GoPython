@@ -1,6 +1,8 @@
 package desugar
 
 import (
+	"fmt"
+
 	"github.com/go-py/go-python/pkg/ast"
 )
 
@@ -247,20 +249,56 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 		desugaredTry.Excepts = make([]*ast.ExceptClause, 0, len(s.Excepts))
 		for _, ex := range s.Excepts {
-			desugaredExcept := &ast.ExceptClause{
-				Token: ex.Token,
-				Type:  desugarExpression(ex.Type),
-				Name:  ex.Name,
-				Body:  desugarBlockStatement(ex.Body),
+			if len(ex.Types) > 0 {
+				for _, typ := range ex.Types {
+					desugaredExcept := &ast.ExceptClause{
+						Token: ex.Token,
+						Type:  desugarExpression(typ),
+						Name:  ex.Name,
+						Body:  desugarBlockStatement(ex.Body),
+					}
+					desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
+				}
+			} else {
+				desugaredExcept := &ast.ExceptClause{
+					Token: ex.Token,
+					Type:  desugarExpression(ex.Type),
+					Name:  ex.Name,
+					Body:  desugarBlockStatement(ex.Body),
+				}
+				desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
 			}
-			desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
 		}
 		if s.Finally != nil {
 			desugaredTry.Finally = desugarBlockStatement(s.Finally)
 		}
 		return desugaredTry
 	case *ast.RaiseStatement:
-		// 对 raise 语句进行脱糖处理：脱糖表达式
+		if s.From != nil {
+			causeExpr := desugarExpression(s.From)
+			excExpr := desugarExpression(s.Expression)
+			causeAssign := &ast.ExpressionStatement{
+				Token: ".",
+				Expression: &ast.InfixExpression{
+					Token:    ".",
+					Left: &ast.MemberAccess{
+						Token:  ".",
+						Object: excExpr,
+						Member: &ast.Identifier{Token: "__cause__", Value: "__cause__"},
+					},
+					Operator: "=",
+					Right:    causeExpr,
+				},
+			}
+			raiseStmt := &ast.RaiseStatement{
+				Token:      s.Token,
+				Expression: excExpr,
+			}
+			return &ast.BlockStatement{
+				Token:      s.Token,
+				Statements: []ast.Statement{causeAssign, raiseStmt},
+			}
+		}
 		return &ast.RaiseStatement{
 			Token:      s.Token,
 			Expression: desugarExpression(s.Expression),
@@ -362,6 +400,14 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 
 	switch e := expr.(type) {
 	case *ast.PrefixExpression:
+		if e.Operator == "~" {
+			right := desugarExpression(e.Right)
+			return &ast.CallExpression{
+				Token:     "__invert__",
+				Function:  &ast.MemberAccess{Token: ".", Object: right, Member: &ast.Identifier{Token: "__invert__", Value: "__invert__"}},
+				Arguments: []ast.Expression{},
+			}
+		}
 		return &ast.PrefixExpression{
 			Token:    e.Token,
 			Operator: e.Operator,
@@ -505,6 +551,23 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			}
 		}
 
+		bitMethodMap := map[string]string{
+			"&":  "__and__",
+			"|":  "__or__",
+			"^":  "__xor__",
+			"<<": "__lshift__",
+			">>": "__rshift__",
+		}
+		if method, ok := bitMethodMap[e.Operator]; ok {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			return &ast.CallExpression{
+				Token:     method,
+				Function:  &ast.MemberAccess{Token: ".", Object: left, Member: &ast.Identifier{Token: method, Value: method}},
+				Arguments: []ast.Expression{right},
+			}
+		}
+
 	// 检查是否是 AND 或 OR，特殊处理
 		if e.Operator == "and" {
 			// a AND b -> if a then b else a
@@ -564,12 +627,18 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			}
 		}
 
-		// 对于其他运算符，正常脱糖
+		left := desugarExpression(e.Left)
+		right := desugarExpression(e.Right)
+
+		if folded := foldConstants(e.Operator, left, right); folded != nil {
+			return folded
+		}
+
 		return &ast.InfixExpression{
 			Token:    e.Token,
-			Left:     desugarExpression(e.Left),
+			Left:     left,
 			Operator: e.Operator,
-			Right:    desugarExpression(e.Right),
+			Right:    right,
 		}
 	case *ast.IfExpression:
 		return &ast.IfExpression{
@@ -611,21 +680,22 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
-		// 脱糖装饰器
 		desugaredDecorators := make([]ast.Expression, len(e.Decorators))
 		for i, dec := range e.Decorators {
 			desugaredDecorators[i] = desugarExpression(dec)
 		}
-		return &ast.FunctionLiteral{
+		desugaredFn := &ast.FunctionLiteral{
 			Token:      e.Token,
 			Name:       e.Name,
 			Parameters: e.Parameters,
+			Defaults:   e.Defaults,
 			Body:       desugarBlockStatement(e.Body),
 			VarArgs:    e.VarArgs,
 			KwArgs:     e.KwArgs,
 			Decorators: desugaredDecorators,
 			IsAsync:    e.IsAsync,
 		}
+		return desugarDefaultParams(desugaredFn)
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
 			Token:     e.Token,
@@ -637,9 +707,15 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		for _, arg := range e.Arguments {
 			desugaredArgs = append(desugaredArgs, desugarExpression(arg))
 		}
+		desugaredFn := desugarExpression(e.Function)
+
+		if ident, ok := desugaredFn.(*ast.Identifier); ok && ident.Value == "super" {
+			return desugarSuperCall(desugaredArgs)
+		}
+
 		return &ast.CallExpression{
 			Token:     e.Token,
-			Function:  desugarExpression(e.Function),
+			Function:  desugaredFn,
 			Arguments: desugaredArgs,
 		}
 	case *ast.IndexExpression:
@@ -760,7 +836,6 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		}
 		return ge
 	case *ast.FStringLiteral:
-		// Keep f-string as-is, the compiler will handle it
 		desugaredParts := make([]ast.Expression, 0, len(e.Parts))
 		for _, part := range e.Parts {
 			desugaredParts = append(desugaredParts, desugarExpression(part))
@@ -769,6 +844,19 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Token: e.Token,
 			Parts: desugaredParts,
 		}
+	case *ast.FormattedExpression:
+		expr := desugarExpression(e.Expression)
+		if e.FormatSpec != "" {
+			return &ast.CallExpression{
+				Token:    "format",
+				Function: &ast.Identifier{Token: "format", Value: "format"},
+				Arguments: []ast.Expression{
+					expr,
+					&ast.StringLiteral{Token: e.FormatSpec, Value: e.FormatSpec},
+				},
+			}
+		}
+		return expr
 	default:
 		return expr
 	}
@@ -778,15 +866,188 @@ func isComparisonOp(op string) bool {
 	return op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">="
 }
 
+// desugarSuperCall 脱糖 super() 调用
+// super() -> __super__()
+// super().method(args) 的模式由编译器层面处理，脱糖层只处理 super() 本身
+func desugarSuperCall(args []ast.Expression) ast.Expression {
+	return &ast.CallExpression{
+		Token:     "super",
+		Function:  &ast.Identifier{Token: "super", Value: "__super__"},
+		Arguments: args,
+	}
+}
+
+// desugarDefaultParams 脱糖函数默认参数
+// 将默认参数转换为函数体开头的条件赋值
+// def foo(a, b=10, c=20) -> def foo(a, b=None, c=None): if b == None: b = 10; if c == None: c = 20
+func desugarDefaultParams(fn *ast.FunctionLiteral) *ast.FunctionLiteral {
+	if len(fn.Defaults) == 0 {
+		return fn
+	}
+
+	// 计算有多少参数有默认值
+	numDefaults := len(fn.Defaults)
+	numParams := len(fn.Parameters)
+	firstDefaultIdx := numParams - numDefaults
+
+	// 在函数体开头添加默认值赋值
+	newStmts := []ast.Statement{}
+
+	for i := 0; i < numDefaults; i++ {
+		paramIdx := firstDefaultIdx + i
+		param := fn.Parameters[paramIdx]
+		defaultValue := fn.Defaults[i]
+
+		// if param == None: param = defaultValue
+		noneCheck := &ast.InfixExpression{
+			Token:    "==",
+			Left:     &ast.Identifier{Token: param.Token, Value: param.Value},
+			Operator: "==",
+			Right:    &ast.Identifier{Token: "None", Value: "None"},
+		}
+
+		assignStmt := &ast.AssignStatement{
+			Token: "=",
+			Names: []*ast.Identifier{{Token: param.Token, Value: param.Value}},
+			Value: defaultValue,
+		}
+
+		ifExpr := &ast.IfExpression{
+			Token:     "if",
+			Condition: noneCheck,
+			Consequence: &ast.BlockStatement{
+				Token:      ":",
+				Statements: []ast.Statement{assignStmt},
+			},
+			Alternative: nil,
+		}
+
+		newStmts = append(newStmts, &ast.ExpressionStatement{
+			Token:      "if",
+			Expression: ifExpr,
+		})
+	}
+
+	// 将新语句添加到函数体开头
+	if fn.Body != nil {
+		newStmts = append(newStmts, fn.Body.Statements...)
+		fn.Body.Statements = newStmts
+	}
+
+	// 清空默认值列表，因为已经脱糖到函数体中
+	fn.Defaults = nil
+
+	return fn
+}
+
 func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
-	// 直接返回，让编译器来处理列表推导式
-	// 我们需要在这里脱糖子表达式
+	if len(lc.Clauses) > 1 {
+		return desugarMultiClauseListComprehension(lc)
+	}
+
 	lc.Element = desugarExpression(lc.Element)
 	lc.Iterable = desugarExpression(lc.Iterable)
 	if lc.Filter != nil {
 		lc.Filter = desugarExpression(lc.Filter)
 	}
 	return lc
+}
+
+func desugarMultiClauseListComprehension(lc *ast.ListComprehension) ast.Expression {
+	resultVar := &ast.Identifier{Token: "_lc_result", Value: "_lc_result"}
+	element := desugarExpression(lc.Element)
+
+	var innerBody *ast.BlockStatement
+	if len(lc.Filters) > 0 {
+		filterCond := desugarExpression(lc.Filters[0])
+		for i := 1; i < len(lc.Filters); i++ {
+			filterCond = &ast.InfixExpression{
+				Token:    "and",
+				Left:     filterCond,
+				Operator: "and",
+				Right:    desugarExpression(lc.Filters[i]),
+			}
+		}
+		innerBody = &ast.BlockStatement{
+			Token: ":",
+			Statements: []ast.Statement{
+				&ast.ExpressionStatement{
+					Token: "if",
+					Expression: &ast.IfExpression{
+						Token:     "if",
+						Condition: filterCond,
+						Consequence: &ast.BlockStatement{
+							Token: ":",
+							Statements: []ast.Statement{
+								&ast.ExpressionStatement{
+									Token: "append",
+									Expression: &ast.CallExpression{
+										Token:    "append",
+										Function: &ast.MemberAccess{Token: ".", Object: resultVar, Member: &ast.Identifier{Token: "append", Value: "append"}},
+										Arguments: []ast.Expression{element},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	} else {
+		innerBody = &ast.BlockStatement{
+			Token: ":",
+			Statements: []ast.Statement{
+				&ast.ExpressionStatement{
+					Token: "append",
+					Expression: &ast.CallExpression{
+						Token:    "append",
+						Function: &ast.MemberAccess{Token: ".", Object: resultVar, Member: &ast.Identifier{Token: "append", Value: "append"}},
+						Arguments: []ast.Expression{element},
+					},
+				},
+			},
+		}
+	}
+
+	currentBody := innerBody
+	for i := len(lc.Clauses) - 1; i >= 0; i-- {
+		clause := lc.Clauses[i]
+		forStmt := &ast.ForStatement{
+			Token:    "for",
+			Value:     clause.Variable,
+			Iterable: desugarExpression(clause.Iterable),
+			Body:     currentBody,
+		}
+		currentBody = desugarForToWhile(forStmt)
+	}
+
+	resultInit := &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{resultVar},
+		Value: &ast.ListLiteral{Token: "[", Elements: []ast.Expression{}},
+	}
+
+	returnStmt := &ast.ReturnStatement{
+		Token:       "return",
+		ReturnValue: resultVar,
+	}
+
+	fn := &ast.FunctionLiteral{
+		Token:      "def",
+		Name:       "_lc",
+		Parameters: []*ast.Identifier{},
+		Body: &ast.BlockStatement{
+			Token:      ":",
+			Statements: append([]ast.Statement{resultInit}, append(currentBody.Statements, returnStmt)...),
+		},
+		Decorators: []ast.Expression{},
+	}
+
+	return &ast.CallExpression{
+		Token:     "(",
+		Function:  fn,
+		Arguments: []ast.Expression{},
+	}
 }
 
 func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
@@ -1195,6 +1456,7 @@ func desugarClassStatement(stmt *ast.ClassStatement) ast.Statement {
 	desugaredBody := desugarBlockStatement(stmt.Body)
 
 	var abstractMethods []string
+	hasDataclass := false
 	for _, s := range desugaredBody.Statements {
 		if es, ok := s.(*ast.ExpressionStatement); ok {
 			if fn, ok := es.Expression.(*ast.FunctionLiteral); ok {
@@ -1202,9 +1464,21 @@ func desugarClassStatement(stmt *ast.ClassStatement) ast.Statement {
 					if ident, ok := dec.(*ast.Identifier); ok && ident.Value == "abstractmethod" {
 						abstractMethods = append(abstractMethods, fn.Name)
 					}
+					if ident, ok := dec.(*ast.Identifier); ok && ident.Value == "dataclass" {
+						hasDataclass = true
+					}
+					if ma, ok := dec.(*ast.MemberAccess); ok {
+						if ma.Member.Value == "dataclass" {
+							hasDataclass = true
+						}
+					}
 				}
 			}
 		}
+	}
+
+	if hasDataclass {
+		desugaredBody = desugarDataclass(stmt.Name, desugaredBody)
 	}
 
 	if len(abstractMethods) > 0 {
@@ -1253,4 +1527,206 @@ func desugarClassStatement(stmt *ast.ClassStatement) ast.Statement {
 		Body:       desugaredBody,
 		Methods:    stmt.Methods,
 	}
+}
+
+func desugarDataclass(className *ast.Identifier, body *ast.BlockStatement) *ast.BlockStatement {
+	var fields []string
+	for _, s := range body.Statements {
+		if es, ok := s.(*ast.ExpressionStatement); ok {
+			if assign, ok := es.Expression.(*ast.InfixExpression); ok {
+				if assign.Operator == "=" {
+					if ident, ok := assign.Left.(*ast.Identifier); ok {
+						fields = append(fields, ident.Value)
+					}
+				}
+			}
+		}
+	}
+
+	newStmts := []ast.Statement{}
+
+	if len(fields) > 0 {
+		initParams := []*ast.Identifier{
+			{Token: "self", Value: "self"},
+		}
+		for _, f := range fields {
+			initParams = append(initParams, &ast.Identifier{Token: f, Value: f})
+		}
+
+		initBodyStmts := []ast.Statement{}
+		for _, f := range fields {
+			initBodyStmts = append(initBodyStmts, &ast.ExpressionStatement{
+				Token: "=",
+				Expression: &ast.InfixExpression{
+					Token:    "=",
+					Left:     &ast.MemberAccess{Token: ".", Object: &ast.Identifier{Token: "self", Value: "self"}, Member: &ast.Identifier{Token: f, Value: f}},
+					Operator: "=",
+					Right:    &ast.Identifier{Token: f, Value: f},
+				},
+			})
+		}
+
+		initFn := &ast.FunctionLiteral{
+			Token:      "def",
+			Name:       "__init__",
+			Parameters: initParams,
+			Body:       &ast.BlockStatement{Token: ":", Statements: initBodyStmts},
+			Decorators: []ast.Expression{},
+		}
+		newStmts = append(newStmts, &ast.ExpressionStatement{Token: "def", Expression: initFn})
+
+		reprParts := []ast.Expression{}
+		for i, f := range fields {
+			if i > 0 {
+				reprParts = append(reprParts, &ast.StringLiteral{Token: ", ", Value: ", "})
+			}
+			reprParts = append(reprParts, &ast.StringLiteral{Token: f + "=", Value: f + "="})
+			reprParts = append(reprParts, &ast.CallExpression{
+				Token:     "str",
+				Function:  &ast.Identifier{Token: "str", Value: "str"},
+				Arguments: []ast.Expression{&ast.MemberAccess{Token: ".", Object: &ast.Identifier{Token: "self", Value: "self"}, Member: &ast.Identifier{Token: f, Value: f}}},
+			})
+		}
+
+		reprConcat := reprParts[0]
+		for _, p := range reprParts[1:] {
+			reprConcat = &ast.InfixExpression{
+				Token:    "+",
+				Left:     reprConcat,
+				Operator: "+",
+				Right:    p,
+			}
+		}
+
+		classNameStr := &ast.StringLiteral{Token: className.Value, Value: className.Value + "("}
+		closeStr := &ast.StringLiteral{Token: ")", Value: ")"}
+		fullRepr := &ast.InfixExpression{
+			Token:    "+",
+			Left:     &ast.InfixExpression{Token: "+", Left: classNameStr, Operator: "+", Right: reprConcat},
+			Operator: "+",
+			Right:    closeStr,
+		}
+
+		reprFn := &ast.FunctionLiteral{
+			Token:      "def",
+			Name:       "__repr__",
+			Parameters: []*ast.Identifier{{Token: "self", Value: "self"}},
+			Body:       &ast.BlockStatement{Token: ":", Statements: []ast.Statement{&ast.ReturnStatement{Token: "return", ReturnValue: fullRepr}}},
+			Decorators: []ast.Expression{},
+		}
+		newStmts = append(newStmts, &ast.ExpressionStatement{Token: "def", Expression: reprFn})
+	}
+
+	newStmts = append(newStmts, body.Statements...)
+	return &ast.BlockStatement{Token: body.Token, Statements: newStmts}
+}
+
+func foldConstants(op string, left, right ast.Expression) ast.Expression {
+	leftInt, leftIsInt := left.(*ast.IntegerLiteral)
+	rightInt, rightIsInt := right.(*ast.IntegerLiteral)
+
+	if leftIsInt && rightIsInt {
+		switch op {
+		case "+":
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", leftInt.Value+rightInt.Value), Value: leftInt.Value + rightInt.Value}
+		case "-":
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", leftInt.Value-rightInt.Value), Value: leftInt.Value - rightInt.Value}
+		case "*":
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", leftInt.Value*rightInt.Value), Value: leftInt.Value * rightInt.Value}
+		case "//":
+			if rightInt.Value == 0 {
+				return nil
+			}
+			result := leftInt.Value / rightInt.Value
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", result), Value: result}
+		case "%":
+			if rightInt.Value == 0 {
+				return nil
+			}
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", leftInt.Value%rightInt.Value), Value: leftInt.Value % rightInt.Value}
+		case "**":
+			if rightInt.Value < 0 {
+				return nil
+			}
+			result := int64(1)
+			for i := int64(0); i < rightInt.Value; i++ {
+				result *= leftInt.Value
+			}
+			return &ast.IntegerLiteral{Token: fmt.Sprintf("%d", result), Value: result}
+		case "==":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value == rightInt.Value), Value: leftInt.Value == rightInt.Value}
+		case "!=":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value != rightInt.Value), Value: leftInt.Value != rightInt.Value}
+		case ">":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value > rightInt.Value), Value: leftInt.Value > rightInt.Value}
+		case "<":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value < rightInt.Value), Value: leftInt.Value < rightInt.Value}
+		case ">=":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value >= rightInt.Value), Value: leftInt.Value >= rightInt.Value}
+		case "<=":
+			return &ast.Boolean{Token: fmt.Sprintf("%t", leftInt.Value <= rightInt.Value), Value: leftInt.Value <= rightInt.Value}
+		}
+	}
+
+	leftFloat, leftIsFloat := left.(*ast.FloatLiteral)
+	rightFloat, rightIsFloat := right.(*ast.FloatLiteral)
+
+	if leftIsFloat && rightIsFloat {
+		switch op {
+		case "+":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value+rightFloat.Value), Value: leftFloat.Value + rightFloat.Value}
+		case "-":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value-rightFloat.Value), Value: leftFloat.Value - rightFloat.Value}
+		case "*":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value*rightFloat.Value), Value: leftFloat.Value * rightFloat.Value}
+		case "/":
+			if rightFloat.Value == 0 {
+				return nil
+			}
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value/rightFloat.Value), Value: leftFloat.Value / rightFloat.Value}
+		}
+	}
+
+	if leftIsInt && rightIsFloat {
+		lf := float64(leftInt.Value)
+		switch op {
+		case "+":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", lf+rightFloat.Value), Value: lf + rightFloat.Value}
+		case "-":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", lf-rightFloat.Value), Value: lf - rightFloat.Value}
+		case "*":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", lf*rightFloat.Value), Value: lf * rightFloat.Value}
+		case "/":
+			if rightFloat.Value == 0 {
+				return nil
+			}
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", lf/rightFloat.Value), Value: lf / rightFloat.Value}
+		}
+	}
+
+	if leftIsFloat && rightIsInt {
+		rf := float64(rightInt.Value)
+		switch op {
+		case "+":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value+rf), Value: leftFloat.Value + rf}
+		case "-":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value-rf), Value: leftFloat.Value - rf}
+		case "*":
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value*rf), Value: leftFloat.Value * rf}
+		case "/":
+			if rf == 0 {
+				return nil
+			}
+			return &ast.FloatLiteral{Token: fmt.Sprintf("%g", leftFloat.Value/rf), Value: leftFloat.Value / rf}
+		}
+	}
+
+	leftStr, leftIsStr := left.(*ast.StringLiteral)
+	rightStr, rightIsStr := right.(*ast.StringLiteral)
+
+	if leftIsStr && rightIsStr && op == "+" {
+		return &ast.StringLiteral{Token: leftStr.Value + rightStr.Value, Value: leftStr.Value + rightStr.Value}
+	}
+
+	return nil
 }

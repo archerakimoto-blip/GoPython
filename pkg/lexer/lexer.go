@@ -32,6 +32,17 @@ const (
 	FLOOR_DIV_EQ = "//="
 	POWER    = "**"
 	POWER_EQ = "**="
+	AMPERSAND = "&"
+	PIPE      = "|"
+	CARET     = "^"
+	TILDE     = "~"
+	LSHIFT    = "<<"
+	RSHIFT    = ">>"
+	AMPERSAND_EQ = "&="
+	PIPE_EQ     = "|="
+	CARET_EQ    = "^="
+	LSHIFT_EQ   = "<<="
+	RSHIFT_EQ   = ">>="
 	VAR_ARGS = "VAR_ARGS"
 	KW_ARGS  = "KW_ARGS"
 
@@ -277,6 +288,29 @@ func (l *Lexer) NextToken() Token {
 		} else {
 			tok = newToken(PERCENT, l.ch)
 		}
+	case '&':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: AMPERSAND_EQ, Literal: "&="}
+		} else {
+			tok = newToken(AMPERSAND, l.ch)
+		}
+	case '|':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: PIPE_EQ, Literal: "|="}
+		} else {
+			tok = newToken(PIPE, l.ch)
+		}
+	case '^':
+		if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: CARET_EQ, Literal: "^="}
+		} else {
+			tok = newToken(CARET, l.ch)
+		}
+	case '~':
+		tok = newToken(TILDE, l.ch)
 	case '!':
 		if l.peekChar() == '=' {
 			ch := l.ch
@@ -286,9 +320,25 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(BANG, l.ch)
 		}
 	case '<':
-		tok = newToken(LT, l.ch)
+		if l.peekChar() == '<' {
+			l.readChar()
+			tok = Token{Type: LSHIFT, Literal: "<<"}
+		} else if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: EQ, Literal: "<="}
+		} else {
+			tok = newToken(LT, l.ch)
+		}
 	case '>':
-		tok = newToken(GT, l.ch)
+		if l.peekChar() == '>' {
+			l.readChar()
+			tok = Token{Type: RSHIFT, Literal: ">>"}
+		} else if l.peekChar() == '=' {
+			l.readChar()
+			tok = Token{Type: EQ, Literal: ">="}
+		} else {
+			tok = newToken(GT, l.ch)
+		}
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
 	case '.':
@@ -310,26 +360,60 @@ func (l *Lexer) NextToken() Token {
 	case ']':
 		tok = newToken(RBRACKET, l.ch)
 	case '"':
-		tok.Type = STRING
-		tok.Literal = l.readString('"')
+		if l.peekChar() == '"' && l.peekCharAt(2) == '"' {
+			l.readChar()
+			l.readChar()
+			tok.Type = STRING
+			tok.Literal = l.readTripleString('"')
+			l.readChar()
+		} else {
+			tok.Type = STRING
+			tok.Literal = l.readString('"')
+		}
 	case '\'':
-		tok.Type = STRING
-		tok.Literal = l.readString('\'')
+		if l.peekChar() == '\'' && l.peekCharAt(2) == '\'' {
+			l.readChar()
+			l.readChar()
+			tok.Type = STRING
+			tok.Literal = l.readTripleString('\'')
+			l.readChar()
+		} else {
+			tok.Type = STRING
+			tok.Literal = l.readString('\'')
+		}
 	case '#':
 		l.skipComment()
 		return l.NextToken()
 	case 'r':
 		if l.peekChar() == '"' {
+			if l.peekCharAt(2) == '"' && l.peekCharAt(3) == '"' {
+				l.readChar()
+				l.readChar()
+				l.readChar()
+				tok.Type = RSTRING
+				tok.Literal = l.readTripleStringRaw('"')
+				l.readChar()
+				return tok
+			}
 			l.readChar()
 			tok.Type = RSTRING
-			tok.Literal = l.readString('"')
+			tok.Literal = l.readStringRaw('"')
 			l.readChar()
 			return tok
 		}
 		if l.peekChar() == '\'' {
+			if l.peekCharAt(2) == '\'' && l.peekCharAt(3) == '\'' {
+				l.readChar()
+				l.readChar()
+				l.readChar()
+				tok.Type = RSTRING
+				tok.Literal = l.readTripleStringRaw('\'')
+				l.readChar()
+				return tok
+			}
 			l.readChar()
 			tok.Type = RSTRING
-			tok.Literal = l.readString('\'')
+			tok.Literal = l.readStringRaw('\'')
 			l.readChar()
 			return tok
 		}
@@ -338,6 +422,15 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	case 'f':
 		if l.peekChar() == '"' {
+			if l.peekCharAt(2) == '"' && l.peekCharAt(3) == '"' {
+				l.readChar()
+				l.readChar()
+				l.readChar()
+				tok.Type = FSTRING
+				tok.Literal = l.readTripleString('"')
+				l.readChar()
+				return tok
+			}
 			l.readChar()
 			tok.Type = FSTRING
 			tok.Literal = l.readString('"')
@@ -345,6 +438,15 @@ func (l *Lexer) NextToken() Token {
 			return tok
 		}
 		if l.peekChar() == '\'' {
+			if l.peekCharAt(2) == '\'' && l.peekCharAt(3) == '\'' {
+				l.readChar()
+				l.readChar()
+				l.readChar()
+				tok.Type = FSTRING
+				tok.Literal = l.readTripleString('\'')
+				l.readChar()
+				return tok
+			}
 			l.readChar()
 			tok.Type = FSTRING
 			tok.Literal = l.readString('\'')
@@ -389,6 +491,14 @@ func (l *Lexer) peekChar() byte {
 		return 0
 	}
 	return l.input[l.readPosition]
+}
+
+func (l *Lexer) peekCharAt(offset int) byte {
+	pos := l.readPosition + offset - 1
+	if pos >= len(l.input) {
+		return 0
+	}
+	return l.input[pos]
 }
 
 func (l *Lexer) readIdentifier() string {
@@ -449,6 +559,79 @@ func (l *Lexer) readString(quote byte) string {
 			continue
 		}
 		if l.ch == quote {
+			break
+		}
+		result = append(result, l.ch)
+	}
+	return string(result)
+}
+
+func (l *Lexer) readTripleString(quote byte) string {
+	var result []byte
+	for {
+		l.readChar()
+		if l.ch == 0 {
+			break
+		}
+		if l.ch == '\\' {
+			l.readChar()
+			switch l.ch {
+			case 'n':
+				result = append(result, '\n')
+			case 't':
+				result = append(result, '\t')
+			case 'r':
+				result = append(result, '\r')
+			case '\\':
+				result = append(result, '\\')
+			case '\'':
+				result = append(result, '\'')
+			case '"':
+				result = append(result, '"')
+			case '0':
+				result = append(result, 0)
+			case '\n':
+			default:
+				result = append(result, '\\')
+				result = append(result, l.ch)
+			}
+			continue
+		}
+		if l.ch == quote && l.peekChar() == quote && l.peekCharAt(2) == quote {
+			l.readChar()
+			l.readChar()
+			break
+		}
+		result = append(result, l.ch)
+	}
+	return string(result)
+}
+
+func (l *Lexer) readStringRaw(quote byte) string {
+	var result []byte
+	for {
+		l.readChar()
+		if l.ch == 0 {
+			break
+		}
+		if l.ch == quote {
+			break
+		}
+		result = append(result, l.ch)
+	}
+	return string(result)
+}
+
+func (l *Lexer) readTripleStringRaw(quote byte) string {
+	var result []byte
+	for {
+		l.readChar()
+		if l.ch == 0 {
+			break
+		}
+		if l.ch == quote && l.peekChar() == quote && l.peekCharAt(2) == quote {
+			l.readChar()
+			l.readChar()
 			break
 		}
 		result = append(result, l.ch)

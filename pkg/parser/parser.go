@@ -35,9 +35,16 @@ var precedences = map[lexer.TokenType]int{
 	lexer.GT:       LESSGREATER,
 	lexer.PLUS:     SUM,
 	lexer.MINUS:    SUM,
-	lexer.SLASH:    PRODUCT,
-	lexer.ASTERISK: PRODUCT,
-	lexer.LPAREN:   CALL,
+	lexer.SLASH:     PRODUCT,
+	lexer.ASTERISK:  PRODUCT,
+	lexer.PERCENT:   PRODUCT,
+	lexer.FLOOR_DIV: PRODUCT,
+	lexer.LSHIFT:    PRODUCT,
+	lexer.RSHIFT:    PRODUCT,
+	lexer.AMPERSAND: SUM,
+	lexer.CARET:     SUM,
+	lexer.PIPE:      SUM,
+	lexer.LPAREN:    CALL,
 	lexer.LBRACKET: INDEX,
 	lexer.AND:      AND,
 	lexer.OR:       OR,
@@ -75,6 +82,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
+	p.registerPrefix(lexer.TILDE, p.parsePrefixExpression)
 	p.registerPrefix(lexer.TRUE, p.parseBoolean)
 	p.registerPrefix(lexer.FALSE, p.parseBoolean)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
@@ -111,6 +119,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.PERCENT, p.parseInfixExpression)
 	p.registerInfix(lexer.FLOOR_DIV, p.parseInfixExpression)
 	p.registerInfix(lexer.POWER, p.parseInfixExpression)
+	p.registerInfix(lexer.AMPERSAND, p.parseInfixExpression)
+	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
+	p.registerInfix(lexer.CARET, p.parseInfixExpression)
+	p.registerInfix(lexer.LSHIFT, p.parseInfixExpression)
+	p.registerInfix(lexer.RSHIFT, p.parseInfixExpression)
 	p.registerInfix(lexer.EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.LT, p.parseInfixExpression)
@@ -713,8 +726,23 @@ func (p *Parser) parseFStringLiteral() ast.Expression {
 					return nil
 				}
 				exprStr := s[start : i-1] // without the closing }
-				// Now parse exprStr into an Expression using parser!
-				// We need to create a new lexer and parser for exprStr
+				var formatSpec string
+				colonIdx := -1
+				fmtDepth := 0
+				for j := 0; j < len(exprStr); j++ {
+					if exprStr[j] == '{' {
+						fmtDepth++
+					} else if exprStr[j] == '}' {
+						fmtDepth--
+					} else if exprStr[j] == ':' && fmtDepth == 0 {
+						colonIdx = j
+						break
+					}
+				}
+				if colonIdx >= 0 {
+					formatSpec = exprStr[colonIdx+1:]
+					exprStr = exprStr[:colonIdx]
+				}
 				subLexer := lexer.New(exprStr)
 				subParser := New(subLexer)
 				subProgram := subParser.ParseProgram()
@@ -724,7 +752,15 @@ func (p *Parser) parseFStringLiteral() ast.Expression {
 				}
 				if len(subProgram.Statements) > 0 {
 					if exprStmt, ok := subProgram.Statements[0].(*ast.ExpressionStatement); ok {
-						fsl.Parts = append(fsl.Parts, exprStmt.Expression)
+						if formatSpec != "" {
+							fsl.Parts = append(fsl.Parts, &ast.FormattedExpression{
+								Token:      exprStr,
+								Expression: exprStmt.Expression,
+								FormatSpec: formatSpec,
+							})
+						} else {
+							fsl.Parts = append(fsl.Parts, exprStmt.Expression)
+						}
 					}
 				}
 			}
@@ -1002,6 +1038,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 
 func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 	lit.Parameters = []*ast.Identifier{}
+	lit.Defaults = []ast.Expression{}
 
 	if p.peekTokenIs(lexer.RPAREN) {
 		p.nextToken()
@@ -1059,6 +1096,8 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 		}
 	}
 
+	numParamsWithoutDefault := 0
+
 	for !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.COMMA) {
 		if p.peekTokenIs(lexer.ASTERISK) {
 			p.nextToken()
@@ -1074,26 +1113,26 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-			// 保存参数名
 			paramName := p.curToken.Literal
 			paramToken := p.curToken.Literal
 
-			// 检查是否有类型注解 (x: int)
 			if p.peekTokenIs(lexer.COLON) {
-				p.nextToken() // 跳过冒号
-				// 跳过类型表达式（简单实现：跳过直到遇到逗号、右括号或等号）
+				p.nextToken()
 				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
 					p.nextToken()
 				}
 			}
 
-			// 检查是否有默认值 (x: int = 5 或 x = 5)
 			if p.peekTokenIs(lexer.ASSIGN) {
-				p.nextToken() // 跳过 =
-				// 跳过默认值表达式
-				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
-					p.nextToken()
+				p.nextToken()
+				defaultValue := p.parseExpression(LOWEST)
+				lit.Defaults = append(lit.Defaults, defaultValue)
+				for i := 0; i < numParamsWithoutDefault; i++ {
+					lit.Defaults = append([]ast.Expression{nil}, lit.Defaults...)
 				}
+				numParamsWithoutDefault = 0
+			} else {
+				numParamsWithoutDefault++
 			}
 
 			ident := &ast.Identifier{Token: paramToken, Value: paramName}
@@ -1121,26 +1160,26 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-			// 保存参数名
 			paramName := p.curToken.Literal
 			paramToken := p.curToken.Literal
 
-			// 检查是否有类型注解 (x: int)
 			if p.peekTokenIs(lexer.COLON) {
-				p.nextToken() // 跳过冒号
-				// 跳过类型表达式
+				p.nextToken()
 				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
 					p.nextToken()
 				}
 			}
 
-			// 检查是否有默认值 (x: int = 5 或 x = 5)
 			if p.peekTokenIs(lexer.ASSIGN) {
-				p.nextToken() // 跳过 =
-				// 跳过默认值表达式
-				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
-					p.nextToken()
+				p.nextToken()
+				defaultValue := p.parseExpression(LOWEST)
+				lit.Defaults = append(lit.Defaults, defaultValue)
+				for i := 0; i < numParamsWithoutDefault; i++ {
+					lit.Defaults = append([]ast.Expression{nil}, lit.Defaults...)
 				}
+				numParamsWithoutDefault = 0
+			} else {
+				numParamsWithoutDefault++
 			}
 
 			ident := &ast.Identifier{Token: paramToken, Value: paramName}
@@ -1220,6 +1259,55 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 		p.nextToken()
 		comp.Iterable = p.parseExpression(LOWEST)
+
+		comp.Clauses = append(comp.Clauses, &ast.ComprehensionFor{
+			Variable: comp.Variable,
+			Iterable: comp.Iterable,
+		})
+
+		for p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+			if !p.curTokenIs(lexer.FOR) {
+				p.nextToken()
+			}
+			if !p.curTokenIs(lexer.FOR) {
+				break
+			}
+			p.nextToken()
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected IDENT after FOR")
+				return nil
+			}
+			varName := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+
+			if !p.curTokenIs(lexer.IN) {
+				p.errors = append(p.errors, "expected IN after variable")
+				return nil
+			}
+			p.nextToken()
+			iterExpr := p.parseExpression(LOWEST)
+
+			comp.Clauses = append(comp.Clauses, &ast.ComprehensionFor{
+				Variable: varName,
+				Iterable: iterExpr,
+			})
+		}
+
+		for p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+			if !p.curTokenIs(lexer.IF) {
+				p.nextToken()
+			}
+			if !p.curTokenIs(lexer.IF) {
+				break
+			}
+			p.nextToken()
+			filterExpr := p.parseExpression(LOWEST)
+			comp.Filters = append(comp.Filters, filterExpr)
+			if comp.Filter == nil {
+				comp.Filter = filterExpr
+			}
+		}
 
 		// Consume closing ]
 		if p.curTokenIs(lexer.RBRACKET) {
@@ -1828,6 +1916,11 @@ func (p *Parser) parseRaiseStatement() *ast.RaiseStatement {
 		stmt.Expression = p.parseExpression(LOWEST)
 	}
 
+	if p.curTokenIs(lexer.FROM) {
+		p.nextToken()
+		stmt.From = p.parseExpression(LOWEST)
+	}
+
 	return stmt
 }
 
@@ -1873,7 +1966,20 @@ func (p *Parser) parseExceptClause() *ast.ExceptClause {
 			p.nextToken()
 		}
 	} else if !p.curTokenIs(lexer.COLON) {
-		clause.Type = p.parseExpression(LOWEST)
+		if p.curTokenIs(lexer.LPAREN) {
+			p.nextToken()
+			clause.Types = append(clause.Types, p.parseExpression(LOWEST))
+			for p.peekTokenIs(lexer.COMMA) {
+				p.nextToken()
+				p.nextToken()
+				clause.Types = append(clause.Types, p.parseExpression(LOWEST))
+			}
+			if !p.expectPeek(lexer.RPAREN) {
+				return nil
+			}
+		} else {
+			clause.Type = p.parseExpression(LOWEST)
+		}
 		if p.curTokenIs(lexer.AS) {
 			p.nextToken()
 			if p.curTokenIs(lexer.IDENT) {

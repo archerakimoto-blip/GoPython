@@ -817,6 +817,13 @@ func (c *Compiler) registerBuiltins() {
 			if len(args) < 1 {
 				return objects.NewError("format() takes at least 1 argument")
 			}
+			if len(args) >= 2 {
+				spec, ok := args[1].(*objects.String)
+				if !ok {
+					return objects.NewError("format() second argument must be a string")
+				}
+				return formatValue(args[0], spec.Value)
+			}
 			template, ok := args[0].(*objects.String)
 			if !ok {
 				return objects.NewError("format() first argument must be a string")
@@ -1085,6 +1092,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		// 执行格式化操作
 		c.emit(OpFormatString, partsCount)
+
+	case *ast.FormattedExpression:
+		err := c.Compile(node.Expression)
+		if err != nil {
+			return err
+		}
+		c.emit(OpConstant, c.addConstant(&objects.String{Value: node.FormatSpec}))
+		c.emit(OpCall, 2)
 
 	case *ast.Boolean:
 		if node.Value {
@@ -1570,6 +1585,45 @@ func (c *Compiler) Compile(node ast.Node) error {
 	}
 
 	return nil
+}
+
+func formatValue(obj objects.Object, spec string) *objects.String {
+	switch v := obj.(type) {
+	case *objects.Integer:
+		if spec == "" {
+			return &objects.String{Value: fmt.Sprintf("%d", v.Value)}
+		}
+		return &objects.String{Value: formatInteger(v.Value, spec)}
+	case *objects.Float:
+		if spec == "" {
+			return &objects.String{Value: fmt.Sprintf("%g", v.Value)}
+		}
+		return &objects.String{Value: formatFloat(v.Value, spec)}
+	case *objects.String:
+		if spec == "" {
+			return v
+		}
+		return &objects.String{Value: formatString(v.Value, spec)}
+	case *objects.Boolean:
+		if v.Value {
+			return &objects.String{Value: "True"}
+		}
+		return &objects.String{Value: "False"}
+	default:
+		return &objects.String{Value: obj.Inspect()}
+	}
+}
+
+func formatInteger(val int64, spec string) string {
+	return fmt.Sprintf("%"+spec, val)
+}
+
+func formatFloat(val float64, spec string) string {
+	return fmt.Sprintf("%"+spec, val)
+}
+
+func formatString(val string, spec string) string {
+	return fmt.Sprintf("%"+spec, val)
 }
 
 func (c *Compiler) hasYieldInBody(node ast.Node) bool {

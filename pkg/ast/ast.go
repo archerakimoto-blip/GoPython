@@ -80,6 +80,21 @@ type FStringLiteral struct {
 	Parts []Expression
 }
 
+type FormattedExpression struct {
+	Token      string
+	Expression Expression
+	FormatSpec string
+}
+
+func (fe *FormattedExpression) expressionNode()      {}
+func (fe *FormattedExpression) TokenLiteral() string { return fe.Token }
+func (fe *FormattedExpression) String() string {
+	if fe.FormatSpec != "" {
+		return "{" + fe.Expression.String() + ":" + fe.FormatSpec + "}"
+	}
+	return "{" + fe.Expression.String() + "}"
+}
+
 func (fsl *FStringLiteral) expressionNode()      {}
 func (fsl *FStringLiteral) TokenLiteral() string { return fsl.Token }
 func (fsl *FStringLiteral) String() string {
@@ -190,6 +205,7 @@ type FunctionLiteral struct {
 	Token      string
 	Name       string
 	Parameters []*Identifier
+	Defaults   []Expression
 	Body       *BlockStatement
 	VarArgs    *Identifier
 	KwArgs     *Identifier
@@ -456,12 +472,19 @@ func (le *LambdaExpression) String() string {
 	return out.String()
 }
 
+type ComprehensionFor struct {
+	Variable *Identifier
+	Iterable Expression
+}
+
 type ListComprehension struct {
 	Token    string
 	Element  Expression
 	Variable *Identifier
 	Iterable Expression
 	Filter   Expression
+	Clauses  []*ComprehensionFor
+	Filters  []Expression
 }
 
 func (lc *ListComprehension) expressionNode()      {}
@@ -842,6 +865,7 @@ type TryStatement struct {
 type ExceptClause struct {
 	Token string
 	Type  Expression
+	Types []Expression
 	Name  *Identifier
 	Body  *BlockStatement
 }
@@ -877,12 +901,16 @@ func (ts *TryStatement) String() string {
 type RaiseStatement struct {
 	Token       string
 	Expression  Expression
+	From        Expression
 }
 
 func (rs *RaiseStatement) statementNode()       {}
 func (rs *RaiseStatement) TokenLiteral() string { return rs.Token }
 func (rs *RaiseStatement) String() string {
 	if rs.Expression != nil {
+		if rs.From != nil {
+			return "raise " + rs.Expression.String() + " from " + rs.From.String()
+		}
 		return "raise " + rs.Expression.String()
 	}
 	return "raise"

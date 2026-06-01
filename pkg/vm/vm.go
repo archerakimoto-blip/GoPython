@@ -231,7 +231,79 @@ func (vm *VM) Run() error {
 				}
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower:
+		case compiler.OpAdd:
+			if vm.sp >= 2 {
+				left := vm.stack[vm.sp-2]
+				right := vm.stack[vm.sp-1]
+				if leftInt, ok := left.(*objects.Integer); ok {
+					if rightInt, ok := right.(*objects.Integer); ok {
+						vm.stack[vm.sp-2] = &objects.Integer{Value: leftInt.Value + rightInt.Value}
+						vm.sp--
+						goto nextInstruction
+					}
+				}
+			}
+			err := vm.executeBinaryOperation(op)
+			if err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				caught := vm.raiseException(errObj)
+				if !caught {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpSub:
+			if vm.sp >= 2 {
+				left := vm.stack[vm.sp-2]
+				right := vm.stack[vm.sp-1]
+				if leftInt, ok := left.(*objects.Integer); ok {
+					if rightInt, ok := right.(*objects.Integer); ok {
+						vm.stack[vm.sp-2] = &objects.Integer{Value: leftInt.Value - rightInt.Value}
+						vm.sp--
+						goto nextInstruction
+					}
+				}
+			}
+			err := vm.executeBinaryOperation(op)
+			if err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				caught := vm.raiseException(errObj)
+				if !caught {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpMul:
+			if vm.sp >= 2 {
+				left := vm.stack[vm.sp-2]
+				right := vm.stack[vm.sp-1]
+				if leftInt, ok := left.(*objects.Integer); ok {
+					if rightInt, ok := right.(*objects.Integer); ok {
+						vm.stack[vm.sp-2] = &objects.Integer{Value: leftInt.Value * rightInt.Value}
+						vm.sp--
+						goto nextInstruction
+					}
+				}
+			}
+			err := vm.executeBinaryOperation(op)
+			if err != nil {
+				return err
+			}
+			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
+				errObj := vm.stack[vm.sp-1]
+				caught := vm.raiseException(errObj)
+				if !caught {
+					return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+				}
+			}
+
+		case compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower:
 			err := vm.executeBinaryOperation(op)
 			if err != nil {
 				return err
@@ -925,6 +997,8 @@ func (vm *VM) Run() error {
 			vm.popFrame()
 			vm.push(gen)
 	}
+
+	nextInstruction:
 	}
 
 	return nil
@@ -1553,6 +1627,8 @@ func (vm *VM) getNativeAttribute(obj objects.Object, attrName string) (objects.O
 		return vm.getListAttribute(o, attrName)
 	case *objects.Dict:
 		return vm.getDictAttribute(o, attrName)
+	case *objects.Integer:
+		return vm.getIntegerAttribute(o, attrName)
 	}
 	return nil, false
 }
@@ -1942,6 +2018,109 @@ func (vm *VM) getDictAttribute(d *objects.Dict, attrName string) (objects.Object
 					dictObj.Keys[keyStr] = key
 				}
 				return objects.None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func (vm *VM) getIntegerAttribute(i *objects.Integer, attrName string) (objects.Object, bool) {
+	switch attrName {
+	case "__and__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__and__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__and__ takes exactly one argument")
+				}
+				right, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("__and__ argument must be an integer")
+				}
+				return &objects.Integer{Value: self.(*objects.Integer).Value & right.Value}
+			},
+		}, true
+	case "__or__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__or__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__or__ takes exactly one argument")
+				}
+				right, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("__or__ argument must be an integer")
+				}
+				return &objects.Integer{Value: self.(*objects.Integer).Value | right.Value}
+			},
+		}, true
+	case "__xor__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__xor__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__xor__ takes exactly one argument")
+				}
+				right, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("__xor__ argument must be an integer")
+				}
+				return &objects.Integer{Value: self.(*objects.Integer).Value ^ right.Value}
+			},
+		}, true
+	case "__lshift__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__lshift__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__lshift__ takes exactly one argument")
+				}
+				right, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("__lshift__ argument must be an integer")
+				}
+				return &objects.Integer{Value: self.(*objects.Integer).Value << uint(right.Value)}
+			},
+		}, true
+	case "__rshift__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__rshift__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__rshift__ takes exactly one argument")
+				}
+				right, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("__rshift__ argument must be an integer")
+				}
+				return &objects.Integer{Value: self.(*objects.Integer).Value >> uint(right.Value)}
+			},
+		}, true
+	case "__invert__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__invert__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 0 {
+					return objects.NewError("__invert__ takes no arguments")
+				}
+				return &objects.Integer{Value: ^self.(*objects.Integer).Value}
+			},
+		}, true
+	case "__contains__":
+		return &objects.NativeMethod{
+			Object:     i,
+			MethodName: "__contains__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__contains__ takes exactly one argument")
+				}
+				return objects.NewError("'int' object has no attribute '__contains__'")
 			},
 		}, true
 	}
