@@ -33,6 +33,9 @@ const (
 	MODULE_OBJ       ObjectType = "MODULE"
 	ASYNC_OBJ         ObjectType = "ASYNC"
 	FUTURE_OBJ         ObjectType = "FUTURE"
+	NATIVE_METHOD_OBJ  ObjectType = "NATIVE_METHOD"
+	RANGE_OBJ         ObjectType = "RANGE"
+	BOUNDMETHOD_OBJ   ObjectType = "BOUNDMETHOD"
 )
 
 type Object interface {
@@ -508,6 +511,63 @@ var (
 	False = &Boolean{Value: false}
 	None_ = &None{}
 )
+
+type NativeMethod struct {
+	Object   Object
+	MethodName string
+	Fn      func(Object, ...Object) Object
+}
+
+func (nm *NativeMethod) Type() ObjectType { return NATIVE_METHOD_OBJ }
+func (nm *NativeMethod) Inspect() string  { return fmt.Sprintf("<native method %s>", nm.MethodName) }
+
+type Range struct {
+	Start int64
+	Stop  int64
+	Step  int64
+}
+
+func NewRange(start, stop, step int64) *Range {
+	return &Range{Start: start, Stop: stop, Step: step}
+}
+
+func (r *Range) Type() ObjectType { return RANGE_OBJ }
+func (r *Range) Inspect() string  { return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step) }
+
+func (r *Range) Len() int64 {
+	if r.Step > 0 {
+		if r.Stop <= r.Start {
+			return 0
+		}
+		return (r.Stop - r.Start + r.Step - 1) / r.Step
+	}
+	if r.Stop >= r.Start {
+		return 0
+	}
+	return (r.Start - r.Stop - r.Step - 1) / (-r.Step)
+}
+
+func (r *Range) ToList() *List {
+	elements := []Object{}
+	if r.Step > 0 {
+		for i := r.Start; i < r.Stop; i += r.Step {
+			elements = append(elements, &Integer{Value: i})
+		}
+	} else {
+		for i := r.Start; i > r.Stop; i += r.Step {
+			elements = append(elements, &Integer{Value: i})
+		}
+	}
+	return &List{Elements: elements}
+}
+
+type BoundMethod struct {
+	Self Object
+	Fn   Object
+}
+
+func (bm *BoundMethod) Type() ObjectType { return BOUNDMETHOD_OBJ }
+func (bm *BoundMethod) Inspect() string  { return fmt.Sprintf("<bound method %v of %v>", bm.Fn, bm.Self) }
 
 func newErrorWithType(errorType, format string, a ...interface{}) *Error {
 	return &Error{

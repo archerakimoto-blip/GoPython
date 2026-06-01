@@ -236,9 +236,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	case *ast.ForStatement:
 		return desugarForToWhile(s)
 	case *ast.BreakStatement:
-		return nil
+		return s
 	case *ast.ContinueStatement:
-		return nil
+		return s
 	case *ast.TryStatement:
 		// 对 try 语句进行脱糖处理：脱糖 body、excepts 和 finally
 		desugaredTry := &ast.TryStatement{
@@ -319,6 +319,8 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		return s
 	case *ast.DeleteStatement:
 		return desugarDeleteStatement(s)
+	case *ast.AssertStatement:
+		return desugarAssertStatement(s)
 	case *ast.YieldFromStatement:
 		return desugarYieldFromStatement(s)
 	case *ast.AsyncForStatement:
@@ -326,14 +328,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	case *ast.AsyncWithStatement:
 		return desugarAsyncWithStatement(s)
 	case *ast.ClassStatement:
-		desugaredClass := &ast.ClassStatement{
-			Token:       s.Token,
-			Name:        s.Name,
-			SuperClass:  s.SuperClass,
-			Body:        desugarBlockStatement(s.Body),
-			Methods:     s.Methods,
-		}
-		return desugaredClass
+		return desugarClassStatement(s)
 	default:
 		return stmt
 	}
@@ -447,7 +442,70 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			return desugarExpression(andExpr)
 		}
 
-		// 检查是否是 AND 或 OR，特殊处理
+		if e.Operator == "is" {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			return &ast.InfixExpression{
+				Token:    e.Token,
+				Left: &ast.CallExpression{
+					Token:     "id",
+					Function:  &ast.Identifier{Token: "id", Value: "id"},
+					Arguments: []ast.Expression{left},
+				},
+				Operator: "==",
+				Right: &ast.CallExpression{
+					Token:     "id",
+					Function:  &ast.Identifier{Token: "id", Value: "id"},
+					Arguments: []ast.Expression{right},
+				},
+			}
+		}
+
+		if e.Operator == "is not" {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			return &ast.InfixExpression{
+				Token:    e.Token,
+				Left: &ast.CallExpression{
+					Token:     "id",
+					Function:  &ast.Identifier{Token: "id", Value: "id"},
+					Arguments: []ast.Expression{left},
+				},
+				Operator: "!=",
+				Right: &ast.CallExpression{
+					Token:     "id",
+					Function:  &ast.Identifier{Token: "id", Value: "id"},
+					Arguments: []ast.Expression{right},
+				},
+			}
+		}
+
+		if e.Operator == "in" {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			return &ast.CallExpression{
+				Token:     "__contains__",
+				Function:  &ast.MemberAccess{Token: ".", Object: right, Member: &ast.Identifier{Token: "__contains__", Value: "__contains__"}},
+				Arguments: []ast.Expression{left},
+			}
+		}
+
+		if e.Operator == "not in" {
+			left := desugarExpression(e.Left)
+			right := desugarExpression(e.Right)
+			containsCall := &ast.CallExpression{
+				Token:     "__contains__",
+				Function:  &ast.MemberAccess{Token: ".", Object: right, Member: &ast.Identifier{Token: "__contains__", Value: "__contains__"}},
+				Arguments: []ast.Expression{left},
+			}
+			return &ast.PrefixExpression{
+				Token:    "not",
+				Operator: "not",
+				Right:    containsCall,
+			}
+		}
+
+	// 检查是否是 AND 或 OR，特殊处理
 		if e.Operator == "and" {
 			// a AND b -> if a then b else a
 			left := desugarExpression(e.Left)
@@ -746,16 +804,38 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 		},
 	}
 
-	loopBodyStmts := []ast.Statement{
-		&ast.AssignStatement{
+	elementAccess := &ast.IndexExpression{
+		Token: "[",
+		Left:  iterable,
+		Index: indexVar,
+	}
+
+	loopBodyStmts := []ast.Statement{}
+
+	if len(forStmt.Values) > 1 {
+		tempVar := &ast.Identifier{Token: "_elem", Value: "_elem"}
+		loopBodyStmts = append(loopBodyStmts, &ast.LetStatement{
+			Token: "let",
+			Names: []*ast.Identifier{tempVar},
+			Value: elementAccess,
+		})
+		for i, v := range forStmt.Values {
+			loopBodyStmts = append(loopBodyStmts, &ast.AssignStatement{
+				Token: "=",
+				Names: []*ast.Identifier{v},
+				Value: &ast.IndexExpression{
+					Token: "[",
+					Left:  tempVar,
+					Index: &ast.IntegerLiteral{Token: string(rune('0' + i)), Value: int64(i)},
+				},
+			})
+		}
+	} else {
+		loopBodyStmts = append(loopBodyStmts, &ast.AssignStatement{
 			Token: "=",
 			Names: []*ast.Identifier{forStmt.Value},
-			Value: &ast.IndexExpression{
-				Token: "[",
-				Left:  iterable,
-				Index: indexVar,
-			},
-		},
+			Value: elementAccess,
+		})
 	}
 
 	loopBodyStmts = append(loopBodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
@@ -927,21 +1007,17 @@ func desugarMixedDictLiteral(elements []ast.Expression) ast.Expression {
 }
 
 // desugarDeleteStatement 脱糖 del 语句
-// 对于简单变量，我们直接保留它，因为删除操作在运行时处理
-// 对于下标访问和成员访问，我们转换为 __delitem__ 和 __delattr__ 调用
 func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 	desugaredStmts := make([]ast.Statement, 0, len(stmt.Targets))
 
 	for _, target := range stmt.Targets {
 		switch t := desugarExpression(target).(type) {
 		case *ast.Identifier:
-			// 简单标识符，保留原样
 			desugaredStmts = append(desugaredStmts, &ast.DeleteStatement{
 				Token:   stmt.Token,
 				Targets: []ast.Expression{t},
 			})
 		case *ast.IndexExpression:
-			// 下标访问：del x[y] -> x.__delitem__(y)
 			desugaredStmts = append(desugaredStmts, &ast.ExpressionStatement{
 				Expression: &ast.CallExpression{
 					Token: "__delitem__",
@@ -954,7 +1030,6 @@ func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 				},
 			})
 		case *ast.MemberAccess:
-			// 成员访问：del x.y -> x.__delattr__(y)
 			desugaredStmts = append(desugaredStmts, &ast.ExpressionStatement{
 				Expression: &ast.CallExpression{
 					Token: "__delattr__",
@@ -967,7 +1042,6 @@ func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 				},
 			})
 		default:
-			// 其他情况，保留原样
 			desugaredStmts = append(desugaredStmts, &ast.DeleteStatement{
 				Token:   stmt.Token,
 				Targets: []ast.Expression{t},
@@ -982,6 +1056,51 @@ func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 	return &ast.BlockStatement{
 		Token:      stmt.Token,
 		Statements: desugaredStmts,
+	}
+}
+
+func desugarAssertStatement(stmt *ast.AssertStatement) ast.Statement {
+	test := desugarExpression(stmt.Test)
+
+	var raiseArg ast.Expression
+	if stmt.Message != nil {
+		raiseArg = desugarExpression(stmt.Message)
+	} else {
+		raiseArg = &ast.StringLiteral{Token: "assertion error", Value: "AssertionError"}
+	}
+
+	raiseExpr := &ast.CallExpression{
+		Token:     "AssertionError",
+		Function:  &ast.Identifier{Token: "AssertionError", Value: "AssertionError"},
+		Arguments: []ast.Expression{raiseArg},
+	}
+
+	raiseStmt := &ast.RaiseStatement{
+		Token:      "raise",
+		Expression: raiseExpr,
+	}
+
+	notTest := &ast.PrefixExpression{
+		Token:    "not",
+		Operator: "not",
+		Right:    test,
+	}
+
+	ifBody := &ast.BlockStatement{
+		Token:      ":",
+		Statements: []ast.Statement{raiseStmt},
+	}
+
+	ifExpr := &ast.IfExpression{
+		Token:       "if",
+		Condition:   notTest,
+		Consequence: ifBody,
+		Alternative: nil,
+	}
+
+	return &ast.ExpressionStatement{
+		Token:      stmt.Token,
+		Expression: ifExpr,
 	}
 }
 
@@ -1070,4 +1189,68 @@ func desugarAsyncWithStatement(stmt *ast.AsyncWithStatement) ast.Statement {
 	}
 
 	return nestedStatement
+}
+
+func desugarClassStatement(stmt *ast.ClassStatement) ast.Statement {
+	desugaredBody := desugarBlockStatement(stmt.Body)
+
+	var abstractMethods []string
+	for _, s := range desugaredBody.Statements {
+		if es, ok := s.(*ast.ExpressionStatement); ok {
+			if fn, ok := es.Expression.(*ast.FunctionLiteral); ok {
+				for _, dec := range fn.Decorators {
+					if ident, ok := dec.(*ast.Identifier); ok && ident.Value == "abstractmethod" {
+						abstractMethods = append(abstractMethods, fn.Name)
+					}
+				}
+			}
+		}
+	}
+
+	if len(abstractMethods) > 0 {
+		getattrChecks := []ast.Statement{}
+		for _, methodName := range abstractMethods {
+			check := &ast.IfExpression{
+				Token: "if",
+				Condition: &ast.InfixExpression{
+					Token:    "==",
+					Left:     &ast.Identifier{Token: "name", Value: "name"},
+					Operator: "==",
+					Right:    &ast.StringLiteral{Token: methodName, Value: methodName},
+				},
+				Consequence: &ast.BlockStatement{
+					Token: ":",
+					Statements: []ast.Statement{
+						&ast.RaiseStatement{
+							Token: "raise",
+							Expression: &ast.CallExpression{
+								Token:     "NotImplementedError",
+								Function:  &ast.Identifier{Token: "NotImplementedError", Value: "NotImplementedError"},
+								Arguments: []ast.Expression{&ast.StringLiteral{Token: "", Value: "Abstract method '" + methodName + "' not implemented"}},
+							},
+						},
+					},
+				},
+				Alternative: nil,
+			}
+			getattrChecks = append(getattrChecks, &ast.ExpressionStatement{
+				Token:      "if",
+				Expression: check,
+			})
+		}
+
+		getattrChecks = append(getattrChecks, desugaredBody.Statements...)
+		desugaredBody = &ast.BlockStatement{
+			Token:      stmt.Token,
+			Statements: getattrChecks,
+		}
+	}
+
+	return &ast.ClassStatement{
+		Token:      stmt.Token,
+		Name:       stmt.Name,
+		SuperClass: stmt.SuperClass,
+		Body:       desugaredBody,
+		Methods:    stmt.Methods,
+	}
 }

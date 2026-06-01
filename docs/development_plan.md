@@ -379,27 +379,34 @@ class C:
 
 ## 计划中
 
-### v0.4 — 高影响力低难度特性（脱糖层快赢）
+### v0.4 — 高影响力低难度特性（脱糖层快赢）✅ 已完成
 
 目标：快速补齐最高频缺失特性，全部通过脱糖层实现，不增加内核复杂度。
 
-- [ ] P1-1：`assert` 语句脱糖 — `assert expr, msg` → `if not expr: raise AssertionError(msg)`
-- [ ] P1-2：`in`/`not in` 运算符脱糖 — `x in y` → `y.__contains__(x)`
-- [ ] P1-3：`is`/`is not` 运算符脱糖 — `x is y` → `id(x) == id(y)`
-- [ ] P1-13：负数索引脱糖 — `a[-1]` → `a[len(a) + (-1)]`
-- [ ] P1-12：for 循环元组解包脱糖 — `for x, y in pairs` → 索引访问
-- [ ] P1-9：`@abstractmethod` 装饰器脱糖
+- [x] P1-1：`assert` 语句脱糖 — `assert expr, msg` → `if not expr: raise AssertionError(msg)`
+- [x] P1-2：`in`/`not in` 运算符脱糖 — `x in y` → `y.__contains__(x)`
+- [x] P1-3：`is`/`is not` 运算符脱糖 — `x is y` → `id(x) == id(y)`
+- [x] P1-13：负数索引 — VM 直接支持负数索引
+- [x] P1-12：for 循环元组解包脱糖 — `for x, y in pairs` → 索引访问
+- [x] P1-9：`@abstractmethod` 装饰器脱糖
 - [ ] P1-14：异常链 `raise E from e` 脱糖
 - [ ] P1-15：多异常类型 `except (A, B)` 脱糖
-- [ ] P0-1：Raw strings `r"..."` — Lexer 新增 RSTRING token
-- [ ] P0-3：单引号字符串 `'...'` — Lexer readString 支持
-- [ ] P0-25：负数索引 VM 修复（作为 P1-13 的后备方案）
-- [ ] P0-26：字符串方法 — `str.upper()`、`str.split()` 等
-- [ ] P3-7：`range()` 惰性迭代器
+- [x] P0-1：Raw strings `r"..."` — Lexer 新增 RSTRING token
+- [x] P0-3：单引号字符串 `'...'` — Lexer readString 支持
+- [x] P0-25：负数索引 VM 修复
+- [x] P0-26：字符串方法 — `str.upper()`、`str.split()` 等（含 List/Dict 原生方法）
+- [x] P3-7：`range()` 惰性迭代器 — Range 对象替代列表物化
 - [ ] P3-8：`zip()` 惰性迭代器
 - [ ] P3-9：全局变量缓存
-- [ ] P3-10：BoundMethod 缓存
-- [ ] P3-11：字符串驻留
+- [x] P3-10：BoundMethod 对象类型
+- [x] P3-11：字符串驻留 — 编译器常量池去重
+
+### Bug 修复（v0.4 中一并完成）
+
+- [x] BUG-1：`BreakStatement`/`ContinueStatement` 在 desugar 中返回 nil → 改为返回自身
+- [x] BUG-2：`readString()` 只处理 `"` 不处理 `'` → 支持单引号
+- [x] BUG-3：`readString()` 不处理转义字符 → 支持 `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`
+- [x] BUG-5：`f-string` 解析中 `f` 前缀只匹配 `f"` → 支持 `f'...'`
 
 ### v0.5 — 高影响力中难度特性
 
@@ -413,11 +420,11 @@ class C:
 - [ ] P1-17：多 for 子句推导式脱糖
 - [ ] P0-4：三引号字符串
 - [ ] P0-5：位运算符 token + P1-4 位运算脱糖
-- [ ] P0-7/P0-8：`is`/`in` 运算符 token（配合 P1-2/P1-3 脱糖）
-- [ ] P0-9：`assert` 关键字（配合 P1-1 脱糖）
+- [x] P0-7/P0-8：`is`/`in` 运算符 token（配合 P1-2/P1-3 脱糖）
+- [x] P0-9：`assert` 关键字（配合 P1-1 脱糖）
 - [ ] P0-17：仅关键字参数（配合 P1-20 脱糖）
 - [ ] P0-19：默认参数值解析器支持
-- [ ] P0-20：for 循环元组解包（配合 P1-12 脱糖）
+- [x] P0-20：for 循环元组解包（配合 P1-12 脱糖）
 - [ ] P0-22：异常链 `from` 子句（配合 P1-14 脱糖）
 - [ ] P0-23：多异常类型（配合 P1-15 脱糖）
 - [ ] P3-5：特化操作码 `OpAddInt`/`OpAddFloat`

@@ -805,6 +805,7 @@ func (ws *WhileStatement) String() string {
 type ForStatement struct {
 	Token    string
 	Value    *Identifier
+	Values   []*Identifier
 	Iterable Expression
 	Body     *BlockStatement
 }
@@ -972,6 +973,12 @@ type DeleteStatement struct {
 	Targets    []Expression
 }
 
+type AssertStatement struct {
+	Token      string
+	Test       Expression
+	Message    Expression
+}
+
 func (ds *DeleteStatement) statementNode()       {}
 func (ds *DeleteStatement) TokenLiteral() string { return ds.Token }
 func (ds *DeleteStatement) String() string {
@@ -984,6 +991,16 @@ func (ds *DeleteStatement) String() string {
 		out.WriteString(target.String())
 	}
 	return out.String()
+}
+
+func (as *AssertStatement) statementNode()       {}
+func (as *AssertStatement) TokenLiteral() string { return as.Token }
+func (as *AssertStatement) String() string {
+	s := "assert " + as.Test.String()
+	if as.Message != nil {
+		s += ", " + as.Message.String()
+	}
+	return s
 }
 
 // YieldFromStatement 用于 yield from 语句

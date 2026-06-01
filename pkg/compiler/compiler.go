@@ -3,6 +3,8 @@ package compiler
 import (
 	"fmt"
 	"os"
+	"reflect"
+	"unsafe"
 
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/concurrency"
@@ -82,6 +84,8 @@ type Compiler struct {
 	instructions        Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+
+	stringIntern map[string]int
 }
 
 type Bytecode struct {
@@ -324,6 +328,8 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.Integer{Value: int64(len(arg.Pairs))}
 			case *objects.Set:
 				return &objects.Integer{Value: int64(len(arg.Elements))}
+			case *objects.Range:
+				return &objects.Integer{Value: arg.Len()}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -612,6 +618,18 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, absBuiltin)
 	c.symbolTable.DefineBuiltin("abs", absIndex)
 
+	idBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("id() takes exactly one argument")
+			}
+			return &objects.Integer{Value: int64(uintptr(unsafe.Pointer(reflect.ValueOf(args[0]).Pointer())))}
+		},
+	}
+	idIndex := len(c.constants)
+	c.constants = append(c.constants, idBuiltin)
+	c.symbolTable.DefineBuiltin("id", idIndex)
+
 	rangeBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			if len(args) < 1 || len(args) > 3 {
@@ -655,17 +673,7 @@ func (c *Compiler) registerBuiltins() {
 					return objects.NewValueError("range() step cannot be zero")
 				}
 			}
-			elements := []objects.Object{}
-			if step > 0 {
-				for i := start; i < stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			} else {
-				for i := start; i > stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			}
-			return &objects.List{Elements: elements}
+			return objects.NewRange(start, stop, step)
 		},
 	}
 	rangeIndex := len(c.constants)
@@ -873,7 +881,6 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.List{Elements: []objects.Object{}}
 			}
 
-			// 检查所有参数是否都是列表
 			lists := make([]*objects.List, len(args))
 			minLen := -1
 			for i, arg := range args {
@@ -887,14 +894,13 @@ func (c *Compiler) registerBuiltins() {
 				}
 			}
 
-			// 构建结果
-			result := &objects.List{Elements: []objects.Object{}}
+			result := &objects.List{Elements: make([]objects.Object, minLen)}
 			for i := 0; i < minLen; i++ {
-				tuple := &objects.List{Elements: []objects.Object{}}
-				for _, list := range lists {
-					tuple.Elements = append(tuple.Elements, list.Elements[i])
+				tuple := &objects.List{Elements: make([]objects.Object, len(lists))}
+				for j, list := range lists {
+					tuple.Elements[j] = list.Elements[i]
 				}
-				result.Elements = append(result.Elements, tuple)
+				result.Elements[i] = tuple
 			}
 
 			return result
@@ -1668,6 +1674,18 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 }
 
 func (c *Compiler) addConstant(obj objects.Object) int {
+	if str, ok := obj.(*objects.String); ok {
+		if c.stringIntern == nil {
+			c.stringIntern = make(map[string]int)
+		}
+		if idx, exists := c.stringIntern[str.Value]; exists {
+			return idx
+		}
+		idx := len(c.constants)
+		c.constants = append(c.constants, obj)
+		c.stringIntern[str.Value] = idx
+		return idx
+	}
 	c.constants = append(c.constants, obj)
 	return len(c.constants) - 1
 }

@@ -12,6 +12,8 @@ const (
 	STRING = "STRING"
 	FSTRING = "FSTRING"
 
+	RSTRING = "RSTRING"
+
 	ASSIGN   = "="
 	PLUS     = "+"
 	MINUS    = "-"
@@ -83,6 +85,8 @@ const (
 	NONLOCAL = "NONLOCAL"
 	RETURN_TYPE = "RETURN_TYPE"
 	DEL      = "DEL"
+	ASSERT   = "ASSERT"
+	IS       = "IS"
 
 	INDENT = "INDENT"
 	DEDENT = "DEDENT"
@@ -126,6 +130,8 @@ var keywords = map[string]TokenType{
 	"global": GLOBAL,
 	"nonlocal": NONLOCAL,
 	"del":    DEL,
+	"assert": ASSERT,
+	"is":     IS,
 }
 
 type Lexer struct {
@@ -305,16 +311,43 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(RBRACKET, l.ch)
 	case '"':
 		tok.Type = STRING
-		tok.Literal = l.readString()
+		tok.Literal = l.readString('"')
+	case '\'':
+		tok.Type = STRING
+		tok.Literal = l.readString('\'')
 	case '#':
-		// Skip comment until end of line
 		l.skipComment()
 		return l.NextToken()
+	case 'r':
+		if l.peekChar() == '"' {
+			l.readChar()
+			tok.Type = RSTRING
+			tok.Literal = l.readString('"')
+			l.readChar()
+			return tok
+		}
+		if l.peekChar() == '\'' {
+			l.readChar()
+			tok.Type = RSTRING
+			tok.Literal = l.readString('\'')
+			l.readChar()
+			return tok
+		}
+		tok.Literal = l.readIdentifier()
+		tok.Type = lookupIdent(tok.Literal)
+		return tok
 	case 'f':
 		if l.peekChar() == '"' {
 			l.readChar()
 			tok.Type = FSTRING
-			tok.Literal = l.readString()
+			tok.Literal = l.readString('"')
+			l.readChar()
+			return tok
+		}
+		if l.peekChar() == '\'' {
+			l.readChar()
+			tok.Type = FSTRING
+			tok.Literal = l.readString('\'')
 			l.readChar()
 			return tok
 		}
@@ -385,15 +418,42 @@ func (l *Lexer) readNumber() (TokenType, string) {
 	return INT, l.input[position:l.position]
 }
 
-func (l *Lexer) readString() string {
-	position := l.position + 1
+func (l *Lexer) readString(quote byte) string {
+	var result []byte
 	for {
 		l.readChar()
-		if l.ch == '"' || l.ch == 0 {
+		if l.ch == 0 {
 			break
 		}
+		if l.ch == '\\' {
+			l.readChar()
+			switch l.ch {
+			case 'n':
+				result = append(result, '\n')
+			case 't':
+				result = append(result, '\t')
+			case 'r':
+				result = append(result, '\r')
+			case '\\':
+				result = append(result, '\\')
+			case '\'':
+				result = append(result, '\'')
+			case '"':
+				result = append(result, '"')
+			case '0':
+				result = append(result, 0)
+			default:
+				result = append(result, '\\')
+				result = append(result, l.ch)
+			}
+			continue
+		}
+		if l.ch == quote {
+			break
+		}
+		result = append(result, l.ch)
 	}
-	return l.input[position:l.position]
+	return string(result)
 }
 
 func (l *Lexer) skipComment() {

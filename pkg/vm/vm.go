@@ -804,7 +804,7 @@ func (vm *VM) Run() error {
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
-			
+
 			if instance, ok := obj.(*objects.Instance); ok {
 				if val, ok := instance.GetAttr(attrName); ok {
 					if method, ok := val.(*compiler.CompiledFunction); ok {
@@ -821,7 +821,7 @@ func (vm *VM) Run() error {
 				}
 				return vm.push(objects.None_)
 			}
-			
+
 			if module, ok := obj.(*objects.Module); ok {
 			if val, ok := module.GetAttr(attrName); ok {
 				err := vm.push(val)
@@ -836,7 +836,11 @@ func (vm *VM) Run() error {
 			}
 			continue
 		}
-			
+
+			if builtinMethod, ok := vm.getNativeAttribute(obj, attrName); ok {
+				return vm.push(builtinMethod)
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
@@ -1029,6 +1033,12 @@ func (vm *VM) executeCall(numArgs int) error {
 		if builtin, ok := calleeObj.(*objects.Builtin); ok {
 			args := vm.stack[vm.sp-numArgs : vm.sp]
 			result := builtin.Fn(args...)
+			vm.sp = vm.sp - numArgs - 1
+			return vm.push(result)
+		}
+		if nativeMethod, ok := calleeObj.(*objects.NativeMethod); ok {
+			args := vm.stack[vm.sp-numArgs : vm.sp]
+			result := nativeMethod.Fn(nativeMethod.Object, args...)
 			vm.sp = vm.sp - numArgs - 1
 			return vm.push(result)
 		}
@@ -1528,29 +1538,455 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 		return vm.executeTupleIndex(left, index)
 	case left.Type() == objects.DICT_OBJ:
 		return vm.executeHashIndex(left, index)
+	case left.Type() == objects.RANGE_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeRangeIndex(left, index)
 	default:
 		return fmt.Errorf("index operator not supported: %s", left.Type())
 	}
 }
 
+func (vm *VM) getNativeAttribute(obj objects.Object, attrName string) (objects.Object, bool) {
+	switch o := obj.(type) {
+	case *objects.String:
+		return vm.getStringAttribute(o, attrName)
+	case *objects.List:
+		return vm.getListAttribute(o, attrName)
+	case *objects.Dict:
+		return vm.getDictAttribute(o, attrName)
+	}
+	return nil, false
+}
+
+func (vm *VM) getStringAttribute(s *objects.String, attrName string) (objects.Object, bool) {
+	switch attrName {
+	case "__contains__":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "__contains__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__contains__ takes exactly one argument")
+				}
+				strObj := self.(*objects.String)
+				subStr, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("__contains__ argument must be a string")
+				}
+				return &objects.Boolean{Value: strings.Contains(strObj.Value, subStr.Value)}
+			},
+		}, true
+	case "upper":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "upper",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				return &objects.String{Value: strings.ToUpper(strObj.Value)}
+			},
+		}, true
+	case "lower":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "lower",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				return &objects.String{Value: strings.ToLower(strObj.Value)}
+			},
+		}, true
+	case "strip":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "strip",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				return &objects.String{Value: strings.TrimSpace(strObj.Value)}
+			},
+		}, true
+	case "split":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "split",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) == 0 {
+					parts := strings.Fields(strObj.Value)
+					elements := make([]objects.Object, len(parts))
+					for i, p := range parts {
+						elements[i] = &objects.String{Value: p}
+					}
+					return &objects.List{Elements: elements}
+				}
+				sep, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("split() separator must be a string")
+				}
+				parts := strings.Split(strObj.Value, sep.Value)
+				elements := make([]objects.Object, len(parts))
+				for i, p := range parts {
+					elements[i] = &objects.String{Value: p}
+				}
+				return &objects.List{Elements: elements}
+			},
+		}, true
+	case "join":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "join",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) != 1 {
+					return objects.NewError("join() takes exactly one argument")
+				}
+				list, ok := args[0].(*objects.List)
+				if !ok {
+					return objects.NewError("join() argument must be a list")
+				}
+				parts := make([]string, len(list.Elements))
+				for i, el := range list.Elements {
+					parts[i] = el.Inspect()
+				}
+				return &objects.String{Value: strings.Join(parts, strObj.Value)}
+			},
+		}, true
+	case "replace":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "replace",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) < 2 {
+					return objects.NewError("replace() takes at least 2 arguments")
+				}
+				old, ok1 := args[0].(*objects.String)
+				new_, ok2 := args[1].(*objects.String)
+				if !ok1 || !ok2 {
+					return objects.NewError("replace() arguments must be strings")
+				}
+				return &objects.String{Value: strings.ReplaceAll(strObj.Value, old.Value, new_.Value)}
+			},
+		}, true
+	case "startswith":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "startswith",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) != 1 {
+					return objects.NewError("startswith() takes exactly one argument")
+				}
+				prefix, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("startswith() argument must be a string")
+				}
+				return &objects.Boolean{Value: strings.HasPrefix(strObj.Value, prefix.Value)}
+			},
+		}, true
+	case "endswith":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "endswith",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) != 1 {
+					return objects.NewError("endswith() takes exactly one argument")
+				}
+				suffix, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("endswith() argument must be a string")
+				}
+				return &objects.Boolean{Value: strings.HasSuffix(strObj.Value, suffix.Value)}
+			},
+		}, true
+	case "find":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "find",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) != 1 {
+					return objects.NewError("find() takes exactly one argument")
+				}
+				sub, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("find() argument must be a string")
+				}
+				return &objects.Integer{Value: int64(strings.Index(strObj.Value, sub.Value))}
+			},
+		}, true
+	case "count":
+		return &objects.NativeMethod{
+			Object:     s,
+			MethodName: "count",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				strObj := self.(*objects.String)
+				if len(args) != 1 {
+					return objects.NewError("count() takes exactly one argument")
+				}
+				sub, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewError("count() argument must be a string")
+				}
+				return &objects.Integer{Value: int64(strings.Count(strObj.Value, sub.Value))}
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func (vm *VM) getListAttribute(l *objects.List, attrName string) (objects.Object, bool) {
+	switch attrName {
+	case "__contains__":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "__contains__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__contains__ takes exactly one argument")
+				}
+				listObj := self.(*objects.List)
+				for _, el := range listObj.Elements {
+					if objects.Equal(el, args[0]) {
+						return &objects.Boolean{Value: true}
+					}
+				}
+				return &objects.Boolean{Value: false}
+			},
+		}, true
+	case "append":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "append",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("append() takes exactly one argument")
+				}
+				listObj := self.(*objects.List)
+				listObj.Elements = append(listObj.Elements, args[0])
+				return objects.None_
+			},
+		}, true
+	case "extend":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "extend",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("extend() takes exactly one argument")
+				}
+				listObj := self.(*objects.List)
+				other, ok := args[0].(*objects.List)
+				if !ok {
+					return objects.NewError("extend() argument must be a list")
+				}
+				listObj.Elements = append(listObj.Elements, other.Elements...)
+				return objects.None_
+			},
+		}, true
+	case "pop":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "pop",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				listObj := self.(*objects.List)
+				if len(listObj.Elements) == 0 {
+					return objects.NewIndexError("pop from empty list")
+				}
+				idx := len(listObj.Elements) - 1
+				if len(args) == 1 {
+					if i, ok := args[0].(*objects.Integer); ok {
+						idx = int(i.Value)
+					}
+				}
+				val := listObj.Elements[idx]
+				listObj.Elements = append(listObj.Elements[:idx], listObj.Elements[idx+1:]...)
+				return val
+			},
+		}, true
+	case "insert":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "insert",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 2 {
+					return objects.NewError("insert() takes exactly 2 arguments")
+				}
+				listObj := self.(*objects.List)
+				idx, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewError("insert() index must be an integer")
+				}
+				i := int(idx.Value)
+				if i < 0 {
+					i = 0
+				}
+				if i > len(listObj.Elements) {
+					i = len(listObj.Elements)
+				}
+				listObj.Elements = append(listObj.Elements[:i], append([]objects.Object{args[1]}, listObj.Elements[i:]...)...)
+				return objects.None_
+			},
+		}, true
+	case "index":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "index",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("index() takes exactly one argument")
+				}
+				listObj := self.(*objects.List)
+				for i, el := range listObj.Elements {
+					if objects.Equal(el, args[0]) {
+						return &objects.Integer{Value: int64(i)}
+					}
+				}
+				return objects.NewValueError("value not in list")
+			},
+		}, true
+	case "reverse":
+		return &objects.NativeMethod{
+			Object:     l,
+			MethodName: "reverse",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				listObj := self.(*objects.List)
+				for i, j := 0, len(listObj.Elements)-1; i < j; i, j = i+1, j-1 {
+					listObj.Elements[i], listObj.Elements[j] = listObj.Elements[j], listObj.Elements[i]
+				}
+				return objects.None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func (vm *VM) getDictAttribute(d *objects.Dict, attrName string) (objects.Object, bool) {
+	switch attrName {
+	case "__contains__":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "__contains__",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				if len(args) != 1 {
+					return objects.NewError("__contains__ takes exactly one argument")
+				}
+				dictObj := self.(*objects.Dict)
+				_, ok := dictObj.Get(args[0])
+				return &objects.Boolean{Value: ok}
+			},
+		}, true
+	case "keys":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "keys",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				dictObj := self.(*objects.Dict)
+				return &objects.List{Elements: dictObj.KeysSlice()}
+			},
+		}, true
+	case "values":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "values",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				dictObj := self.(*objects.Dict)
+				return &objects.List{Elements: dictObj.ValuesSlice()}
+			},
+		}, true
+	case "items":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "items",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				dictObj := self.(*objects.Dict)
+				elements := []objects.Object{}
+				for keyStr, key := range dictObj.Keys {
+					value := dictObj.Pairs[keyStr]
+					elements = append(elements, &objects.Tuple{Elements: []objects.Object{key, value}})
+				}
+				return &objects.List{Elements: elements}
+			},
+		}, true
+	case "get":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "get",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				dictObj := self.(*objects.Dict)
+				if len(args) < 1 || len(args) > 2 {
+					return objects.NewError("get() takes 1 or 2 arguments")
+				}
+				if val, ok := dictObj.Get(args[0]); ok {
+					return val
+				}
+				if len(args) == 2 {
+					return args[1]
+				}
+				return objects.None_
+			},
+		}, true
+	case "update":
+		return &objects.NativeMethod{
+			Object:     d,
+			MethodName: "update",
+			Fn: func(self objects.Object, args ...objects.Object) objects.Object {
+				dictObj := self.(*objects.Dict)
+				if len(args) != 1 {
+					return objects.NewError("update() takes exactly one argument")
+				}
+				other, ok := args[0].(*objects.Dict)
+				if !ok {
+					return objects.NewError("update() argument must be a dict")
+				}
+				for keyStr, key := range other.Keys {
+					dictObj.Pairs[keyStr] = other.Pairs[keyStr]
+					dictObj.Keys[keyStr] = key
+				}
+				return objects.None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 	arrayObject := array.(*objects.List)
 	idx := index.(*objects.Integer).Value
-	max := int64(len(arrayObject.Elements) - 1)
+	length := int64(len(arrayObject.Elements))
 
-	if idx < 0 || idx > max {
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
 		return vm.push(objects.None_)
 	}
 
 	return vm.push(arrayObject.Elements[idx])
 }
 
+func (vm *VM) executeRangeIndex(rangeObj, index objects.Object) error {
+	r := rangeObj.(*objects.Range)
+	idx := index.(*objects.Integer).Value
+	length := r.Len()
+
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
+		return vm.push(objects.None_)
+	}
+
+	return vm.push(&objects.Integer{Value: r.Start + idx*r.Step})
+}
+
 func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
 	tupleObject := tuple.(*objects.Tuple)
 	idx := index.(*objects.Integer).Value
-	max := int64(len(tupleObject.Elements) - 1)
+	length := int64(len(tupleObject.Elements))
 
-	if idx < 0 || idx > max {
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
 		return vm.push(objects.None_)
 	}
 

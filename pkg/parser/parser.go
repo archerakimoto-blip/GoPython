@@ -41,6 +41,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.LBRACKET: INDEX,
 	lexer.AND:      AND,
 	lexer.OR:       OR,
+	lexer.IS:       EQUALS,
+	lexer.IN:       EQUALS,
 	lexer.IF:       TERNARY,
 	lexer.COLON:    0,
 	lexer.AS:       LOWEST + 1,
@@ -69,6 +71,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.INT, p.parseIntegerLiteral)
 	p.registerPrefix(lexer.FLOAT, p.parseFloatLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
+	p.registerPrefix(lexer.RSTRING, p.parseStringLiteral)
 	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
@@ -116,6 +119,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
+	p.registerInfix(lexer.IS, p.parseIsExpression)
+	p.registerInfix(lexer.IN, p.parseInExpression)
 	p.registerInfix(lexer.IF, p.parseTernaryExpression)
 	p.registerInfix(lexer.WALRUS, p.parseNamedExpression)
 
@@ -280,6 +285,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseNonlocalStatement()
 	case lexer.DEL:
 		return p.parseDeleteStatement()
+	case lexer.ASSERT:
+		return p.parseAssertStatement()
 	case lexer.IMPORT:
 		return p.parseImportStatement()
 	case lexer.FROM:
@@ -767,6 +774,46 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression := &ast.InfixExpression{
 		Token:    p.curToken.Literal,
 		Operator: p.curToken.Literal,
+		Left:     left,
+	}
+
+	precedence := p.curPrecedence()
+	p.nextToken()
+	expression.Right = p.parseExpression(precedence)
+
+	return expression
+}
+
+func (p *Parser) parseIsExpression(left ast.Expression) ast.Expression {
+	operator := "is"
+	if p.peekTokenIs(lexer.NOT) {
+		p.nextToken()
+		operator = "is not"
+	}
+
+	expression := &ast.InfixExpression{
+		Token:    p.curToken.Literal,
+		Operator: operator,
+		Left:     left,
+	}
+
+	precedence := p.curPrecedence()
+	p.nextToken()
+	expression.Right = p.parseExpression(precedence)
+
+	return expression
+}
+
+func (p *Parser) parseInExpression(left ast.Expression) ast.Expression {
+	operator := "in"
+	if p.peekTokenIs(lexer.NOT) {
+		p.nextToken()
+		operator = "not in"
+	}
+
+	expression := &ast.InfixExpression{
+		Token:    p.curToken.Literal,
+		Operator: operator,
 		Left:     left,
 	}
 
@@ -1735,6 +1782,18 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 		return nil
 	}
 	stmt.Value = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+	stmt.Values = []*ast.Identifier{stmt.Value}
+
+	for p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		if !p.curTokenIs(lexer.IDENT) {
+			p.errors = append(p.errors, "expected identifier after ',' in for loop")
+			return nil
+		}
+		id := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+		stmt.Values = append(stmt.Values, id)
+	}
 
 	if !p.expectPeek(lexer.IN) {
 		return nil
@@ -2048,23 +2107,35 @@ func (p *Parser) parseNonlocalStatement() *ast.NonlocalStatement {
 // 例如: del x, list[0], dict['key']
 func (p *Parser) parseDeleteStatement() *ast.DeleteStatement {
 	stmt := &ast.DeleteStatement{Token: p.curToken.Literal}
-	p.nextToken() // 跳过 "del"
+	p.nextToken()
 
-	// 解析目标列表
 	for {
-		// 解析表达式作为目标
 		target := p.parseExpression(LOWEST)
 		if target != nil {
 			stmt.Targets = append(stmt.Targets, target)
 		}
 
-		// 检查是否还有逗号分隔的目标
 		if p.peekTokenIs(lexer.COMMA) {
-			p.nextToken() // 跳过逗号
-			p.nextToken() // 移动到下一个目标
+			p.nextToken()
+			p.nextToken()
 		} else {
 			break
 		}
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseAssertStatement() *ast.AssertStatement {
+	stmt := &ast.AssertStatement{Token: p.curToken.Literal}
+	p.nextToken()
+
+	stmt.Test = p.parseExpression(LOWEST)
+
+	if p.peekTokenIs(lexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		stmt.Message = p.parseExpression(LOWEST)
 	}
 
 	return stmt
