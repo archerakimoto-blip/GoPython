@@ -56,6 +56,8 @@ type Parser struct {
 
 	prefixParseFns map[lexer.TokenType]prefixParseFn
 	infixParseFns  map[lexer.TokenType]infixParseFn
+
+	lastStmtAdvanced bool
 }
 
 func New(l *lexer.Lexer) *Parser {
@@ -146,7 +148,11 @@ func (p *Parser) ParseProgram() *ast.Program {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
-			p.nextToken()
+			if p.lastStmtAdvanced {
+				p.lastStmtAdvanced = false
+			} else {
+				p.nextToken()
+			}
 		} else {
 			if !p.curTokenIs(lexer.EOF) {
 				p.nextToken()
@@ -804,8 +810,7 @@ func (p *Parser) parseIfExpression() ast.Expression {
 	p.nextToken()
 	expression.Consequence = p.parseBlockStatement()
 
-	if p.peekTokenIs(lexer.ELIF) {
-		p.nextToken()
+	if p.curTokenIs(lexer.ELIF) {
 		elifExpr := p.parseIfExpression()
 		if elifExpr != nil {
 			expression.Alternative = &ast.BlockStatement{
@@ -818,9 +823,7 @@ func (p *Parser) parseIfExpression() ast.Expression {
 				},
 			}
 		}
-	} else if p.peekTokenIs(lexer.ELSE) {
-		p.nextToken()
-
+	} else if p.curTokenIs(lexer.ELSE) {
 		if !p.expectPeek(lexer.COLON) {
 			return nil
 		}
@@ -912,12 +915,16 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 				break
 			}
 
-			p.nextToken()
+			if p.lastStmtAdvanced {
+				p.lastStmtAdvanced = false
+			} else {
+				p.nextToken()
+			}
 		}
 
-		// Consume the DEDENT token if present
 		if p.curTokenIs(lexer.DEDENT) {
 			p.nextToken()
+			p.lastStmtAdvanced = true
 		}
 	}
 
@@ -1006,6 +1013,11 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 				p.nextToken()
 				p.nextToken()
 				defaultVal = p.parseExpression(LOWEST)
+				if _, ok := defaultVal.(*ast.FunctionLiteral); ok {
+					for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
+						p.nextToken()
+					}
+				}
 			}
 
 			ident := &ast.Identifier{Token: paramName, Value: paramName}

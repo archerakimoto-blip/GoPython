@@ -1339,22 +1339,35 @@ func (c *Compiler) Compile(node ast.Node) error {
 			}
 		}
 
+		numDefaults := 0
+		numPositionalDefaults := 0
+		for i, d := range node.Defaults {
+			if d != nil {
+				numDefaults++
+				if !node.KeywordOnly[i] {
+					numPositionalDefaults++
+				}
+			}
+		}
+
 		paramNames := make([]string, len(node.Parameters))
 		for i, p := range node.Parameters {
 			paramNames[i] = p.Value
 		}
 
 		compiledFn := &CompiledFunction{
-			Instructions:   fnInstructions,
-			NumLocals:      numLocals,
-			NumParameters:  len(node.Parameters),
-			NumKeywordOnly: numKeywordOnly,
-			ParameterNames: paramNames,
-			IsGenerator:    c.hasYieldInBody(node.Body),
-			IsAsync:        node.IsAsync,
-			Free:           allFreeVars,
-			VarArgs:        node.VarArgs != nil,
-			KwArgs:         node.KwArgs != nil,
+			Instructions:          fnInstructions,
+			NumLocals:             numLocals,
+			NumParameters:         len(node.Parameters),
+			NumKeywordOnly:        numKeywordOnly,
+			NumDefaults:           numDefaults,
+			NumPositionalDefaults: numPositionalDefaults,
+			ParameterNames:        paramNames,
+			IsGenerator:           c.hasYieldInBody(node.Body),
+			IsAsync:               node.IsAsync,
+			Free:                  allFreeVars,
+			VarArgs:               node.VarArgs != nil,
+			KwArgs:                node.KwArgs != nil,
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))

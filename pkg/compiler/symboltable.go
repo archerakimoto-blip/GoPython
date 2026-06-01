@@ -202,18 +202,20 @@ func (s *SymbolTable) numDefinitionsInScope() int {
 }
 
 type CompiledFunction struct {
-	Instructions   []byte
-	NumLocals      int
-	NumParameters  int
-	NumKeywordOnly int
-	ParameterNames []string
-	IsGenerator    bool
-	IsAsync        bool
-	Free           []Symbol
-	Name           string
-	Constants      []objects.Object
-	VarArgs        bool
-	KwArgs         bool
+	Instructions          []byte
+	NumLocals             int
+	NumParameters         int
+	NumKeywordOnly        int
+	NumDefaults           int
+	NumPositionalDefaults int
+	ParameterNames        []string
+	IsGenerator           bool
+	IsAsync               bool
+	Free                  []Symbol
+	Name                  string
+	Constants             []objects.Object
+	VarArgs               bool
+	KwArgs                bool
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {

@@ -1225,14 +1225,19 @@ func (vm *VM) executeCall(numArgs int) error {
 		}
 
 		basePointer = calleeIndex + 1
-	} else if callee.NumKeywordOnly > 0 {
+	} else if callee.NumKeywordOnly > 0 || callee.NumDefaults > 0 {
 		maxPosArgs := callee.NumParameters - callee.NumKeywordOnly
+		minPosArgs := maxPosArgs - callee.NumPositionalDefaults
+		if posArgsCount < minPosArgs {
+			return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
+				minPosArgs, maxPosArgs, posArgsCount)
+		}
 		if posArgsCount > maxPosArgs {
 			return fmt.Errorf("takes %d positional arguments but %d were given",
 				maxPosArgs, posArgsCount)
 		}
 
-		if kwargsDict != nil {
+		if kwargsDict != nil && callee.NumKeywordOnly > 0 {
 			for i := 0; i < callee.NumParameters; i++ {
 				if i < maxPosArgs {
 					continue
@@ -1246,12 +1251,23 @@ func (vm *VM) executeCall(numArgs int) error {
 				}
 			}
 			numArgs = callee.NumParameters
-		} else {
-			for i := posArgsCount; i < callee.NumParameters; i++ {
-				vm.stack[vm.sp-numArgs+i-posArgsCount] = objects.None_
-			}
-			numArgs = callee.NumParameters
 		}
+
+		for i := posArgsCount; i < callee.NumParameters; i++ {
+			vm.push(objects.None_)
+		}
+		numArgs = callee.NumParameters
+		basePointer = vm.sp - numArgs
+	} else if callee.NumDefaults > 0 {
+		minArgs := callee.NumParameters - callee.NumDefaults
+		if posArgsCount < minArgs || posArgsCount > callee.NumParameters {
+			return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
+				minArgs, callee.NumParameters, posArgsCount)
+		}
+		for i := posArgsCount; i < callee.NumParameters; i++ {
+			vm.push(objects.None_)
+		}
+		numArgs = callee.NumParameters
 		basePointer = vm.sp - numArgs
 	} else {
 		if numArgs != callee.NumParameters {
