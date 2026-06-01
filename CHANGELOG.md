@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+### 重构
+
+- **装饰器脱糖重构**：将 `@property`、`@classmethod`、`@staticmethod` 和 `__slots__` 的处理逻辑从编译器/虚拟机内核迁移至脱糖层，大幅简化内核执行路径
+  - `@property` / `@name.setter` / `@name.deleter`：脱糖层自动生成混淆方法（`_desugar_prop_get_xxx` 等）和 `__getattr__` / `__setattr__` / `__delattr__` 拦截逻辑
+  - `@classmethod`：脱糖层生成 `_desugar_cm_xxx` 方法和 `__getattr__`，通过 `__get_class__` + `__bind_method__` 绑定类对象
+  - `@staticmethod`：脱糖层生成 `_desugar_sm_xxx` 方法和 `__getattr__`，直接返回函数无需绑定
+  - `__slots__`：脱糖层生成 `__setattr__` 白名单检查，未在 slots 列表中的属性赋值将抛出 `AttributeError`
+- **移除旧类型**：从对象系统中移除 `Property`、`ClassMethod`、`StaticMethod` 类型和 `Class.Slots` 字段，这些语义现在完全由脱糖层实现
+- **新增 `BoundMethod` 对象类型**：用于表示绑定到实例/类的方法，在 VM 的 `executeCall` 中自动展开为 `fn(self, args...)`
+- **新增内置辅助函数**：
+  - `__get_class__(obj)` — 获取实例的类对象
+  - `__bind_method__(fn, self)` — 创建 BoundMethod 对象
+  - `__set_field__(instance, name, value)` — 直接设置实例字段
+  - `__del_field__(instance, name)` — 直接删除实例字段
+
 ### 新增特性
 
 - **并发架构**：实现了完整的类似 Go 语言 goroutine 的高性能并发架构，无 GIL 锁，支持真正的并行执行
@@ -24,7 +39,7 @@
 - **集合推导式**（SetComprehension）：支持 `{x for x in iterable}` 语法
 - **生成器表达式**（GeneratorExpression）：支持 `(x for x in iterable)` 语法
 - **多重上下文管理器**：支持 `with a, b:` 语法，自动脱糖成嵌套with语句
-- **属性装饰器**：支持 @property、@name.setter、@name.deleter 装饰器语法（框架已支持，可进一步扩展 property 类型）
+- **属性装饰器**：支持 @property、@name.setter、@name.deleter 装饰器语法，通过脱糖层自动生成 `__getattr__` / `__setattr__` / `__delattr__` 拦截逻辑
 - **elif 语句**：完整支持条件分支 `if-elif-else` 结构
 - **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
 - **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string

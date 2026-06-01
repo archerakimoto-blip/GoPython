@@ -61,6 +61,11 @@ go build -o gopy ./cmd/gopy
 - Lambda 表达式和闭包
 - 类、对象、继承和多态
 - 装饰器 (Decorators)
+  - `@property` / `@name.setter` / `@name.deleter` — 属性描述符，通过脱糖层自动生成 `__getattr__` / `__setattr__` / `__delattr__`
+  - `@classmethod` — 类方法，通过脱糖层自动生成 `__getattr__` 并绑定类对象
+  - `@staticmethod` — 静态方法，通过脱糖层自动生成 `__getattr__` 直接返回函数
+  - 通用装饰器 — 支持简单装饰器、多个装饰器、带参数的装饰器
+- `__slots__` — 通过脱糖层自动生成 `__setattr__` 限制属性赋值
 - 标准 Python 缩进语法
 - f-string 格式化字符串
 - 模块导入系统 (import/from...import)
@@ -76,7 +81,39 @@ go build -o gopy ./cmd/gopy
 
 以下特性暂不支持，欢迎贡献！
 - 类型注解 (Type Hints)
+- `__slots__` 继承语义（当前仅在定义类中生效）
 - 更多 Python 标准库
+
+## 脱糖架构 (Desugar Architecture)
+
+GoPy 采用**脱糖优先**的设计理念，将高级语法特性在编译前转换为更基础的 AST 节点，从而大幅简化编译器和虚拟机的实现。
+
+### 脱糖转换一览
+
+| 源语法 | 脱糖目标 | 说明 |
+|--------|----------|------|
+| `@property` / `@name.setter` / `@name.deleter` | `_desugar_prop_get_xxx` / `_desugar_prop_set_xxx` / `_desugar_prop_del_xxx` 方法 + `__getattr__` / `__setattr__` / `__delattr__` | 属性访问拦截 |
+| `@classmethod` | `_desugar_cm_xxx` 方法 + `__getattr__` 返回 `BoundMethod` | 类方法绑定类对象 |
+| `@staticmethod` | `_desugar_sm_xxx` 方法 + `__getattr__` 直接返回函数 | 无需绑定 |
+| `__slots__` | `__setattr__` 白名单检查 | 限制动态属性 |
+| `and` / `or` | `IfExpression` 短路求值 | 逻辑运算脱糖 |
+| 链式比较 `a < b < c` | `(a < b) and (b < c)` | 比较脱糖 |
+| 增强赋值 `a += 1` | `a = a + 1` | 赋值脱糖 |
+| `for ... in ...` | `while` 循环 + 迭代器 | 循环脱糖 |
+| 海象运算符 `:=` | `let` 绑定 | 表达式提升为语句 |
+| 集合/字典推导式 | `for` 循环 + `set`/`dict` 操作 | 推导式脱糖 |
+| 多重上下文管理器 | 嵌套 `with` 语句 | 上下文管理器脱糖 |
+
+### 内置辅助函数
+
+脱糖层生成的代码依赖以下编译器内置函数：
+
+| 函数 | 说明 |
+|------|------|
+| `__get_class__(obj)` | 获取实例的类对象 |
+| `__bind_method__(fn, self)` | 创建 BoundMethod 对象 |
+| `__set_field__(instance, name, value)` | 直接设置实例字段 |
+| `__del_field__(instance, name)` | 直接删除实例字段 |
 
 ## 项目架构
 
