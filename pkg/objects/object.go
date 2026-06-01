@@ -30,7 +30,9 @@ const (
 	CONTEXT_OBJ      ObjectType = "CONTEXT"
 	CLASS_OBJ        ObjectType = "CLASS"
 	INSTANCE_OBJ     ObjectType = "INSTANCE"
-	MODULE_OBJ       ObjectType = "MODULE"
+	MODULE_OBJ      ObjectType = "MODULE"
+	RANGE_OBJ       ObjectType = "RANGE"
+	ZIP_OBJ         ObjectType = "ZIP"
 	ASYNC_OBJ         ObjectType = "ASYNC"
 	FUTURE_OBJ         ObjectType = "FUTURE"
 )
@@ -46,6 +48,51 @@ type Integer struct {
 
 func (i *Integer) Type() ObjectType { return INTEGER_OBJ }
 func (i *Integer) Inspect() string  { return fmt.Sprintf("%d", i.Value) }
+
+var integerPool [512]*Integer
+var integerPoolReady bool
+
+func initIntegerPool() {
+	for i := int64(0); i < 512; i++ {
+		integerPool[i] = &Integer{Value: i - 256}
+	}
+	integerPoolReady = true
+}
+
+func GetCachedInteger(v int64) *Integer {
+	if !integerPoolReady {
+		initIntegerPool()
+	}
+	if v >= -256 && v < 256 {
+		return integerPool[v+256]
+	}
+	return &Integer{Value: v}
+}
+
+var stringPool map[string]*String
+var stringPoolReady bool
+
+func initStringPool() {
+	stringPool = make(map[string]*String, 256)
+	stringPoolReady = true
+}
+
+func GetCachedString(v string) *String {
+	if !stringPoolReady {
+		initStringPool()
+	}
+	if len(v) <= 16 {
+		if cached, ok := stringPool[v]; ok {
+			return cached
+		}
+		s := &String{Value: v}
+		if len(stringPool) < 4096 {
+			stringPool[v] = s
+		}
+		return s
+	}
+	return &String{Value: v}
+}
 
 type Float struct {
 	Value float64
@@ -264,14 +311,24 @@ func (s *Set) ToSlice() []Object {
 }
 
 type Dict struct {
-	Pairs map[string]Object
-	Keys  map[string]Object
+	Pairs    map[string]Object
+	Keys     map[string]Object
+	KeyOrder []string
 }
 
 func NewDict() *Dict {
 	return &Dict{
-		Pairs: make(map[string]Object),
-		Keys:  make(map[string]Object),
+		Pairs:    make(map[string]Object),
+		Keys:     make(map[string]Object),
+		KeyOrder: make([]string, 0),
+	}
+}
+
+func NewDictWithCapacity(n int) *Dict {
+	return &Dict{
+		Pairs:    make(map[string]Object, n),
+		Keys:     make(map[string]Object, n),
+		KeyOrder: make([]string, 0, n),
 	}
 }
 
@@ -279,11 +336,12 @@ func (d *Dict) Type() ObjectType { return DICT_OBJ }
 func (d *Dict) Inspect() string {
 	result := "{"
 	first := true
-	for keyStr, key := range d.Keys {
+	for _, keyStr := range d.KeyOrder {
 		if !first {
 			result += ", "
 		}
 		first = false
+		key := d.Keys[keyStr]
 		value := d.Pairs[keyStr]
 		result += fmt.Sprintf("%s: %s", key.Inspect(), value.Inspect())
 	}
@@ -314,6 +372,9 @@ func (d *Dict) Get(key Object) (Object, bool) {
 
 func (d *Dict) Set(key, value Object) {
 	keyStr := d.HashKey(key)
+	if _, exists := d.Pairs[keyStr]; !exists {
+		d.KeyOrder = append(d.KeyOrder, keyStr)
+	}
 	d.Pairs[keyStr] = value
 	d.Keys[keyStr] = key
 }
@@ -326,8 +387,16 @@ func (d *Dict) Has(key Object) bool {
 
 func (d *Dict) Delete(key Object) {
 	keyStr := d.HashKey(key)
-	delete(d.Pairs, keyStr)
-	delete(d.Keys, keyStr)
+	if _, exists := d.Pairs[keyStr]; exists {
+		delete(d.Pairs, keyStr)
+		delete(d.Keys, keyStr)
+		for i, k := range d.KeyOrder {
+			if k == keyStr {
+				d.KeyOrder = append(d.KeyOrder[:i], d.KeyOrder[i+1:]...)
+				break
+			}
+		}
+	}
 }
 
 func (d *Dict) Size() int {
@@ -596,6 +665,135 @@ func (m *Module) GetAttr(name string) (Object, bool) {
 		return val, true
 	}
 	return nil, false
+}
+
+type Range struct {
+	Start int64
+	Stop  int64
+	Step  int64
+}
+
+func NewRange(start, stop, step int64) *Range {
+	return &Range{Start: start, Stop: stop, Step: step}
+}
+
+func (r *Range) Type() ObjectType { return RANGE_OBJ }
+func (r *Range) Inspect() string {
+	if r.Step == 1 {
+		if r.Start == 0 {
+			return fmt.Sprintf("range(%d)", r.Stop)
+		}
+		return fmt.Sprintf("range(%d, %d)", r.Start, r.Stop)
+	}
+	return fmt.Sprintf("range(%d, %d, %d)", r.Start, r.Stop, r.Step)
+}
+
+func (r *Range) Len() int64 {
+	if r.Step > 0 {
+		if r.Stop <= r.Start {
+			return 0
+		}
+		return (r.Stop - r.Start + r.Step - 1) / r.Step
+	}
+	if r.Step < 0 {
+		if r.Stop >= r.Start {
+			return 0
+		}
+		return (r.Start - r.Stop - r.Step - 1) / (-r.Step)
+	}
+	return 0
+}
+
+func (r *Range) ToList() []Object {
+	result := make([]Object, 0, r.Len())
+	if r.Step > 0 {
+		for i := r.Start; i < r.Stop; i += r.Step {
+			result = append(result, &Integer{Value: i})
+		}
+	} else {
+		for i := r.Start; i > r.Stop; i += r.Step {
+			result = append(result, &Integer{Value: i})
+		}
+	}
+	return result
+}
+
+func (r *Range) GetItem(index int64) (Object, bool) {
+	length := r.Len()
+	if index < 0 {
+		index = length + index
+	}
+	if index < 0 || index >= length {
+		return nil, false
+	}
+	return &Integer{Value: r.Start + index*r.Step}, true
+}
+
+type Zip struct {
+	Iterables []Object
+}
+
+func NewZip(iterables []Object) *Zip {
+	return &Zip{Iterables: iterables}
+}
+
+func (z *Zip) Type() ObjectType { return ZIP_OBJ }
+func (z *Zip) Inspect() string  { return "<zip object>" }
+
+func (z *Zip) Len() int64 {
+	minLen := int64(-1)
+	for _, iter := range z.Iterables {
+		switch v := iter.(type) {
+		case *List:
+			if minLen == -1 || int64(len(v.Elements)) < minLen {
+				minLen = int64(len(v.Elements))
+			}
+		case *Range:
+			l := v.Len()
+			if minLen == -1 || l < minLen {
+				minLen = l
+			}
+		case *String:
+			if minLen == -1 || int64(len(v.Value)) < minLen {
+				minLen = int64(len(v.Value))
+			}
+		case *Tuple:
+			if minLen == -1 || int64(len(v.Elements)) < minLen {
+				minLen = int64(len(v.Elements))
+			}
+		default:
+			return -1
+		}
+	}
+	if minLen == -1 {
+		return 0
+	}
+	return minLen
+}
+
+func (z *Zip) ToList() []Object {
+	length := z.Len()
+	if length < 0 {
+		return nil
+	}
+	result := make([]Object, 0, length)
+	for i := int64(0); i < length; i++ {
+		tuple := make([]Object, len(z.Iterables))
+		for j, iter := range z.Iterables {
+			switch v := iter.(type) {
+			case *List:
+				tuple[j] = v.Elements[i]
+			case *Range:
+				tuple[j], _ = v.GetItem(i)
+			case *String:
+				tuple[j] = &String{Value: string(v.Value[i])}
+			case *Tuple:
+				tuple[j] = v.Elements[i]
+			}
+		}
+		result = append(result, &Tuple{Elements: tuple})
+	}
+	return result
 }
 
 var modules = make(map[string]*Module)

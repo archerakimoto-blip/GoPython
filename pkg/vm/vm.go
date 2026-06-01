@@ -48,6 +48,11 @@ type AttrCacheEntry struct {
 	ClassName string
 }
 
+type GlobalCacheEntry struct {
+	Value   objects.Object
+	Version uint64
+}
+
 type VM struct {
 	constants    []objects.Object
 	instructions compiler.Instructions
@@ -68,7 +73,9 @@ type VM struct {
 	gcThreshold    int64             // 垃圾回收阈值（字节）
 	allocatedBytes int64             // 当前已分配字节数
 
-	attrCache map[AttrCacheKey]AttrCacheEntry
+	attrCache      map[AttrCacheKey]AttrCacheEntry
+	globalCache    []GlobalCacheEntry
+	globalVersions []uint64
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -95,6 +102,8 @@ func New(bytecode *compiler.Bytecode) *VM {
 		gcThreshold:    1024 * 1024,
 		allocatedBytes: 0,
 		attrCache:      make(map[AttrCacheKey]AttrCacheEntry),
+		globalCache:    make([]GlobalCacheEntry, GlobalSize),
+		globalVersions: make([]uint64, GlobalSize),
 	}
 }
 
@@ -310,12 +319,23 @@ func (vm *VM) Run() error {
 		case compiler.OpSetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
-			vm.globals[globalIndex] = vm.pop()
+			val := vm.pop()
+			vm.globals[globalIndex] = val
+			vm.globalVersions[globalIndex]++
+			vm.globalCache[globalIndex] = GlobalCacheEntry{Value: val, Version: vm.globalVersions[globalIndex]}
 
 		case compiler.OpGetGlobal:
 			globalIndex := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
-			err := vm.push(vm.globals[globalIndex])
+			cached := vm.globalCache[globalIndex]
+			var val objects.Object
+			if cached.Version == vm.globalVersions[globalIndex] && cached.Value != nil {
+				val = cached.Value
+			} else {
+				val = vm.globals[globalIndex]
+				vm.globalCache[globalIndex] = GlobalCacheEntry{Value: val, Version: vm.globalVersions[globalIndex]}
+			}
+			err := vm.push(val)
 			if err != nil {
 				return err
 			}
@@ -1155,7 +1175,6 @@ func (vm *VM) executeCall(numArgs int) error {
 	var kwargsDict *objects.Dict = nil
 	posArgsCount := numArgs
 
-	// 检查最后一个参数是否是关键字参数字典（来自我们编译器的特殊处理）
 	if numArgs > 0 {
 		lastArgIdx := vm.sp - 1
 		if dict, ok := vm.stack[lastArgIdx].(*objects.Dict); ok {
@@ -1178,7 +1197,6 @@ func (vm *VM) executeCall(numArgs int) error {
 				minParams, posArgsCount)
 		}
 
-		// 处理 *args（可变位置参数）
 		if callee.VarArgs {
 			if posArgsCount > minParams {
 				extraArgs := posArgsCount - minParams
@@ -1198,18 +1216,43 @@ func (vm *VM) executeCall(numArgs int) error {
 			}
 		}
 
-		// 处理 **kwargs（可变关键字参数）
 		if callee.KwArgs {
-			// 如果没有kwargs字典，就创建空的
 			if kwargsDict == nil {
 				kwargsDict = objects.NewDict()
 			}
-			// 将kwargsDict放到参数栈上
 			vm.stack[vm.sp-numArgs+posArgsCount] = kwargsDict
 			numArgs = posArgsCount + 1
 		}
 
 		basePointer = calleeIndex + 1
+	} else if callee.NumKeywordOnly > 0 {
+		maxPosArgs := callee.NumParameters - callee.NumKeywordOnly
+		if posArgsCount > maxPosArgs {
+			return fmt.Errorf("takes %d positional arguments but %d were given",
+				maxPosArgs, posArgsCount)
+		}
+
+		if kwargsDict != nil {
+			for i := 0; i < callee.NumParameters; i++ {
+				if i < maxPosArgs {
+					continue
+				}
+				paramName := callee.ParameterNames[i]
+				key := &objects.String{Value: paramName}
+				if val, ok := kwargsDict.Get(key); ok {
+					vm.stack[vm.sp-numArgs+i] = val
+				} else {
+					vm.stack[vm.sp-numArgs+i] = objects.None_
+				}
+			}
+			numArgs = callee.NumParameters
+		} else {
+			for i := posArgsCount; i < callee.NumParameters; i++ {
+				vm.stack[vm.sp-numArgs+i-posArgsCount] = objects.None_
+			}
+			numArgs = callee.NumParameters
+		}
+		basePointer = vm.sp - numArgs
 	} else {
 		if numArgs != callee.NumParameters {
 			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
@@ -1244,7 +1287,7 @@ func (vm *VM) executeMinusOperator() error {
 	}
 
 	value := operand.(*objects.Integer).Value
-	return vm.push(&objects.Integer{Value: -value})
+	return vm.push(objects.GetCachedInteger(-value))
 }
 
 func (vm *VM) executeBangOperator() error {
@@ -1437,7 +1480,7 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
 
-	err := vm.push(&objects.Integer{Value: result})
+	err := vm.push(objects.GetCachedInteger(result))
 	if err != nil {
 		return err
 	}
@@ -1626,6 +1669,10 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 		return vm.executeTupleIndex(left, index)
 	case left.Type() == objects.DICT_OBJ:
 		return vm.executeHashIndex(left, index)
+	case left.Type() == objects.RANGE_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeRangeIndex(left, index)
+	case left.Type() == objects.STRING_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeStringIndex(left, index)
 	default:
 		return fmt.Errorf("index operator not supported: %s", left.Type())
 	}
@@ -1648,11 +1695,37 @@ func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
 	idx := index.(*objects.Integer).Value
 	max := int64(len(tupleObject.Elements) - 1)
 
+	if idx < 0 {
+		idx = int64(len(tupleObject.Elements)) + idx
+	}
 	if idx < 0 || idx > max {
 		return vm.push(objects.None_)
 	}
 
 	return vm.push(tupleObject.Elements[idx])
+}
+
+func (vm *VM) executeRangeIndex(left, index objects.Object) error {
+	rangeObj := left.(*objects.Range)
+	idx := index.(*objects.Integer).Value
+	val, ok := rangeObj.GetItem(idx)
+	if !ok {
+		return vm.push(objects.None_)
+	}
+	return vm.push(val)
+}
+
+func (vm *VM) executeStringIndex(left, index objects.Object) error {
+	str := left.(*objects.String)
+	idx := index.(*objects.Integer).Value
+	length := int64(len(str.Value))
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
+		return vm.push(objects.None_)
+	}
+	return vm.push(&objects.String{Value: string(str.Value[idx])})
 }
 
 func (vm *VM) executeHashIndex(hash, index objects.Object) error {

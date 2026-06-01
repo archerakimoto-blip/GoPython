@@ -960,149 +960,64 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 
 func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 	lit.Parameters = []*ast.Identifier{}
+	lit.Defaults = []ast.Expression{}
+	lit.KeywordOnly = []bool{}
 
 	if p.peekTokenIs(lexer.RPAREN) {
 		p.nextToken()
 		return
 	}
 
-	if p.peekTokenIs(lexer.ASTERISK) {
-		p.nextToken()
-		if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
-			lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			lit.Parameters = append(lit.Parameters, lit.VarArgs)
-		} else if p.peekTokenIs(lexer.COMMA) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.ASTERISK) {
-				p.nextToken()
-				if p.peekTokenIs(lexer.IDENT) {
-					p.nextToken()
-					lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				}
-			} else {
-				ident := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				lit.Parameters = append(lit.Parameters, ident)
-			}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-		if p.peekTokenIs(lexer.COMMA) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.ASTERISK) {
-				p.nextToken()
-				if p.peekTokenIs(lexer.IDENT) {
-					p.nextToken()
-					lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				}
-			}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-	}
+	seenStar := false
 
-	if p.peekTokenIs(lexer.POWER) {
-		p.nextToken()
-		if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
-			lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-		}
-		if p.peekTokenIs(lexer.RPAREN) {
-			p.nextToken()
-			return
-		}
-	}
-
-	for !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.COMMA) {
-		if p.peekTokenIs(lexer.ASTERISK) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
-				p.nextToken()
-				lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			}
-		} else if p.peekTokenIs(lexer.POWER) {
-			p.nextToken()
-			if p.peekTokenIs(lexer.IDENT) {
-				p.nextToken()
-				lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-			}
-		} else if p.peekTokenIs(lexer.IDENT) {
-			p.nextToken()
-			// 保存参数名
-			paramName := p.curToken.Literal
-			paramToken := p.curToken.Literal
-
-			// 检查是否有类型注解 (x: int)
-			if p.peekTokenIs(lexer.COLON) {
-				p.nextToken() // 跳过冒号
-				// 跳过类型表达式（简单实现：跳过直到遇到逗号、右括号或等号）
-				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
-					p.nextToken()
-				}
-			}
-
-			// 检查是否有默认值 (x: int = 5 或 x = 5)
-			if p.peekTokenIs(lexer.ASSIGN) {
-				p.nextToken() // 跳过 =
-				// 跳过默认值表达式
-				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
-					p.nextToken()
-				}
-			}
-
-			ident := &ast.Identifier{Token: paramToken, Value: paramName}
-			lit.Parameters = append(lit.Parameters, ident)
-		} else {
-			break
-		}
-	}
-
-	for p.peekTokenIs(lexer.COMMA) {
-		p.nextToken()
+	for {
 		if p.peekTokenIs(lexer.ASTERISK) {
 			p.nextToken()
 			if p.peekTokenIs(lexer.IDENT) {
 				p.nextToken()
 				lit.VarArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.VarArgs)
+				lit.Defaults = append(lit.Defaults, nil)
+				lit.KeywordOnly = append(lit.KeywordOnly, false)
 			}
+			seenStar = true
 		} else if p.peekTokenIs(lexer.POWER) {
 			p.nextToken()
 			if p.peekTokenIs(lexer.IDENT) {
 				p.nextToken()
 				lit.KwArgs = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 				lit.Parameters = append(lit.Parameters, lit.KwArgs)
+				lit.Defaults = append(lit.Defaults, nil)
+				lit.KeywordOnly = append(lit.KeywordOnly, false)
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
-			// 保存参数名
 			paramName := p.curToken.Literal
-			paramToken := p.curToken.Literal
 
-			// 检查是否有类型注解 (x: int)
 			if p.peekTokenIs(lexer.COLON) {
-				p.nextToken() // 跳过冒号
-				// 跳过类型表达式
+				p.nextToken()
 				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.ASSIGN) && !p.peekTokenIs(lexer.EOF) {
 					p.nextToken()
 				}
 			}
 
-			// 检查是否有默认值 (x: int = 5 或 x = 5)
+			var defaultVal ast.Expression = nil
 			if p.peekTokenIs(lexer.ASSIGN) {
-				p.nextToken() // 跳过 =
-				// 跳过默认值表达式
-				for !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RPAREN) && !p.peekTokenIs(lexer.EOF) {
-					p.nextToken()
-				}
+				p.nextToken()
+				p.nextToken()
+				defaultVal = p.parseExpression(LOWEST)
 			}
 
-			ident := &ast.Identifier{Token: paramToken, Value: paramName}
+			ident := &ast.Identifier{Token: paramName, Value: paramName}
 			lit.Parameters = append(lit.Parameters, ident)
+			lit.Defaults = append(lit.Defaults, defaultVal)
+			lit.KeywordOnly = append(lit.KeywordOnly, seenStar)
+		} else {
+			break
+		}
+
+		if p.peekTokenIs(lexer.COMMA) {
+			p.nextToken()
 		} else {
 			break
 		}

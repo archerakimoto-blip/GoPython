@@ -105,17 +105,17 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
             │ ✅ P3-7 range惰性 │ ✅ P3-13 常量折叠 │ ✅ P3-6 内联缓存   │
             │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ P3-15 直接线程    │
             ├───────────────────┼───────────────────┼───────────────────┤
-            │ ✅ P1-9 @abstrmeth│ P1-10 lru_cache   │ P3-16 寄存器VM    │
+            │ ✅ P1-9 @abstrmeth│ ✅ P1-10 lru_cache│ P3-16 寄存器VM    │
             │ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ P0-33 描述符      │
   中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ P0-34 元类        │
-            │ ✅ P1-15 多except │ P1-18 NamedTuple  │ P3-19 分代GC      │
-            │ P3-9 全局变量缓存 │ P3-12 对象池      │                   │
-            │ ✅ P3-10 BoundMethod│ P3-17 Dict优化  │                   │
+            │ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ P3-19 分代GC      │
+            │ ✅ P3-9 全局变量缓存│ ✅ P3-12 对象池  │                   │
+            │ ✅ P3-10 BoundMethod│ ✅ P3-17 Dict优化│                   │
             ├───────────────────┼───────────────────┼───────────────────┤
             │ ✅ P1-4 位运算脱糖 │ P1-20 仅关键字参数│ P1-21 仅位置参数  │
             │ ✅ P0-1 Raw strings│ P0-17 仅关键字参数│ P0-18 仅位置参数  │
-  低影响力   │ P0-10 0x/0b/0o   │ P1-19 Enum        │ P0-12 复数        │
-            │ P0-11 数字下划线  │ P0-2 Byte strings │ P0-14 Ellipsis    │
+  低影响力   │ ✅ P0-10 0x/0b/0o │ P1-19 Enum        │ P0-12 复数        │
+            │ ✅ P0-11 数字下划线│ P0-2 Byte strings │ P0-14 Ellipsis    │
             │ ✅ P3-11 字符串驻留│ P3-14 死代码消除  │ P0-34 元类        │
             └───────────────────┴───────────────────┴───────────────────┘
 ```
@@ -130,37 +130,23 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] P0-16：多继承解析器支持 — `class C(A, B):` 逗号分隔多父类
 - [x] P3-6：内联缓存 — VM `attrCache` 基于 IP+ObjType 的属性查找缓存
 
-### v0.7 — 性能优化
+### v0.7 — 中影响力特性（性能+语言） ✅ 已完成
 
-目标：JIT 编译器从空壳变为可用。
+目标：实现中影响力特性，提升运行时性能和语言便利性。
 
-- [ ] P3-4：JIT 真正的机器码生成
-- [ ] P3-2：JIT 优化器（常量折叠、死代码消除、内联）
-- [ ] P3-3：ARM/x86 代码生成器连接
-- [ ] P3-8：`zip()` 惰性迭代器
-- [ ] P3-9：全局变量缓存
-- [ ] P3-12：对象池
-- [ ] P3-17：Dict/Set 哈希表优化
-- [ ] P3-19：分代 GC
+- [x] P3-9：全局变量缓存 — VM `globalCache`/`globalVersions` 版本号缓存
+- [x] P1-10：`@lru_cache` 脱糖 — `isLruCacheDecorator` 检测 + `desugarLruCache` 字典记忆化包装
+- [x] P1-18：NamedTuple 脱糖 — `desugarNamedTuple` 生成 `__init__` + `__repr__` 类
+- [x] P3-8：`zip()` 惰性迭代器 — `Zip` 对象 + `ToList()` 按需物化
+- [x] P3-12：对象池 — `GetCachedInteger`（-256~255）+ `GetCachedString`（≤16字符）
+- [x] P3-17：Dict 优化 — `KeyOrder` 有序键列表 + `NewDictWithCapacity` 预分配
 
-### v0.8 — 低影响力特性
+### v0.8 — 低影响力低难度特性 ✅ 已完成
 
-目标：完善语言兼容性。
+目标：完善语言兼容性，补齐低影响力低难度象限。
 
-- [ ] P0-11：数字下划线
-- [ ] P0-12：复数字面量
-- [ ] P0-13：Ellipsis
-- [ ] P0-14：`match`/`case` 关键字 token
-- [ ] P0-18：仅位置参数
-- [ ] P0-33：描述符协议
-- [ ] P0-34：元类
-- [ ] P1-18：NamedTuple 脱糖
-- [ ] P1-19：Enum 脱糖
-- [ ] P1-20：仅关键字参数脱糖
-- [ ] P1-21：仅位置参数脱糖
-- [ ] P3-14：死代码消除
-- [ ] P3-16：寄存器式 VM（长期目标）
-- [ ] P3-18：逃逸分析
+- [x] P0-10：0x/0b/0o 字面量 — Lexer `readNumber` 支持 `0x`/`0b`/`0o` 前缀，`0o` 自动转换为 Go 兼容的 `0` 前缀
+- [x] P0-11：数字下划线 — Lexer `readNumber` 跳过 `_` 并在返回前剥离，支持十进制/十六进制/二进制/八进制/浮点数中的下划线
 
 ---
 
@@ -199,3 +185,18 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | `pkg/compiler/compiler.go` | 新增 `OpCreateClassWithMultiSuper` 操作码；`compileMatchStatement` fallback（应被脱糖）；`compileClassStatement` 多父类编译路径 |
 | `pkg/vm/vm.go` | 新增 `AttrCacheKey`/`AttrCacheEntry` 类型；VM 新增 `attrCache` 字段；`OpGetAttribute` 内联缓存：Instance/Module 属性查找缓存；`OpCreateClassWithMultiSuper` 处理：弹出多父类、设置 `SuperClasses`、调用 `ComputeMRO()`；`OpCreateClassWithSuper` 改进：同时设置 `SuperClasses` |
 | `pkg/objects/object.go` | `Class` 新增 `SuperClasses []*Class` 和 `MRO []*Class` 字段；`Instance.GetAttr` 支持 MRO 查找；新增 `ComputeMRO()` 和 `c3Linearize()` C3 线性化算法 |
+
+### v0.7 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/objects/object.go` | 新增 `RANGE_OBJ`/`ZIP_OBJ` 类型；`Range` 结构体（`Start`/`Stop`/`Step`）+ `Len()`/`ToList()`/`GetItem()`；`Zip` 结构体（`Iterables`）+ `Len()`/`ToList()`；`GetCachedInteger`（-256~255 整数池）；`GetCachedString`（≤16字符字符串池）；`Dict` 新增 `KeyOrder []string` 有序键列表 + `NewDictWithCapacity` 预分配构造函数；`Dict.Set`/`Delete` 维护 `KeyOrder` |
+| `pkg/vm/vm.go` | 新增 `GlobalCacheEntry` 结构体；VM 新增 `globalCache`/`globalVersions` 字段；`OpGetGlobal` 版本号缓存快速路径；`OpSetGlobal` 递增版本号；`executeRangeIndex`/`executeStringIndex` 新增；`executeTupleIndex` 支持负数索引；`executeBinaryIntegerOperation`/`executeBangOperator` 使用 `GetCachedInteger` |
+| `pkg/compiler/compiler.go` | `range` 内置函数返回 `NewRange` 惰性对象；`zip` 内置函数返回 `NewZip` 惰性对象；`len` 支持 `Range`/`Zip` 对象 |
+| `pkg/desugar/desugar.go` | 新增 `isLruCacheDecorator`：检测 `@lru_cache` 装饰器；`desugarLruCache`：生成 `_cache` 字典 + 键查找 + 结果缓存包装函数；`desugarNamedTuple`：`NamedTuple('Name', [...])` → 生成带 `__init__` + `__repr__` 的类 |
+
+### v0.8 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | `readNumber` 新增 `0x`/`0X`/`0b`/`0B`/`0o`/`0O` 前缀检测分支，分别读取十六进制/二进制/八进制数字；`0o` 前缀自动转换为 Go 兼容的 `0` 前缀；所有数字读取循环支持 `_` 字符；新增 `stripUnderscores` 辅助函数在返回前剥离下划线；新增 `isHexDigit`/`isBinaryDigit`/`isOctalDigit` 辅助函数 |

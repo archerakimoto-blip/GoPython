@@ -187,14 +187,16 @@ func (bs *BlockStatement) String() string {
 }
 
 type FunctionLiteral struct {
-	Token      string
-	Name       string
-	Parameters []*Identifier
-	Body       *BlockStatement
-	VarArgs    *Identifier
-	KwArgs     *Identifier
-	Decorators []Expression // 装饰器列表
-	IsAsync    bool         // 是否为 async 函数
+	Token       string
+	Name        string
+	Parameters  []*Identifier
+	Defaults    []Expression // parallel to Parameters, nil if no default
+	KeywordOnly []bool       // parallel to Parameters, true if keyword-only
+	Body        *BlockStatement
+	VarArgs     *Identifier
+	KwArgs      *Identifier
+	Decorators  []Expression // 装饰器列表
+	IsAsync     bool         // 是否为 async 函数
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}

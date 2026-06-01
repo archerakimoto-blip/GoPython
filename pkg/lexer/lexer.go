@@ -372,21 +372,53 @@ func (l *Lexer) readIdentifier() string {
 
 func (l *Lexer) readNumber() (TokenType, string) {
 	position := l.position
+
+	if l.ch == '0' {
+		next := l.peekChar()
+		if next == 'x' || next == 'X' {
+			l.readChar()
+			l.readChar()
+			for isHexDigit(l.ch) || l.ch == '_' {
+				l.readChar()
+			}
+			return INT, stripUnderscores(l.input[position:l.position])
+		}
+		if next == 'b' || next == 'B' {
+			l.readChar()
+			l.readChar()
+			for isBinaryDigit(l.ch) || l.ch == '_' {
+				l.readChar()
+			}
+			return INT, stripUnderscores(l.input[position:l.position])
+		}
+		if next == 'o' || next == 'O' {
+			l.readChar()
+			l.readChar()
+			for isOctalDigit(l.ch) || l.ch == '_' {
+				l.readChar()
+			}
+			literal := stripUnderscores(l.input[position:l.position])
+			return INT, "0" + literal[2:]
+		}
+	}
+
 	isFloat := false
-	for isDigit(l.ch) {
+	for isDigit(l.ch) || l.ch == '_' {
 		l.readChar()
 	}
 	if l.ch == '.' && isDigit(l.peekChar()) {
 		isFloat = true
 		l.readChar()
-		for isDigit(l.ch) {
+		for isDigit(l.ch) || l.ch == '_' {
 			l.readChar()
 		}
 	}
+
+	literal := stripUnderscores(l.input[position:l.position])
 	if isFloat {
-		return FLOAT, l.input[position:l.position]
+		return FLOAT, literal
 	}
-	return INT, l.input[position:l.position]
+	return INT, literal
 }
 
 func (l *Lexer) readString() string {
@@ -452,6 +484,37 @@ func isIdentifierChar(ch byte) bool {
 
 func isDigit(ch byte) bool {
 	return '0' <= ch && ch <= '9'
+}
+
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || ('a' <= ch && ch <= 'f') || ('A' <= ch && ch <= 'F')
+}
+
+func isBinaryDigit(ch byte) bool {
+	return ch == '0' || ch == '1'
+}
+
+func isOctalDigit(ch byte) bool {
+	return '0' <= ch && ch <= '7'
+}
+
+func stripUnderscores(s string) string {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] != '_' {
+			n++
+		}
+	}
+	if n == len(s) {
+		return s
+	}
+	result := make([]byte, 0, n)
+	for i := 0; i < len(s); i++ {
+		if s[i] != '_' {
+			result = append(result, s[i])
+		}
+	}
+	return string(result)
 }
 
 func lookupIdent(ident string) TokenType {

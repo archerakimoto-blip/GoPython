@@ -34,32 +34,32 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		}
 		// 检查是否是带装饰器的函数
 		if fnLit, ok := s.Expression.(*ast.FunctionLiteral); ok && len(fnLit.Decorators) > 0 {
-			// 脱糖子表达式
 			desugaredFn := desugarExpression(fnLit).(*ast.FunctionLiteral)
 			desugaredDecorators := make([]ast.Expression, len(desugaredFn.Decorators))
 			for i, dec := range desugaredFn.Decorators {
 				desugaredDecorators[i] = desugarExpression(dec)
 			}
 
-			// 创建一个块语句，包含：
-			// 1. 定义原始函数（临时名称）
-			// 2. 用装饰器包装它
-			// 3. 将结果赋值回原函数名
+			for _, dec := range desugaredDecorators {
+				if isLruCacheDecorator(dec) {
+					return desugarLruCache(desugaredFn)
+				}
+			}
+
 			stmts := []ast.Statement{}
 
-			// 原始函数名
 			funcIdent := &ast.Identifier{Token: desugaredFn.Token, Value: desugaredFn.Name}
-			// 临时函数名
 			tempIdent := &ast.Identifier{Token: desugaredFn.Token, Value: "_temp_" + desugaredFn.Name}
 
-			// 1. 把原始函数定义赋值给临时变量
 			tempFn := &ast.FunctionLiteral{
-				Token:      desugaredFn.Token,
-				Name:       "",
-				Parameters: desugaredFn.Parameters,
-				Body:       desugaredFn.Body,
-				VarArgs:    desugaredFn.VarArgs,
-				KwArgs:     desugaredFn.KwArgs,
+				Token:       desugaredFn.Token,
+				Name:        "",
+				Parameters:  desugaredFn.Parameters,
+				Defaults:    desugaredFn.Defaults,
+				KeywordOnly: desugaredFn.KeywordOnly,
+				Body:        desugaredFn.Body,
+				VarArgs:     desugaredFn.VarArgs,
+				KwArgs:      desugaredFn.KwArgs,
 			}
 
 			letStmt := &ast.LetStatement{
@@ -69,19 +69,15 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			}
 			stmts = append(stmts, letStmt)
 
-			// 2. 应用装饰器，从最后一个装饰器开始（因为装饰器是从下往上应用的）
 			currentValue := tempIdent
 			for i := len(desugaredDecorators) - 1; i >= 0; i-- {
 				decorator := desugaredDecorators[i]
-				// 调用装饰器
 				callExpr := &ast.CallExpression{
 					Token:     decorator.TokenLiteral(),
 					Function:  decorator,
 					Arguments: []ast.Expression{currentValue},
 				}
-				// 赋值给临时变量或最终变量
 				if i == 0 {
-					// 最后一个装饰器，赋值回原函数名
 					assignStmt := &ast.AssignStatement{
 						Token: desugaredFn.Token,
 						Names: []*ast.Identifier{funcIdent},
@@ -89,7 +85,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					}
 					stmts = append(stmts, assignStmt)
 				} else {
-					// 中间步骤，赋值给临时变量
 					letStmt = &ast.LetStatement{
 						Token: desugaredFn.Token,
 						Names: []*ast.Identifier{tempIdent},
@@ -99,7 +94,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				}
 			}
 
-			// 如果只有一个装饰器，直接赋值
 			if len(desugaredDecorators) == 1 {
 				decorator := desugaredDecorators[0]
 				callExpr := &ast.CallExpression{
@@ -107,7 +101,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 					Function:  decorator,
 					Arguments: []ast.Expression{tempFn},
 				}
-				// 清空 stmts，用更简单的方式
 				stmts = []ast.Statement{
 					&ast.LetStatement{
 						Token: desugaredFn.Token,
@@ -117,7 +110,6 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				}
 			}
 
-			// 返回块语句
 			return &ast.BlockStatement{
 				Token:      s.Token,
 				Statements: stmts,
@@ -171,6 +163,15 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AssignStatement:
+		if len(s.Names) == 1 {
+			if call, ok := s.Value.(*ast.CallExpression); ok {
+				if ident, ok := call.Function.(*ast.Identifier); ok {
+					if ident.Value == "NamedTuple" && len(call.Arguments) >= 2 {
+						return desugarNamedTuple(s.Names[0].Value, call)
+					}
+				}
+			}
+		}
 		if len(s.Names) > 1 {
 			// 多重赋值：a, b = x, y
 			// 脱糖为 let _temp = x; a = _temp[0]; b = _temp[1];
@@ -341,6 +342,113 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		return desugarMatchStatement(s)
 	default:
 		return stmt
+	}
+}
+
+func desugarNamedTuple(name string, call *ast.CallExpression) ast.Statement {
+	var fields []struct {
+		Name string
+		Type string
+	}
+
+	if list, ok := call.Arguments[1].(*ast.ListLiteral); ok {
+		for _, elem := range list.Elements {
+			if fieldList, ok := elem.(*ast.ListLiteral); ok && len(fieldList.Elements) >= 1 {
+				fieldName := ""
+				fieldType := ""
+				if ident, ok := fieldList.Elements[0].(*ast.Identifier); ok {
+					fieldName = ident.Value
+				}
+				if len(fieldList.Elements) >= 2 {
+					if ident, ok := fieldList.Elements[1].(*ast.Identifier); ok {
+						fieldType = ident.Value
+					}
+				}
+				if fieldName != "" {
+					fields = append(fields, struct {
+						Name string
+						Type string
+					}{Name: fieldName, Type: fieldType})
+				}
+			}
+			if str, ok := elem.(*ast.StringLiteral); ok {
+				fields = append(fields, struct {
+					Name string
+					Type string
+				}{Name: str.Value, Type: ""})
+			}
+		}
+	}
+
+	params := make([]*ast.Identifier, len(fields))
+	initBody := make([]ast.Statement, len(fields))
+	reprParts := make([]ast.Expression, 0, len(fields)*2+1)
+
+	reprParts = append(reprParts, &ast.StringLiteral{Token: name + "(", Value: name + "("})
+
+	for i, f := range fields {
+		params[i] = &ast.Identifier{Token: f.Name, Value: f.Name}
+
+		initBody[i] = &ast.ExpressionStatement{
+			Token: "=",
+			Expression: &ast.InfixExpression{
+				Token:    "=",
+				Left:     &ast.MemberAccess{Token: ".", Object: &ast.Identifier{Token: "self", Value: "self"}, Member: &ast.Identifier{Token: f.Name, Value: f.Name}},
+				Operator: "=",
+				Right:    &ast.Identifier{Token: f.Name, Value: f.Name},
+			},
+		}
+
+		if i > 0 {
+			reprParts = append(reprParts, &ast.StringLiteral{Token: ", ", Value: ", "})
+		}
+		reprParts = append(reprParts, &ast.StringLiteral{Token: f.Name + "=", Value: f.Name + "="})
+		reprParts = append(reprParts, &ast.CallExpression{
+			Token:     "str",
+			Function:  &ast.Identifier{Token: "str", Value: "str"},
+			Arguments: []ast.Expression{&ast.MemberAccess{Token: ".", Object: &ast.Identifier{Token: "self", Value: "self"}, Member: &ast.Identifier{Token: f.Name, Value: f.Name}}},
+		})
+	}
+
+	reprParts = append(reprParts, &ast.StringLiteral{Token: ")", Value: ")"})
+
+	initFn := &ast.FunctionLiteral{
+		Token:      "def",
+		Name:       "__init__",
+		Parameters: append([]*ast.Identifier{{Token: "self", Value: "self"}}, params...),
+		Body:       &ast.BlockStatement{Token: ":", Statements: initBody},
+	}
+
+	reprConcat := reprParts[0]
+	for i := 1; i < len(reprParts); i++ {
+		reprConcat = &ast.InfixExpression{
+			Token:    "+",
+			Left:     reprConcat,
+			Operator: "+",
+			Right:    reprParts[i],
+		}
+	}
+
+	reprFn := &ast.FunctionLiteral{
+		Token:      "def",
+		Name:       "__repr__",
+		Parameters: []*ast.Identifier{{Token: "self", Value: "self"}},
+		Body: &ast.BlockStatement{Token: ":", Statements: []ast.Statement{
+			&ast.ReturnStatement{Token: "return", ReturnValue: reprConcat},
+		}},
+	}
+
+	classStmt := &ast.ClassStatement{
+		Token:   "class",
+		Name:    &ast.Identifier{Token: name, Value: name},
+		Body:    &ast.BlockStatement{Token: ":", Statements: []ast.Statement{}},
+		Methods: []*ast.FunctionLiteral{initFn, reprFn},
+	}
+
+	return &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{{Token: name, Value: name}},
+		Value: classStmt,
 	}
 }
 
@@ -558,20 +666,61 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			Alternative: alternativeBlock,
 		}
 	case *ast.FunctionLiteral:
-		// 脱糖装饰器
 		desugaredDecorators := make([]ast.Expression, len(e.Decorators))
 		for i, dec := range e.Decorators {
 			desugaredDecorators[i] = desugarExpression(dec)
 		}
+
+		desugaredBody := desugarBlockStatement(e.Body)
+
+		defaultStmts := []ast.Statement{}
+		for i, def := range e.Defaults {
+			if def != nil {
+				paramName := e.Parameters[i].Value
+				defaultStmts = append(defaultStmts, &ast.ExpressionStatement{
+					Token: "if",
+					Expression: &ast.IfExpression{
+						Token: "if",
+						Condition: &ast.InfixExpression{
+							Token:    "==",
+							Left:     &ast.Identifier{Token: paramName, Value: paramName},
+							Operator: "==",
+							Right:    &ast.Identifier{Token: "None", Value: "None"},
+						},
+						Consequence: &ast.BlockStatement{
+							Statements: []ast.Statement{
+								&ast.AssignStatement{
+									Token: paramName,
+									Names: []*ast.Identifier{{Token: paramName, Value: paramName}},
+									Value: desugarExpression(def),
+								},
+							},
+						},
+					},
+				})
+			}
+		}
+
+		if len(defaultStmts) > 0 {
+			newStmts := make([]ast.Statement, 0, len(defaultStmts)+len(desugaredBody.Statements))
+			newStmts = append(newStmts, defaultStmts...)
+			newStmts = append(newStmts, desugaredBody.Statements...)
+			desugaredBody = &ast.BlockStatement{
+				Statements: newStmts,
+			}
+		}
+
 		return &ast.FunctionLiteral{
-			Token:      e.Token,
-			Name:       e.Name,
-			Parameters: e.Parameters,
-			Body:       desugarBlockStatement(e.Body),
-			VarArgs:    e.VarArgs,
-			KwArgs:     e.KwArgs,
-			Decorators: desugaredDecorators,
-			IsAsync:    e.IsAsync,
+			Token:       e.Token,
+			Name:        e.Name,
+			Parameters:  e.Parameters,
+			Defaults:    e.Defaults,
+			KeywordOnly: e.KeywordOnly,
+			Body:        desugaredBody,
+			VarArgs:     e.VarArgs,
+			KwArgs:      e.KwArgs,
+			Decorators:  desugaredDecorators,
+			IsAsync:     e.IsAsync,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
@@ -1358,4 +1507,159 @@ func collectPatternBindings(matchVar ast.Expression, pattern ast.Expression) []a
 	}
 
 	return bindings
+}
+
+func isLruCacheDecorator(dec ast.Expression) bool {
+	if ident, ok := dec.(*ast.Identifier); ok {
+		return ident.Value == "lru_cache"
+	}
+	if call, ok := dec.(*ast.CallExpression); ok {
+		if ident, ok := call.Function.(*ast.Identifier); ok {
+			return ident.Value == "lru_cache"
+		}
+		if ma, ok := call.Function.(*ast.MemberAccess); ok {
+			return ma.Member.Value == "lru_cache"
+		}
+	}
+	if ma, ok := dec.(*ast.MemberAccess); ok {
+		return ma.Member.Value == "lru_cache"
+	}
+	return false
+}
+
+func desugarLruCache(fn *ast.FunctionLiteral) ast.Statement {
+	funcIdent := &ast.Identifier{Token: fn.Token, Value: fn.Name}
+	origName := "_lru_orig_" + fn.Name
+	origIdent := &ast.Identifier{Token: fn.Token, Value: origName}
+	cacheAttr := "_cache"
+
+	cacheIdent := &ast.MemberAccess{
+		Token:  ".",
+		Object: funcIdent,
+		Member: &ast.Identifier{Token: cacheAttr, Value: cacheAttr},
+	}
+
+	keyVar := &ast.Identifier{Token: "_lru_key", Value: "_lru_key"}
+	resultVar := &ast.Identifier{Token: "_lru_result", Value: "_lru_result"}
+
+	keyElements := make([]ast.Expression, len(fn.Parameters))
+	for i, p := range fn.Parameters {
+		keyElements[i] = p
+	}
+	keyTuple := &ast.ListLiteral{Token: "(", Elements: keyElements}
+
+	origArgs := make([]ast.Expression, len(fn.Parameters))
+	for i, p := range fn.Parameters {
+		origArgs[i] = p
+	}
+	origCall := &ast.CallExpression{
+		Token:     "(",
+		Function:  origIdent,
+		Arguments: origArgs,
+	}
+
+	cacheLookup := &ast.InfixExpression{
+		Token:    "in",
+		Left:     keyTuple,
+		Operator: "in",
+		Right:    cacheIdent,
+	}
+
+	cacheGet := &ast.IndexExpression{
+		Token: "[",
+		Left:  cacheIdent,
+		Index: keyTuple,
+	}
+
+	wrapperBody := &ast.BlockStatement{
+		Token: ":",
+		Statements: []ast.Statement{
+			&ast.LetStatement{
+				Token: "let",
+				Names: []*ast.Identifier{keyVar},
+				Value: keyTuple,
+			},
+			&ast.ExpressionStatement{
+				Token: "if",
+				Expression: &ast.IfExpression{
+					Token:     "if",
+					Condition: cacheLookup,
+					Consequence: &ast.BlockStatement{
+						Token: ":",
+						Statements: []ast.Statement{
+							&ast.ReturnStatement{
+								Token:       "return",
+								ReturnValue: cacheGet,
+							},
+						},
+					},
+				},
+			},
+			&ast.LetStatement{
+				Token: "let",
+				Names: []*ast.Identifier{resultVar},
+				Value: origCall,
+			},
+			&ast.ExpressionStatement{
+				Token:      "=",
+				Expression: &ast.InfixExpression{
+					Token:    "=",
+					Left:     &ast.IndexExpression{Token: "[", Left: cacheIdent, Index: keyTuple},
+					Operator: "=",
+					Right:    resultVar,
+				},
+			},
+			&ast.ReturnStatement{
+				Token:       "return",
+				ReturnValue: resultVar,
+			},
+		},
+	}
+
+	wrapperFn := &ast.FunctionLiteral{
+		Token:       fn.Token,
+		Name:        fn.Name,
+		Parameters:  fn.Parameters,
+		Defaults:    fn.Defaults,
+		KeywordOnly: fn.KeywordOnly,
+		Body:        wrapperBody,
+		VarArgs:     fn.VarArgs,
+		KwArgs:      fn.KwArgs,
+	}
+
+	origFn := &ast.FunctionLiteral{
+		Token:       fn.Token,
+		Name:        "",
+		Parameters:  fn.Parameters,
+		Defaults:    fn.Defaults,
+		KeywordOnly: fn.KeywordOnly,
+		Body:        desugarBlockStatement(fn.Body),
+		VarArgs:    fn.VarArgs,
+		KwArgs:     fn.KwArgs,
+	}
+
+	return &ast.BlockStatement{
+		Token: fn.Token,
+		Statements: []ast.Statement{
+			&ast.LetStatement{
+				Token: fn.Token,
+				Names: []*ast.Identifier{origIdent},
+				Value: origFn,
+			},
+			&ast.LetStatement{
+				Token: fn.Token,
+				Names: []*ast.Identifier{funcIdent},
+				Value: wrapperFn,
+			},
+			&ast.ExpressionStatement{
+				Token: fn.Token,
+				Expression: &ast.InfixExpression{
+					Token:    "=",
+					Left:     cacheIdent,
+					Operator: "=",
+					Right:    &ast.HashLiteral{Token: "{", Pairs: map[ast.Expression]ast.Expression{}},
+				},
+			},
+		},
+	}
 }

@@ -325,6 +325,14 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.Integer{Value: int64(len(arg.Pairs))}
 			case *objects.Set:
 				return &objects.Integer{Value: int64(len(arg.Elements))}
+			case *objects.Range:
+				return &objects.Integer{Value: arg.Len()}
+			case *objects.Zip:
+				l := arg.Len()
+				if l < 0 {
+					return objects.NewError("cannot determine length of zip with non-sequence argument")
+				}
+				return &objects.Integer{Value: l}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -333,6 +341,15 @@ func (c *Compiler) registerBuiltins() {
 	lenIndex := len(c.constants)
 	c.constants = append(c.constants, lenBuiltin)
 	c.symbolTable.DefineBuiltin("len", lenIndex)
+
+	noneBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			return objects.None_
+		},
+	}
+	noneIndex := len(c.constants)
+	c.constants = append(c.constants, noneBuiltin)
+	c.symbolTable.DefineBuiltin("None", noneIndex)
 
 	appendBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -656,17 +673,7 @@ func (c *Compiler) registerBuiltins() {
 					return objects.NewValueError("range() step cannot be zero")
 				}
 			}
-			elements := []objects.Object{}
-			if step > 0 {
-				for i := start; i < stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			} else {
-				for i := start; i > stop; i += step {
-					elements = append(elements, &objects.Integer{Value: i})
-				}
-			}
-			return &objects.List{Elements: elements}
+			return objects.NewRange(start, stop, step)
 		},
 	}
 	rangeIndex := len(c.constants)
@@ -873,32 +880,7 @@ func (c *Compiler) registerBuiltins() {
 			if len(args) == 0 {
 				return &objects.List{Elements: []objects.Object{}}
 			}
-
-			// 检查所有参数是否都是列表
-			lists := make([]*objects.List, len(args))
-			minLen := -1
-			for i, arg := range args {
-				list, ok := arg.(*objects.List)
-				if !ok {
-					return objects.NewError("zip() arguments must be lists")
-				}
-				lists[i] = list
-				if minLen == -1 || len(list.Elements) < minLen {
-					minLen = len(list.Elements)
-				}
-			}
-
-			// 构建结果
-			result := &objects.List{Elements: []objects.Object{}}
-			for i := 0; i < minLen; i++ {
-				tuple := &objects.List{Elements: []objects.Object{}}
-				for _, list := range lists {
-					tuple.Elements = append(tuple.Elements, list.Elements[i])
-				}
-				result.Elements = append(result.Elements, tuple)
-			}
-
-			return result
+			return objects.NewZip(args)
 		},
 	}
 	zipIndex := len(c.constants)
@@ -1350,15 +1332,29 @@ func (c *Compiler) Compile(node ast.Node) error {
 			})
 		}
 
+		numKeywordOnly := 0
+		for _, kw := range node.KeywordOnly {
+			if kw {
+				numKeywordOnly++
+			}
+		}
+
+		paramNames := make([]string, len(node.Parameters))
+		for i, p := range node.Parameters {
+			paramNames[i] = p.Value
+		}
+
 		compiledFn := &CompiledFunction{
-			Instructions:  fnInstructions,
-			NumLocals:     numLocals,
-			NumParameters: len(node.Parameters),
-			IsGenerator:   c.hasYieldInBody(node.Body),
-			IsAsync:       node.IsAsync,
-			Free:          allFreeVars,
-			VarArgs:       node.VarArgs != nil,
-			KwArgs:        node.KwArgs != nil,
+			Instructions:   fnInstructions,
+			NumLocals:      numLocals,
+			NumParameters:  len(node.Parameters),
+			NumKeywordOnly: numKeywordOnly,
+			ParameterNames: paramNames,
+			IsGenerator:    c.hasYieldInBody(node.Body),
+			IsAsync:        node.IsAsync,
+			Free:           allFreeVars,
+			VarArgs:        node.VarArgs != nil,
+			KwArgs:         node.KwArgs != nil,
 		}
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
