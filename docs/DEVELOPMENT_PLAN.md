@@ -1,8 +1,4 @@
-# Go Python 解释器 - 开发计划文档
-
-## 项目概述
-
-GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 Python 提供高性能的 JIT 编译实现。本文档详细规划了未来版本的特性开发优先级和实现路线图。
+# GoPy 开发计划
 
 **当前版本**: 0.11.x
 **目标版本**: 1.0.0
@@ -12,30 +8,41 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 
 ## 目录
 
-1. [当前实现状态](#当前实现状态)
-2. [特性优先级矩阵](#特性优先级矩阵)
-3. [高优先级特性详细规划](#高优先级特性详细规划)
-4. [中优先级特性详细规划](#中优先级特性详细规划)
-5. [低优先级特性详细规划](#低优先级特性详细规划)
-6. [技术架构改进](#技术架构改进)
-7. [测试策略](#测试策略)
-8. [文档计划](#文档计划)
-9. [里程碑规划](#里程碑规划)
+1. [设计理念](#设计理念)
+2. [当前实现状态](#当前实现状态)
+3. [影响力-难度矩阵](#影响力-难度矩阵)
+4. [版本历史](#版本历史)
+5. [进行中](#进行中)
+6. [路线图](#路线图)
+7. [架构约束](#架构约束)
+8. [测试策略](#测试策略)
+9. [风险评估](#风险评估)
+
+---
+
+## 设计理念
+
+GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是：**尽可能在脱糖层处理高级语法特性，将编译器和虚拟机保持为最小内核**。
+
+这样做的好处：
+1. **内核简洁** — 编译器和虚拟机只需处理基础语义，无需感知装饰器、slots 等高级特性
+2. **可维护性** — 高级特性的变更集中在脱糖层，不污染内核代码
+3. **可测试性** — 脱糖输出是纯 AST，可以独立验证转换正确性
+4. **可扩展性** — 新增语法特性只需在脱糖层添加转换规则
 
 ---
 
 ## 当前实现状态
 
-### 已实现的核心特性
+### 1. 基础语法 (完成度: 98%)
 
-#### 1. 基础语法 (完成度: 98%)
 ✅ 整数、浮点数、布尔值、字符串
 ✅ 数组、字典、集合
 ✅ 基本算术运算 (+, -, *, /, %, //, **)
 ✅ 比较运算 (==, !=, >, <, >=, <=)
 ✅ 链式比较 (a < b < c)
 ✅ 布尔运算 (and, or, not)
-✅ 变量绑定和作用域 (let)
+✅ 变量绑定和作用域
 ✅ 多重赋值/元组解包
 ✅ 增强赋值 (+=, -=, *=, /=, %=, **=)
 ✅ 函数定义和调用
@@ -64,19 +71,8 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ✅ match/case 模式匹配 - Python 3.10+
 ⚠️ 仅位置参数 (/) - **未实现**
 
-#### 2. 并发特性 (完成度: 60%)
-✅ Goroutine 协程
-✅ Channel 通道
-✅ 协程调度器
-✅ async/await 语法
-✅ 异步对象 (Async, Future)
-✅ 并发安全数据结构
-✅ 同步原语 (Mutex, WaitGroup, Once)
-✅ concurrency 模块
-⚠️ asyncio 模块 - **部分实现**
-⚠️ async comprehensions - **未实现**
+### 2. 高级特性 (完成度: 90%)
 
-#### 3. 高级特性 (完成度: 90%)
 ✅ 异常处理 (try/except/finally) + 跨帧异常捕获 + 异常链 (raise E from e)
 ✅ 上下文管理器 (with)
 ✅ 生成器 (yield, yield from)
@@ -101,7 +97,21 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ⚠️ Metaclasses - **未实现**
 ⚠️ Exception groups - **未实现**
 
-#### 4. 运行时优化 (完成度: 75%)
+### 3. 并发特性 (完成度: 60%)
+
+✅ Goroutine 协程
+✅ Channel 通道
+✅ 协程调度器
+✅ async/await 语法
+✅ 异步对象 (Async, Future)
+✅ 并发安全数据结构
+✅ 同步原语 (Mutex, WaitGroup, Once)
+✅ concurrency 模块
+⚠️ asyncio 模块 - **部分实现**
+⚠️ async comprehensions - **未实现**
+
+### 4. 运行时优化 (完成度: 75%)
+
 ✅ 内联缓存 (attrCache)
 ✅ 全局变量缓存 (globalCache/globalVersions)
 ✅ 特化操作码 (int+int 快速路径)
@@ -116,7 +126,8 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ⚠️ 分代 GC - **未实现**
 ⚠️ 直接线程 - **未实现**
 
-#### 5. 标准库 (完成度: 70%)
+### 5. 标准库 (完成度: 70%)
+
 ✅ math, sys, os, json, gc
 ✅ random, string, time, datetime
 ✅ concurrency
@@ -148,640 +159,315 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 
 ---
 
-## 特性优先级矩阵
-
-### 影响力-难度矩阵
+## 影响力-难度矩阵
 
 ```
-        低难度        中难度        高难度
-高影响力  ┌──────────┬──────────┬──────────┐
-         │✅字符串方法│✅多继承  │✅match/case│
-         │✅async    │✅异常链  │✅Descriptors│
-         │✅comprehens│✅__slots__│❌Metaclasses│
-         └──────────┼──────────┼──────────┤
-中影响力  │✅Raw strings│✅Keyword-│❌正则表达式│
-         │❌Ellipsis │✅only args│❌Exception│
-         │✅Byte str │         │  groups   │
-         └──────────┼──────────┼──────────┤
-低影响力  │✅Ordered  │❌Complex │❌仅位置参数│
-         │✅Dict     │numbers  │❌Ellipsis │
-         │✅Dict views│         │❌Metaclasses│
-         └──────────┴──────────┴──────────┘
-```
-
-### 优先级评分标准
-
-- **业务价值** (1-5分): 实际使用频率
-- **实现难度** (1-5分): 代码复杂度
-- **依赖关系** (1-5分): 其他特性的依赖程度
-- **优先级分数**: 业务价值 × 3 + (6 - 实现难度) × 2 + (6 - 依赖关系)
-
----
-
-## 高优先级特性详细规划
-
-### 1. Pattern Matching (match/case) 🔴
-
-**优先级**: ⭐⭐⭐⭐⭐ (最高)
-**估计开发时间**: 4-6 周
-**技术挑战**: 高
-
-#### 1.1 功能描述
-
-Python 3.10+ 引入的结构化模式匹配语法：
-
-```python
-match command.split():
-    case ["quit"]:
-        print("Goodbye!")
-    case ["look"]:
-        print("Looking...")
-    case ["go", direction]:
-        print(f"Going {direction}")
-    case ["drop", *items]:
-        print(f"Dropping {items}")
-    case _:
-        print("Unknown command")
-```
-
-#### 1.2 支持的模式类型
-
-1. **通配符模式** - `case _:` 
-2. **字面量模式** - `case 42:`, `case "text":`
-3. **捕获模式** - `case name:`
-4. **序列模式** - `case [x, y, *rest]:`
-5. **映射模式** - `case {"key": value}:`
-6. **类模式** - `case Point(x, y):`
-7. **OR 模式** - `case 1 | 2 | 3:`
-8. **AS 模式** - `case [x, y] as pair:`
-9. **Guard 子句** - `case x if x > 0:`
-
-#### 1.3 实现计划
-
-**Phase 1: AST 节点定义 (1 周)**
-- 创建 MatchStatement 节点
-- 创建 CaseClause 节点
-- 创建 Pattern 接口和实现
-  - WildcardPattern
-  - LiteralPattern
-  - CapturePattern
-  - SequencePattern
-  - MappingPattern
-  - ClassPattern
-  - OrPattern
-  - AsPattern
-
-**Phase 2: Parser 实现 (2 周)**
-- 实现 match 语句解析
-- 实现 case 子句解析
-- 实现所有模式类型的解析
-- 处理 guard 条件
-
-**Phase 3: Compiler 实现 (1 周)**
-- 设计模式匹配字节码指令
-- 实现模式编译策略
-- 优化模式匹配顺序
-
-**Phase 4: VM 执行 (2 周)**
-- 实现模式匹配解释器
-- 性能优化
-- 错误处理
-
-#### 1.4 技术细节
-
-```go
-// AST 节点定义
-type MatchStatement struct {
-    Token   token.Token
-    Subject Expression
-    Cases   []*CaseClause
-}
-
-type CaseClause struct {
-    Token    token.Token
-    Pattern  Pattern
-    Guard    Expression  // 可选的 guard 条件
-    Body     *BlockStatement
-}
-
-// Pattern 接口
-type Pattern interface {
-    Match(subject Object, env *Environment) (bool, Object, error)
-    TypeCheck(subject Object) error
-}
-```
-
-#### 1.5 测试用例
-
-```python
-# test_pattern_matching.py
-
-# 测试通配符模式
-match 42:
-    case _:
-        assert True
-
-# 测试字面量模式
-match "quit":
-    case "quit":
-        assert True
-    case _:
-        assert False
-
-# 测试序列模式
-match [1, 2, 3]:
-    case [x, y, z]:
-        assert x == 1 and y == 2 and z == 3
-
-# 测试 OR 模式
-match 2:
-    case 1 | 2 | 3:
-        assert True
-
-# 测试带 guard
-match 10:
-    case x if x > 5:
-        assert x == 10
+                    低难度                中难度                高难度
+            ┌───────────────────┬───────────────────┬───────────────────┐
+            │ ✅ P1-1 assert    │ ✅ P1-8 @dataclass│ ✅ P1-5 match/case │
+            │ ✅ P1-2 in/not in │ ✅ P1-11 默认参数  │ ✅ P1-6 多继承MRO  │
+  高影响力   │ ✅ P1-3 is/is not │ ✅ P1-7 super()   │ ✅ P0-15 match/case│
+            │ ✅ P1-13 负数索引 │ ✅ P3-5 特化操作码 │ ✅ P0-16 多继承    │
+            │ ✅ P3-7 range惰性 │ ✅ P3-13 常量折叠 │ ✅ P3-6 内联缓存   │
+            │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ ❌ P3-15 直接线程  │
+            ├───────────────────┼───────────────────┼───────────────────┤
+            │ ✅ P1-9 @abstrmeth│ ✅ P1-10 lru_cache│ ❌ P3-16 寄存器VM  │
+            │ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ ✅ P0-33 描述符    │
+  中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ ❌ P0-34 元类      │
+            │ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ ❌ P3-19 分代GC    │
+            │ ✅ P3-9 全局变量缓存│ ✅ P3-12 对象池  │                   │
+            │ ✅ P3-10 BoundMethod│ ✅ P3-17 Dict优化│                   │
+            ├───────────────────┼───────────────────┼───────────────────┤
+            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ ❌ P1-21 仅位置参数│
+            │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ ❌ P0-18 仅位置参数│
+  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ ❌ P0-12 复数    │
+            │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ ❌ P0-14 Ellipsis│
+            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ ❌ P0-34 元类     │
+            └───────────────────┴───────────────────┴───────────────────┘
 ```
 
 ---
 
-### 2. String Methods 🟡
+## 版本历史
 
-**优先级**: ⭐⭐⭐⭐⭐ (最高)
-**估计开发时间**: 2-3 周
-**技术挑战**: 中
+### v0.3 — 装饰器脱糖重构 ✅
 
-#### 2.1 功能描述
+将 `@property`、`@classmethod`、`@staticmethod` 和 `__slots__` 的处理从内核迁移至脱糖层。
 
-完整的字符串方法支持：
+**`@property`** → `__getattr__` 中添加 getter 调用
+**`@property` + `@x.setter`** → `__getattr__` + `__setattr__` 中添加 getter/setter
+**`@classmethod`** → `__getattr__` 中返回 `__bind_method__(cls._desugar_cm_foo, cls)`
+**`@staticmethod`** → `__getattr__` 中返回 `cls._desugar_sm_bar`
+**`__slots__`** → `__setattr__` 白名单检查
 
-**大小写转换**
-- `str.upper()` - 转换为大写
-- `str.lower()` - 转换为小写
-- `str.capitalize()` - 首字母大写
-- `str.title()` - 每个单词首字母大写
-- `str.swapcase()` - 大小写交换
+### v0.4 — 高影响力低难度特性 ✅
 
-**查找和替换**
-- `str.find(sub)` - 查找子串位置
-- `str.replace(old, new)` - 替换
-- `str.count(sub)` - 计数
-- `str.startswith(prefix)` - 是否以某串开始
-- `str.endswith(suffix)` - 是否以某串结束
+目标：快速补齐最高频缺失特性，全部通过脱糖层实现，不增加内核复杂度。
 
-**分割和连接**
-- `str.split(sep)` - 分割
-- `str.rsplit(sep)` - 从右分割
-- `str.splitlines()` - 按行分割
-- `str.join(iterable)` - 连接
+- [x] P1-1：`assert` 语句脱糖 — `assert expr, msg` → `if not expr: raise AssertionError(msg)`
+- [x] P1-2：`in`/`not in` 运算符脱糖 — `x in y` → `y.__contains__(x)`
+- [x] P1-3：`is`/`is not` 运算符脱糖 — `x is y` → `id(x) == id(y)`
+- [x] P1-13：负数索引 — VM 直接支持负数索引
+- [x] P1-12：for 循环元组解包脱糖 — `for x, y in pairs` → 索引访问
+- [x] P1-9：`@abstractmethod` 装饰器脱糖
+- [x] P1-14：异常链 `raise E from e` 脱糖 — `exc.__cause__ = e; raise exc`
+- [x] P1-15：多异常类型 `except (A, B)` 脱糖 — 展开为多个 except 子句
+- [x] P0-1：Raw strings `r"..."` / `r'...'` — Lexer 新增 RSTRING token
+- [x] P0-3：单引号字符串 `'...'` — Lexer readString 支持
+- [x] P0-25：负数索引 VM 修复
+- [x] P0-26：字符串方法 — `str.upper()`、`str.split()` 等（含 List/Dict/Integer 原生方法）
+- [x] P3-7：`range()` 惰性迭代器 — Range 对象替代列表物化
+- [x] P3-10：BoundMethod 对象类型
+- [x] P3-11：字符串驻留 — 编译器常量池去重
 
-**去除空白**
-- `str.strip()` - 去除两端空白
-- `str.lstrip()` - 去除左端
-- `str.rstrip()` - 去除右端
+**Bug 修复（v0.4）：**
 
-**格式化和对齐**
-- `str.center(width)` - 居中对齐
-- `str.ljust(width)` - 左对齐
-- `str.rjust(width)` - 右对齐
-- `str.zfill(width)` - 零填充
+- [x] BUG-1：`BreakStatement`/`ContinueStatement` 在 desugar 中返回 nil → 改为返回自身
+- [x] BUG-2：`readString()` 只处理 `"` 不处理 `'` → 支持单引号
+- [x] BUG-3：`readString()` 不处理转义字符 → 支持 `\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`
+- [x] BUG-5：`f-string` 解析中 `f` 前缀只匹配 `f"` → 支持 `f'...'`
 
-**布尔判断**
-- `str.isalpha()` - 是否全字母
-- `str.isdigit()` - 是否全数字
-- `str.isalnum()` - 是否字母数字
-- `str.isspace()` - 是否空白字符
-- `str.isupper()` / `str.islower()`
+### v0.5 — 高影响力中难度特性 ✅
 
-#### 2.2 实现计划
+目标：实现核心语言特性，提升语言完整性。
 
-**Phase 1: 核心方法 (1 周)**
-- 大小写转换方法
-- 查找替换方法
-- 分割连接方法
+- [x] P1-8：`@dataclass` 装饰器脱糖 — 自动生成 `__init__` 和 `__repr__`
+- [x] P1-11：默认参数值 — 修改解析器存储默认值 + 脱糖层 `if x == None: x = default`
+- [x] P1-7：`super()` 脱糖 — `super()` → `__super__()`
+- [x] P1-16：f-string 格式化规格脱糖 — `{expr:fmt}` → `format(expr, "fmt")`
+- [x] P1-17：多 for 子句推导式脱糖 — 嵌套循环 + IIFE 包装
+- [x] P0-4：三引号字符串 `"""..."""` / `'''...'''` — 含 `r"""..."""` 和 `f"""..."""`
+- [x] P0-5：位运算符 token `& | ^ ~ << >>` + P1-4 位运算脱糖 → `__and__` 等方法调用
+- [x] P0-6：位运算增强赋值 `&= |= ^= <<= >>=` token
+- [x] P0-7/P0-8：`is`/`in` 运算符 token（配合 P1-2/P1-3 脱糖）
+- [x] P0-9：`assert` 关键字（配合 P1-1 脱糖）
+- [x] P0-19：默认参数值解析器支持
+- [x] P0-20：for 循环元组解包（配合 P1-12 脱糖）
+- [x] P0-22：异常链 `from` 子句（配合 P1-14 脱糖）
+- [x] P0-23：多异常类型（配合 P1-15 脱糖）
+- [x] P3-5：特化操作码 — VM 内联快速路径（int+int 的 OpAdd/OpSub/OpMul 直接计算）
+- [x] P3-13：常量折叠 — 脱糖层编译期计算常量表达式（int/float/string/bool）
 
-**Phase 2: 高级方法 (1 周)**
-- 格式化对齐方法
-- 布尔判断方法
-- 编码转换方法
+**v0.5 变更详情：**
 
-**Phase 3: 优化和测试 (1 周)**
-- Unicode 支持
-- 性能优化
-- 完整测试覆盖
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | 新增 `AssertStatement`、`FormattedExpression`、`ComprehensionFor`；`ForStatement` 新增 `Values` 字段；`FunctionLiteral` 新增 `Defaults` 字段；`RaiseStatement` 新增 `From` 字段；`ExceptClause` 新增 `Types` 字段；`ListComprehension` 新增 `Clauses`/`Filters` 字段 |
+| `pkg/lexer/lexer.go` | 新增 `RSTRING`/`ASSERT`/`IS`/`AMPERSAND`/`PIPE`/`CARET`/`TILDE`/`LSHIFT`/`RSHIFT` 等 token；支持单引号字符串、raw string、三引号字符串、转义字符、位运算符 |
+| `pkg/parser/parser.go` | 新增 `parseAssertStatement`/`parseIsExpression`/`parseInExpression`；支持位运算符、默认参数值、多异常类型、f-string 格式说明符、多 for 子句推导式 |
+| `pkg/desugar/desugar.go` | 新增 `desugarAssertStatement`、`desugarDefaultParams`、`desugarSuperCall`、`desugarDataclass`、`foldConstants`、`desugarMultiClauseListComprehension`；`is`/`in`/位运算脱糖；`raise E from e` 脱糖；`FormattedExpression` → `format()` 调用 |
+| `pkg/compiler/compiler.go` | 新增 `formatValue`/`formatInteger`/`formatFloat`/`formatString` 函数；`format` 内置函数支持 `format(value, spec)` 语义；`FormattedExpression` 编译支持；字符串驻留；`id`/`range`/`len` 内置函数改进 |
+| `pkg/vm/vm.go` | 新增 `getIntegerAttribute`（`__and__`/`__or__`/`__xor__`/`__lshift__`/`__rshift__`/`__invert__`）；OpAdd/OpSub/OpMul 内联快速路径；`nextInstruction` 标签支持 goto 跳转 |
+| `pkg/objects/object.go` | 新增 `NATIVE_METHOD_OBJ`/`RANGE_OBJ`/`BOUNDMETHOD_OBJ`；`NativeMethod`/`Range`/`BoundMethod` 类型 |
 
-#### 2.3 代码示例
+### v0.6 — 高影响力高难度特性 ✅
 
-```go
-// pkg/objects/string.go
-func (s *String) Upper() *String {
-    return &String{Value: strings.ToUpper(s.Value)}
-}
+目标：实现高级语言特性，接近 Python 3.10+ 兼容。
 
-func (s *String) Split(sep *String) *List {
-    parts := strings.Split(s.Value, sep.Value)
-    result := make([]Object, len(parts))
-    for i, p := range parts {
-        result[i] = &String{Value: p}
-    }
-    return &List{Elements: result}
-}
-```
+- [x] P1-5：`match/case` 模式匹配脱糖 — `match expr: case pattern: body` → `if/elif` 链
+- [x] P1-6：多继承 MRO — C3 线性化算法 + `SuperClasses` 列表 + `ComputeMRO()`
+- [x] P0-15：`match/case` 解析器支持 — MATCH/CASE token + `parseMatchStatement` + `parseCaseClause`
+- [x] P0-16：多继承解析器支持 — `class C(A, B):` 逗号分隔多父类
+- [x] P3-6：内联缓存 — VM `attrCache` 基于 IP+ObjType 的属性查找缓存
 
----
+**v0.6 变更详情：**
 
-### 3. 多继承和 MRO 🟡
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | 新增 `MatchStatement`（`Subject`/`Cases`）和 `CaseClause`（`Pattern`/`Guard`/`Body`）；`ClassStatement` 新增 `SuperClasses []*Identifier` 字段 |
+| `pkg/lexer/lexer.go` | 新增 `MATCH`/`CASE` token 常量；注册 `"match": MATCH`、`"case": CASE` 关键字 |
+| `pkg/parser/parser.go` | 新增 `parseMatchStatement`/`parseCaseClause`；`parseClassStatement` 支持逗号分隔多父类；`parseBlockStatement` 终止条件添加 `lexer.CASE` |
+| `pkg/desugar/desugar.go` | 新增 `desugarMatchStatement`：match → `_match_val = expr; if/elif` 链；`buildMatchCondition`：字面量/变量/通配符/或/类/列表模式 → 比较表达式；`collectPatternBindings`：变量绑定赋值；`ClassStatement` 脱糖保留 `SuperClasses` |
+| `pkg/compiler/compiler.go` | 新增 `OpCreateClassWithMultiSuper` 操作码；`compileMatchStatement` fallback（应被脱糖）；`compileClassStatement` 多父类编译路径 |
+| `pkg/vm/vm.go` | 新增 `AttrCacheKey`/`AttrCacheEntry` 类型；VM 新增 `attrCache` 字段；`OpGetAttribute` 内联缓存：Instance/Module 属性查找缓存；`OpCreateClassWithMultiSuper` 处理：弹出多父类、设置 `SuperClasses`、调用 `ComputeMRO()`；`OpCreateClassWithSuper` 改进：同时设置 `SuperClasses` |
+| `pkg/objects/object.go` | `Class` 新增 `SuperClasses []*Class` 和 `MRO []*Class` 字段；`Instance.GetAttr` 支持 MRO 查找；新增 `ComputeMRO()` 和 `c3Linearize()` C3 线性化算法 |
 
-**优先级**: ⭐⭐⭐⭐
-**估计开发时间**: 3-4 周
-**技术挑战**: 高
+### v0.7 — 中影响力特性（性能+语言） ✅
 
-#### 3.1 功能描述
+目标：实现中影响力特性，提升运行时性能和语言便利性。
 
-```python
-class Base1:
-    def method(self):
-        return "Base1"
+- [x] P3-9：全局变量缓存 — VM `globalCache`/`globalVersions` 版本号缓存
+- [x] P1-10：`@lru_cache` 脱糖 — `isLruCacheDecorator` 检测 + `desugarLruCache` 字典记忆化包装
+- [x] P1-18：NamedTuple 脱糖 — `desugarNamedTuple` 生成 `__init__` + `__repr__` 类
+- [x] P3-8：`zip()` 惰性迭代器 — `Zip` 对象 + `ToList()` 按需物化
+- [x] P3-12：对象池 — `GetCachedInteger`（-256~255）+ `GetCachedString`（≤16字符）
+- [x] P3-17：Dict 优化 — `KeyOrder` 有序键列表 + `NewDictWithCapacity` 预分配
 
-class Base2:
-    def method(self):
-        return "Base2"
+**v0.7 变更详情：**
 
-class MyClass(Base1, Base2):
-    pass
+| 模块 | 变更 |
+|------|------|
+| `pkg/objects/object.go` | 新增 `RANGE_OBJ`/`ZIP_OBJ` 类型；`Range` 结构体（`Start`/`Stop`/`Step`）+ `Len()`/`ToList()`/`GetItem()`；`Zip` 结构体（`Iterables`）+ `Len()`/`ToList()`；`GetCachedInteger`（-256~255 整数池）；`GetCachedString`（≤16字符字符串池）；`Dict` 新增 `KeyOrder []string` 有序键列表 + `NewDictWithCapacity` 预分配构造函数；`Dict.Set`/`Delete` 维护 `KeyOrder` |
+| `pkg/vm/vm.go` | 新增 `GlobalCacheEntry` 结构体；VM 新增 `globalCache`/`globalVersions` 字段；`OpGetGlobal` 版本号缓存快速路径；`OpSetGlobal` 递增版本号；`executeRangeIndex`/`executeStringIndex` 新增；`executeTupleIndex` 支持负数索引；`executeBinaryIntegerOperation`/`executeBangOperator` 使用 `GetCachedInteger` |
+| `pkg/compiler/compiler.go` | `range` 内置函数返回 `NewRange` 惰性对象；`zip` 内置函数返回 `NewZip` 惰性对象；`len` 支持 `Range`/`Zip` 对象 |
+| `pkg/desugar/desugar.go` | 新增 `isLruCacheDecorator`：检测 `@lru_cache` 装饰器；`desugarLruCache`：生成 `_cache` 字典 + 键查找 + 结果缓存包装函数；`desugarNamedTuple`：`NamedTuple('Name', [...])` → 生成带 `__init__` + `__repr__` 的类 |
 
-obj = MyClass()
-print(obj.method())  # 应该遵循 C3 线性化算法
-```
+### v0.8 — 低影响力低难度特性 ✅
 
-#### 3.2 实现计划
+目标：完善语言兼容性，补齐低影响力低难度象限。
 
-**Phase 1: 解析器支持 (1 周)**
-- 修改 ClassStatement 支持多父类
-- 验证逗号分隔的父类列表
+- [x] P0-10：0x/0b/0o 字面量 — Lexer `readNumber` 支持 `0x`/`0b`/`0o` 前缀，`0o` 自动转换为 Go 兼容的 `0` 前缀
+- [x] P0-11：数字下划线 — Lexer `readNumber` 跳过 `_` 并在返回前剥离，支持十进制/十六进制/二进制/八进制/浮点数中的下划线
 
-**Phase 2: MRO 算法 (2 周)**
-- 实现 C3 线性化算法
-- 创建继承层次结构
-- 方法解析顺序计算
+**v0.8 变更详情：**
 
-**Phase 3: 运行时支持 (1 周)**
-- 修改属性查找逻辑
-- 实现 super() 内置函数
-- 处理方法冲突
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | `readNumber` 新增 `0x`/`0X`/`0b`/`0B`/`0o`/`0O` 前缀检测分支，分别读取十六进制/二进制/八进制数字；`0o` 前缀自动转换为 Go 兼容的 `0` 前缀；所有数字读取循环支持 `_` 字符；新增 `stripUnderscores` 辅助函数在返回前剥离下划线；新增 `isHexDigit`/`isBinaryDigit`/`isOctalDigit` 辅助函数 |
 
-#### 3.3 C3 线性化算法
+### v0.9 — 低影响力中难度特性 ✅
 
-```go
-func ComputeMRO(classes []*Class) ([]*Class, error) {
-    // 实现 C3 线性化算法
-    // Python 使用 C3 线性化算法确定方法解析顺序
-}
-```
+目标：实现低影响力中难度象限特性，完善语言兼容性和运行时优化。
 
----
+- [x] P1-20/P0-17：仅关键字参数 + 默认参数值 — 解析器 `*` 分隔符支持 + `KeywordOnly` 标记 + VM kwargs 字典处理 + 默认值填充
+- [x] P1-19：Enum 脱糖 — `class Color(Enum): RED=1, GREEN=2` → 类属性 + `_members_` 字典 + 枚举值对象
+- [x] P0-2：Byte strings `b"..."` — Lexer BYTESTRING token + `Bytes` 对象 + VM 索引/切片/比较/len/bool
+- [x] P3-14：死代码消除 — `EliminateDeadCode` BFS 可达性分析 + 跳转目标重写 + 函数内 DCE
 
-### 4. Exception Chaining 🟡
+**v0.9 变更详情：**
 
-**优先级**: ⭐⭐⭐⭐
-**估计开发时间**: 2 周
-**技术挑战**: 中
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | 新增 `BYTESTRING` token；`case 'b':` 处理 `b"..."`/`b'...'` 前缀；`readStringWithQuote(quote byte)` 支持引号类型参数；`case '\'':` 单引号字符串处理 |
+| `pkg/ast/ast.go` | 新增 `ByteStringLiteral` 结构体（`Token`/`Value` 字段） |
+| `pkg/parser/parser.go` | 新增 `parseByteStringLiteral`；注册 `BYTESTRING` 前缀解析器 |
+| `pkg/desugar/desugar.go` | 默认参数值脱糖：`if param == None: param = default` + `None` 表达式确保 IfExpression 栈一致性；Enum 脱糖：`class E(Enum):` → 类属性 + `_members_` 字典 |
+| `pkg/compiler/compiler.go` | `ByteStringLiteral` 编译为 `OpConstant` + `Bytes` 常量；`None` 常量修复（从 Builtin 改为 `objects.None_`）；`OpSetLocal` 编码修复（`emit` → `emit1`）；`len`/`bool` 内置函数支持 `Bytes` 类型；`Bytecode()` 启用 `EliminateDeadCodeInFunctions` |
+| `pkg/compiler/optimize.go` | 新增 `EliminateDeadCode`：BFS 从指令 0 开始可达性分析，terminator（OpReturn/OpReturnValue/OpJump/OpRaise）不跟随 fall-through，重写跳转目标；`EliminateDeadCodeInFunctions`：递归优化 CompiledFunction 常量中的指令；`instructionSize`/`isTerminator`/`readOperand` 辅助函数 |
+| `pkg/vm/vm.go` | `executeBytesIndex`/`executeBytesSlice`/`executeBytesComparison`：Bytes 索引/切片/比较；`OpSlice` 修复：弹出 step 值；VarArgs 修复：`posArgsCount == minParams` 时 `vm.push` 替代 `vm.stack` 赋值；Closure 默认参数支持：`NumKeywordOnly`/`NumDefaults`/`NumPositionalDefaults`/`ParameterNames` 字段 + kwargs 字典处理；`isTruthy` 支持 `Bytes` |
+| `pkg/objects/object.go` | 新增 `BYTES_OBJ` 类型；`Bytes` 结构体（`Value []byte`）+ `NewBytes` 构造函数 + `Inspect` 输出 `b'...'` 格式；`Equal` 支持 `Bytes` 逐字节比较；`Closure` 新增 `NumKeywordOnly`/`NumDefaults`/`NumPositionalDefaults`/`ParameterNames` 字段 |
 
-#### 4.1 功能描述
+**v0.9 Bug 修复：**
 
-```python
-try:
-    raise ValueError("original")
-except ValueError as e:
-    raise TypeError("new") from e  # 异常链
-```
+- [x] OpSetLocal 编码错误：`c.emit(OpSetLocal, ...)` 使用 2 字节操作数编码但 OpSetLocal 期望 1 字节 → 改为 `c.emit1(OpSetLocal, ...)`
+- [x] None 常量注册为 Builtin 函数：`b == None` 始终返回 false → 改为存储 `objects.None_` 常量
+- [x] OpSlice step 值栈泄漏：编译器推送 4 值但 VM 只弹出 3 个 → 添加 `step := vm.pop()`
+- [x] IfExpression 栈不一致：默认参数脱糖生成的 `if b == None: b = 10` 中 AssignStatement 不留值 → 添加 None 表达式确保栈一致
+- [x] OpGetLocal 读取超出 sp：默认参数 IfExpression 的 OpPop 弹出了错误栈位 → 根因是 IfExpression 栈不一致（已修复）
+- [x] Closure 不支持默认参数：`make_adder(n=10)` 调用报错 → Closure 结构体新增默认参数字段 + VM 闭包调用路径支持
+- [x] VarArgs 空参数覆盖：`greet("Alice")` 中 `args` 覆盖了 `name` → 改用 `vm.push` 替代 `vm.stack` 赋值
 
-#### 4.2 实现细节
+### v0.10 — 描述符协议与内置描述符 ✅
 
-```go
-type Exception struct {
-    Type      *String
-    Value     *String
-    Traceback *Traceback
-    Context   *Exception  // 来自的异常
-    __cause__ *Exception   // 显式指定的异常
-}
-```
+目标：实现 Python 描述符协议，支持 property/classmethod/staticmethod 和 __slots__。
 
----
+- [x] P0-33：描述符协议 — `__get__`/`__set__`/`__delete__`，数据描述符优先于实例属性
+- [x] 内置 `property` — getter/setter/deleter，VM `OpGetAttribute`/`OpSetAttribute` 中拦截
+- [x] 内置 `classmethod` — `__getattr__` 返回绑定类的方法
+- [x] 内置 `staticmethod` — `__getattr__` 返回原始函数
+- [x] `__slots__` — 实例属性白名单检查，继承场景下父类 slots 合并
+- [x] 属性赋值语法 — `obj.attr = value`（`AttributeAssignStatement` AST 节点）
+- [x] 装饰器解析/编译 — `@property`/`@classmethod`/`@staticmethod` 在类体中的解析和编译
 
-### 5. Descriptors 🟡
+**v0.10 变更详情：**
 
-**优先级**: ⭐⭐⭐⭐
-**估计开发时间**: 3 周
-**技术挑战**: 高
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | 新增 `AttributeAssignStatement` 结构体（`Object`/`Attribute`/`Value` 字段） |
+| `pkg/parser/parser.go` | 新增 `parseExpressionOrAttrAssign()`；类体中装饰器解析修复 |
+| `pkg/objects/object.go` | 新增 `PROPERTY_OBJ`/`CLASSMETHOD_OBJ`/`STATICMETHOD_OBJ` 类型；`Property`/`ClassMethod`/`StaticMethod` 结构体；`Descriptor` 接口 + `IsDescriptor()`/`IsDataDescriptor()` 函数；`Class` 新增 `Slots []string` + `HasSlots()`/`IsSlotAllowed()` |
+| `pkg/compiler/compiler.go` | 新增 `property`/`classmethod`/`staticmethod` 内置函数；`compileClassStatement` 处理 `@staticmethod`/`@classmethod` 装饰器 |
+| `pkg/vm/vm.go` | `OpGetAttribute`：数据描述符 → 实例属性 → 非数据描述符查找优先级；`OpSetAttribute`：property setter / 数据描述符 `__set__` / `__slots__` 检查；`Frame` 新增 `initInstance`/`setAttrValue` 字段 |
 
-#### 5.1 功能描述
+**v0.10 Bug 修复：**
 
-属性描述符协议：
+- [x] 编译器 `lastInstruction` 状态泄漏：`compileFunction`/`FunctionLiteral` 进入新作用域时未重置 → 保存/恢复 `lastInstruction`/`previousInstruction`
+- [x] `return vm.push(val)` 导致 VM 提前退出 → 改为 `vm.push(val); continue`
+- [x] `__init__` 返回值覆盖实例 → `Frame.initInstance` 标记
 
-```python
-class Property:
-    def __init__(self, fget):
-        self.fget = fget
-    
-    def __get__(self, obj, objtype=None):
-        return self.fget(obj)
-    
-    def __set__(self, obj, value):
-        raise AttributeError("Read-only")
+### v0.11 — try/except 编译器修复 ✅
 
-class MyClass:
-    @property
-    def value(self):
-        return self._value
-    
-    @value.setter
-    def value(self, val):
-        self._value = val
-```
+目标：修复 try/except 的编译器和 VM 问题，确保异常处理正确工作。
 
-#### 5.2 实现计划
+- [x] `OpBeginTry` 新增 `handlerIP` 操作数 — 编译器回填第一个 `OpExceptHandler` 的位置
+- [x] try 块无异常时不穿透到 except 块 — 编译器在 try body 后始终生成 `OpJump`
+- [x] 跨帧异常处理 — `OpRaise`/`raiseException` 正确回退帧到 `try/except` 所在帧
+- [x] `matchesException` catch-all — 裸 `except:` 捕获任何类型异常
+- [x] DCE 保留异常处理器 — `EliminateDeadCode` 理解 `OpBeginTry` 控制流，标记 `handlerIP` 为可达
 
-**Phase 1: 描述符协议 (2 周)**
-- `__get__(self, obj, objtype)`
-- `__set__(self, obj, value)`
-- `__delete__(self, obj)`
+**v0.11 变更详情：**
 
-**Phase 2: 内置描述符 (1 周)**
-- property
-- classmethod
-- staticmethod
+| 模块 | 变更 |
+|------|------|
+| `pkg/compiler/compiler.go` | `compileTryStatement`：`OpBeginTry` 新增第 3 个操作数 `handlerIP`（7 字节指令）；try body 后始终生成 `OpJump`；回填 `handlerIP` |
+| `pkg/compiler/optimize.go` | `instructionSize`：`OpBeginTry` 从 5 字节改为 7 字节；`EliminateDeadCode`：`OpBeginTry` 标记 `handlerIP` 位置为可达；重写时更新 `handlerIP` |
+| `pkg/vm/vm.go` | `OpBeginTry`：读取 `handlerIP` 操作数；`OpRaise`/`OpEndTry`：使用 `handlerIP` 扫描 `OpExceptHandler`；`ExceptionHandler.handlerIP` 在 `OpBeginTry` 时设置；`raiseException`：使用 `handlerIP` 替代 `tryBlockStartIP` 扫描；移除 `handlerIP == -1` 检查，改用 `exceptCount == 0` |
 
 ---
 
-### 6. Async Comprehensions 🟡
+## 进行中
 
-**优先级**: ⭐⭐⭐⭐
-**估计开发时间**: 2 周
-**技术挑战**: 中
+### Bug 修复
 
-#### 6.1 功能描述
+- [ ] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。根因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1。修复方案：在 `OpBeginTry` 中编码 `finallyStartIP`（类似 `handlerIP` 的方式）
 
-```python
-# 异步列表推导式
-result = [x async for x in agenator if x > 0]
+### 脱糖层增强
 
-# 异步生成器表达式
-gen = (x async for x in agenator)
+- [ ] `@property` 的 `@x.deleter` 端到端测试
+- [ ] `@classmethod` / `@staticmethod` 端到端测试
+- [ ] `__slots__` 端到端测试
+- [ ] 装饰器与继承的交互测试
+- [ ] 用户自定义 `__getattr__` / `__setattr__` 与脱糖生成代码的合并测试
 
-# 异步字典/集合推导式
-dict_result = {k: v async for k, v in agen.items()}
-```
+### 词法分析器 / 解析器
 
----
-
-### 7. __slots__ 🟡
-
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 2 周
-**技术挑战**: 中
-
-#### 7.1 功能描述
-
-```python
-class Point:
-    __slots__ = ['x', 'y']
-    
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-```
+- [ ] 类体中 `@property` / `@classmethod` / `@staticmethod` 装饰器解析的健壮性改进
+- [ ] INDENT/DEDENT 边界情况处理
 
 ---
 
-### 8. Raw Strings 🟢
+## 路线图
 
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 1 周
-**技术挑战**: 低
+### v0.12 — 脱糖迁移 + Bug 修复 (计划中)
 
-#### 8.1 功能描述
+当前 property/classmethod/staticmethod/__slots__ 的处理仍在 VM 和 compiler 中。根据脱糖优先原则，应迁移到脱糖层：
 
-```python
-path = r"C:\Users\Name\Documents"
-regex = r"\d+\.\d+"  # 不需要转义
-```
+- [ ] `@property` → 脱糖生成 `__getattr__` + `__setattr__` 方法
+- [ ] `@classmethod` → 脱糖生成 `__getattr__` 中返回 `__bind_method__(cls._desugar_cm_foo, cls)`
+- [ ] `@staticmethod` → 脱糖生成 `__getattr__` 中返回 `cls._desugar_sm_bar`
+- [ ] `__slots__` → 脱糖生成 `__setattr__` 白名单检查
+- [ ] try-only-finally 异常穿透修复 — `OpBeginTry` 编码 `finallyStartIP`
 
----
+### v0.13 — 剩余高难度特性 (计划中)
 
-## 中优先级特性详细规划
+- [ ] Metaclasses
+- [ ] 仅位置参数 (/)
+- [ ] Exception groups
 
-### 9. Keyword-only Arguments ⚠️
+### v0.14 — 低影响力特性 (计划中)
 
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 2 周
+- [ ] Ellipsis (...)
+- [ ] Complex numbers
+- [ ] Dictionary Views
 
-```python
-def func(a, b, *, key1, key2):
-    pass
+### v0.15 — 标准库与运行时 (计划中)
 
-func(1, 2, key1=3, key2=4)  # 正确
-func(1, 2, 3, 4)            # 错误
-```
+- [ ] re 正则表达式模块
+- [ ] Async comprehensions
+- [ ] 分代 GC
+- [ ] 寄存器 VM
 
-### 10. Positional-only Arguments ⚠️
+### v1.0.0 — Production Ready
 
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 2 周
-
-```python
-def func(a, b, /, c, d):
-    pass
-
-func(1, 2, 3, 4)  # 正确
-func(1, 2, c=3, d=4)  # 正确
-```
-
-### 11. Ellipsis (...) ⚠️
-
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 1 周
-
-```python
-# 类型标注
-def func(x: List[int]) -> Dict[str, int]: ...
-
-# 切片
-arr[..., 1]  # NumPy 风格
-```
-
-### 12. Abstract Base Classes ⚠️
-
-**优先级**: ⭐⭐
-**估计开发时间**: 3 周
-
-```python
-from abc import ABC, abstractmethod
-
-class Shape(ABC):
-    @abstractmethod
-    def area(self):
-        pass
-```
-
-### 13. Data Classes ⚠️
-
-**优先级**: ⭐⭐
-**估计开发时间**: 4 周
-
-```python
-from dataclasses import dataclass
-
-@dataclass
-class Point:
-    x: float
-    y: float
-    color: str = "red"
-```
-
-### 14. Metaclasses ⚠️
-
-**优先级**: ⭐⭐
-**估计开发时间**: 4 周
-
-```python
-class Meta(type):
-    def __new__(cls, name, bases, dct):
-        return super().__new__(cls, name, bases, dct)
-
-class MyClass(metaclass=Meta):
-    pass
-```
-
-### 15. Asyncio 模块 ⚠️
-
-**优先级**: ⭐⭐⭐
-**估计开发时间**: 4-6 周
+- [ ] 完整的 asyncio 模块
+- [ ] 性能基准测试达标
+- [ ] 生产环境验证
 
 ---
 
-## 低优先级特性详细规划
+## 架构约束
 
-### 16. Ordered Dict ⚠️
-
-**优先级**: ⭐
-**估计开发时间**: 1 周
-
-Python 3.7+ 的普通 dict 已经保持插入顺序，但 OrderedDict 类仍需实现以保持兼容性。
-
-### 17. Dictionary Views ⚠️
-
-**优先级**: ⭐
-**估计开发时间**: 2 周
-
-```python
-d = {'a': 1, 'b': 2}
-keys = d.keys()   # dict_keys(['a', 'b'])
-values = d.values()  # dict_values([1, 2])
-items = d.items()  # dict_items([('a', 1), ('b', 2)])
-```
-
-### 18. Complex Numbers ⚠️
-
-**优先级**: ⭐
-**估计开发时间**: 2 周
-
-```python
-c = 3 + 4j
-print(c.real)  # 3.0
-print(c.imag)  # 4.0
-```
-
-### 19. Byte Strings ⚠️
-
-**优先级**: ⭐
-**估计开发时间**: 2 周
-
-```python
-b = b"hello"
-print(b[0])  # 104
-```
-
----
-
-## 技术架构改进
-
-### 1. 性能优化
-
-#### 1.1 JIT 编译器改进
-- **热点检测**: 实现基于采样的热点检测
-- **内联优化**: 函数内联和特化
-- **代码生成**: 更高效的 x86-64 和 ARM64 代码生成
-- **缓存机制**: 编译结果缓存
-
-#### 1.2 内存管理
-- **对象池**: 减少 GC 压力
-- **内存分配器**: 定制化内存分配策略
-- **延迟回收**: 减少短生命周期对象的 GC 开销
-
-#### 1.3 并发优化
-- **工作窃取**: 改进协程调度器
-- **锁优化**: 减少锁竞争
-- **批量操作**: 批量系统调用
-
-### 2. 错误处理改进
-
-#### 2.1 更好的错误信息
-```python
-# 当前
-Error: unsupported operand type(s) for +: 'int' and 'str'
-
-# 改进后
-TypeError: unsupported operand type(s) for +: 'int' and 'str'
-  File "test.py", line 3, in <module>
-    result = 5 + "hello"
-            ~ ^ ~~~~~~~~~~
-```
-
-#### 2.2 堆栈跟踪改进
-- 显示更多上下文信息
-- 源代码片段
-- 变量值检查
-
-### 3. 调试能力增强
-
-#### 3.1 REPL 改进
-- 自动补全
-- 多行编辑
-- 历史记录
-- 帮助系统
-
-#### 3.2 调试器增强
-- 条件断点
-- 监视点
-- 异步调试
+1. **脱糖层不修改内核** — 脱糖层只能生成由现有内核支持的 AST 节点和内置函数调用
+2. **内置函数最小化** — 新增内置函数需有充分理由，优先使用现有指令组合
+3. **向后兼容** — 脱糖转换不应改变用户可见的语义行为
+4. **可调试性** — 脱糖生成的混淆方法名（`_desugar_*`）应保持可追溯性
+5. **脱糖优先原则** — 新增语法特性优先考虑脱糖实现，仅在性能关键路径上引入内核支持
 
 ---
 
 ## 测试策略
 
-### 1. 测试金字塔
-
-```
-        ┌─────────────┐
-        │   E2E Tests │    端到端测试
-        │    (50+)    │    真实 Python 脚本
-        └──────┬──────┘
-               │
-        ┌──────┴──────┐
-        │  API Tests   │    集成测试
-        │   (200+)     │    包/模块级别
-        └──────┬──────┘
-               │
-        ┌──────┴──────┐
-        │  Unit Tests   │    单元测试
-        │   (500+)     │    函数/类级别
-        └─────────────┘
-```
-
-### 2. 测试覆盖目标
+### 测试覆盖目标
 
 | 模块 | 当前覆盖 | 目标覆盖 |
 |------|----------|----------|
@@ -793,311 +479,32 @@ TypeError: unsupported operand type(s) for +: 'int' and 'str'
 | Desugar | 70% | 90% |
 | Concurrency | 55% | 80% |
 
-### 3. 兼容性测试
+### 成功指标
 
-#### 3.1 Python 标准测试套件
-- 使用 Python 官方测试套件
-- 重点关注已实现的特性
-- 跟踪 CPython 行为
-
-#### 3.2 跨版本测试
-```bash
-# 测试 Python 3.8-3.12 特性
-python3.8 -m pytest tests/
-python3.9 -m pytest tests/
-python3.10 -m pytest tests/
-```
-
-### 4. 性能基准测试
-
-```python
-# benchmarks/test_performance.py
-import time
-
-def benchmark_list_comprehension():
-    start = time.time()
-    result = [x ** 2 for x in range(10000)]
-    return time.time() - start
-
-def benchmark_function_calls():
-    start = time.time()
-    for i in range(10000):
-        fibonacci(i)
-    return time.time() - start
-```
-
----
-
-## 文档计划
-
-### 1. 用户文档
-
-#### 1.1 快速开始指南
-- 安装和配置
-- 基本用法
-- 常见示例
-
-#### 1.2 语言参考
-- 完整的语法规范
-- 内置函数文档
-- 标准库文档
-
-#### 1.3 教程
-- Python 到 GoPython
-- 并发编程指南
-- 性能优化技巧
-
-### 2. 开发者文档
-
-#### 2.1 架构设计
-- 整体架构图
-- 组件交互
-- 设计决策
-
-#### 2.2 代码规范
-- Go 代码风格
-- 提交规范
-- PR 流程
-
-#### 2.3 贡献指南
-- 开发环境设置
-- 测试指南
-- 提交流程
-
-### 3. API 文档
-
-#### 3.1 Go API
-```go
-// 包文档
-package gopy // import "github.com/go-py/go-python"
-
-import (
-    "github.com/go-py/go-python/pkg/vm"
-)
-
-// New creates a new Python VM instance
-func New() *vm.VM
-
-// Run executes Python code
-func (vm *VM) Run(code string) error
-```
-
-#### 3.2 命令行工具
-```bash
-gopy run script.py
-gopy compile script.py -o output.gyc
-gopy disasm script.py
-```
-
----
-
-## 里程碑规划
-
-### 版本 0.3–0.5 — 基础特性补齐 ✅ 已完成
-
-- ✅ 完整的字符串方法支持
-- ✅ Raw strings (r"...")
-- ✅ Keyword-only arguments
-- ✅ @dataclass / @abstractmethod / @lru_cache 装饰器
-- ✅ 默认参数值 / super() / f-string 格式化规格
-- ✅ 位运算符 / 常量折叠 / 特化操作码
-
-### 版本 0.6–0.7 — 高级语言特性 ✅ 已完成
-
-- ✅ match/case 模式匹配
-- ✅ 多继承 + C3 MRO 算法
-- ✅ 内联缓存 / 全局变量缓存
-- ✅ @lru_cache / NamedTuple / zip() 惰性迭代器
-- ✅ 对象池 / Dict 优化
-
-### 版本 0.8–0.9 — 语言兼容性 ✅ 已完成
-
-- ✅ 0x/0b/0o 字面量 + 数字下划线
-- ✅ 仅关键字参数 + Enum + Byte strings
-- ✅ 死代码消除
-
-### 版本 0.10–0.11 — 描述符与异常处理 ✅ 已完成
-
-- ✅ 描述符协议 (__get__/__set__/__delete__)
-- ✅ property / classmethod / staticmethod
-- ✅ __slots__
-- ✅ try/except 编译器修复 + 跨帧异常捕获
-
-### 版本 0.12 — 脱糖迁移 + Bug 修复 (计划中)
-
-- [ ] @property → 脱糖生成 __getattr__ + __setattr__
-- [ ] @classmethod → 脱糖生成 __getattr__ 返回绑定方法
-- [ ] @staticmethod → 脱糖生成 __getattr__ 返回原始函数
-- [ ] __slots__ → 脱糖生成 __setattr__ 白名单检查
-- [ ] try-only-finally 异常穿透修复 — 在 OpBeginTry 中编码 finallyStartIP
-
-### 版本 0.13 — 剩余高难度特性 (计划中)
-
-- [ ] Metaclasses
-- [ ] 仅位置参数 (/)
-- [ ] Exception groups
-
-### 版本 0.14 — 低影响力特性 (计划中)
-
-- [ ] Ellipsis (...)
-- [ ] Complex numbers
-- [ ] Dictionary Views
-
-### 版本 0.15 — 标准库与运行时 (计划中)
-
-- [ ] re 正则表达式模块
-- [ ] Async comprehensions
-- [ ] 分代 GC
-- [ ] 寄存器 VM
-
-### 版本 1.0.0 - Production Ready
-
-- [ ] 完整的 asyncio 模块
-- [ ] 性能基准测试达标
-- [ ] 生产环境验证
-
----
-
-## 资源估算
-
-### 开发时间总览
-
-| 特性类别 | 特性数量 | 总时间 | 占比 |
-|----------|----------|--------|------|
-| 高优先级 | 15 | 30 周 | 50% |
-| 中优先级 | 10 | 25 周 | 42% |
-| 低优先级 | 5 | 5 周 | 8% |
-| **总计** | **30** | **60 周** | **100%** |
-
-### 团队规模建议
-
-| 阶段 | 推荐团队规模 | 角色分配 |
-|------|--------------|----------|
-| 核心开发 | 2-3 人 | 1 核心架构 + 1-2 功能开发 |
-| 全面开发 | 4-6 人 | 1 架构 + 2 功能 + 1 测试 + 1-2 文档 |
-| 维护阶段 | 2-3 人 | 1 维护 + 1-2 功能 |
-
-### 基础设施需求
-
-1. **CI/CD**
-   - GitHub Actions
-   - 自动化测试
-   - 性能基准测试
-
-2. **代码质量**
-   - Code Review
-   - 代码覆盖率工具
-   - 静态分析
-
-3. **文档**
-   - GitBook/Sphinx
-   - API 文档生成
-   - 示例代码
+- [ ] 支持 95% 的核心 Python 语法
+- [ ] 执行速度达到 CPython 的 80%+
+- [ ] 测试覆盖率 > 80%
+- [ ] 关键路径测试覆盖率 > 95%
 
 ---
 
 ## 风险评估
 
-### 1. 技术风险
-
 | 风险 | 影响 | 可能性 | 缓解策略 |
 |------|------|--------|----------|
-| Pattern matching 实现复杂度 | 高 | 中 | 分阶段实现，逐步测试 |
+| 脱糖迁移引入回归 | 高 | 中 | 端到端测试覆盖 + 逐步迁移 |
+| Metaclasses 实现复杂度 | 高 | 中 | 分阶段实现，对标 CPython |
 | 性能回归 | 高 | 低 | 完整的性能测试套件 |
-| 多继承 MRO 算法错误 | 高 | 中 | 对标 CPython 测试用例 |
-| JIT 编译器 bug | 高 | 中 | 强化集成测试 |
-
-### 2. 项目风险
-
-| 风险 | 影响 | 可能性 | 缓解策略 |
-|------|------|--------|----------|
-| 开发时间超期 | 中 | 高 | 敏捷迭代，定期评估 |
-| 资源不足 | 高 | 中 | 优先级排序，聚焦核心 |
-| 需求变更 | 低 | 中 | 灵活架构，易于扩展 |
+| try-only-finally 修复影响现有异常处理 | 中 | 低 | 回归测试 + 增量修改 |
 
 ---
 
-## 成功指标
-
-### 1. 功能指标
-
-- [ ] 支持 95% 的核心 Python 语法
-- [ ] 字符串方法覆盖率 > 90%
-- [ ] 类特性覆盖率 > 85%
-- [ ] 异常处理完整度 > 90%
-
-### 2. 性能指标
-
-- [ ] 执行速度达到 CPython 的 80%+
-- [ ] 启动时间 < 100ms
-- [ ] 内存占用 < CPython 的 150%
-- [ ] 并发性能线性扩展
-
-### 3. 质量指标
-
-- [ ] 测试覆盖率 > 80%
-- [ ] 关键路径测试覆盖率 > 95%
-- [ ] 文档覆盖率 > 90%
-- [ ] Bug 修复响应时间 < 48h
-
-### 4. 社区指标
-
-- [ ] GitHub Stars > 1000
-- [ ] 活跃贡献者 > 20
-- [ ] Stack Overflow 问题 > 100
-- [ ] 生产用户 > 10
-
----
-
-## 附录
-
-### A. Python 语法检查清单
-
-```python
-# 基础语法
-✅ 变量和类型
-✅ 运算符
-✅ 控制流
-✅ 函数定义
-✅ 类定义
-✅ 异常处理
-✅ 上下文管理器
-✅ 导入系统
-
-# 高级语法
-✅ Pattern matching (match/case)
-✅ 生成器
-✅ 装饰器
-✅ 上下文管理器
-✅ 描述符协议
-✅ 元编程特性 (部分实现，缺 Metaclasses)
-
-# 标准库
-✅ 内置函数
-✅ 字符串方法
-✅ 列表/字典/集合
-⚠️ 正则表达式 (未实现)
-⚠️ IO 操作 (部分实现)
-```
-
-### B. 参考资源
-
-- [Python 官方文档](https://docs.python.org/3/)
-- [CPython 源码](https://github.com/python/cpython)
-- [Python 语言参考](https://docs.python.org/3/reference/)
-- [Go 语言文档](https://go.dev/doc/)
-
-### C. 术语表
+## 术语表
 
 - **AST**: Abstract Syntax Tree，抽象语法树
 - **Desugar**: 语法脱糖，将高级语法转换为低级语法
+- **DCE**: Dead Code Elimination，死代码消除
 - **JIT**: Just-In-Time，运行时编译
 - **MRO**: Method Resolution Order，方法解析顺序
 - **VM**: Virtual Machine，虚拟机
 - **GC**: Garbage Collection，垃圾回收
-
----
-
-**文档版本**: 1.0
-**维护者**: GoPython 开发团队
-**最后更新**: 2026年
