@@ -32,7 +32,7 @@ class ReadOnlyDesc:
         return "readonly_value"
     
     def __set__(self, obj, value):
-        raise Exception("cannot set readonly attribute")
+        raise "cannot set readonly attribute"
 
 class ReadOnly:
     x = ReadOnlyDesc()

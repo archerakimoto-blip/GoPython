@@ -1706,16 +1706,14 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 	hasExcept := len(ts.Excepts) > 0
 	hasFinally := ts.Finally != nil
 
-	c.emit(OpBeginTry, boolToInt(hasExcept), boolToInt(hasFinally))
+	c.emit(OpBeginTry, len(ts.Excepts), boolToInt(hasFinally))
 
 	if err := c.Compile(ts.Body); err != nil {
 		return err
 	}
 
 	jumpPositions := []int{}
-	if hasFinally {
-		jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
-	}
+	jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
 
 	if hasExcept {
 		for _, ex := range ts.Excepts {
@@ -1754,9 +1752,7 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 				return err
 			}
 
-			if hasFinally {
-				jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
-			}
+			jumpPositions = append(jumpPositions, c.emit(OpJump, 0))
 		}
 	}
 
@@ -1768,6 +1764,11 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 		}
 		for _, pos := range jumpPositions {
 			c.changeOperand(pos, finallyStartPos)
+		}
+	} else {
+		afterTryPos := len(c.instructions)
+		for _, pos := range jumpPositions {
+			c.changeOperand(pos, afterTryPos)
 		}
 	}
 
