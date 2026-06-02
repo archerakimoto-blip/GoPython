@@ -23,7 +23,7 @@ class Base:
     def greet():
         return "hello"
 
-class Child(Base):
+class Child(MyClass, Base):
     pass
 
 if Child.who() != "Child":

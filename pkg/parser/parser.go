@@ -295,6 +295,17 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseImportStatement()
 	case lexer.FROM:
 		return p.parseFromImportStatement()
+	case lexer.IF:
+		// 顶层 if 语句，作为 ExpressionStatement 处理，设置 lastStmtAdvanced
+		expr := p.parseIfExpression()
+		if expr == nil {
+			return nil
+		}
+		p.lastStmtAdvanced = true // 这样 parseProgram 不会再 nextToken
+		return &ast.ExpressionStatement{
+			Token:      p.curToken.Literal,
+			Expression: expr,
+		}
 	case lexer.IDENT:
 		switch p.peekToken.Type {
 		case lexer.ASSIGN:

@@ -553,8 +553,16 @@ func (vm *VM) Run() error {
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
 				pendingError := vm.exceptionStack[lastIdx].pendingError
+				handler := vm.exceptionStack[lastIdx]
 				vm.exceptionStack = vm.exceptionStack[:lastIdx]
 				vm.inFinally = false
+
+				// 如果 except 块处理了异常，我们需要把之前 push 到栈上的异常对象 pop 掉
+				// 判断依据是我们当前栈是否比 handler.stackPtr 多一个值（也就是那个 errObj）
+				if vm.sp > handler.stackPtr {
+					// 检查栈顶是不是异常对象（虽然理论上是的）
+					_ = vm.pop()
+				}
 
 				if pendingError != nil {
 					err := vm.push(pendingError)
@@ -882,7 +890,7 @@ func (vm *VM) Run() error {
 			class := vm.constants[idx].(*objects.Class)
 			vm.currentFrame().ip += 2
 
-			numParents := int(ins[ip+1])
+			numParents := int(ins[ip+3])
 			vm.currentFrame().ip += 1
 
 			parents := make([]*objects.Class, 0, numParents)
@@ -1346,7 +1354,6 @@ func (vm *VM) Run() error {
 
 func (vm *VM) executeCall(numArgs int) error {
 	calleeIndex := vm.sp - numArgs - 1
-	
 	calleeObj := vm.stack[calleeIndex]
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
