@@ -908,11 +908,14 @@ func (vm *VM) Run() error {
 			attrName := vm.constants[idx].(*objects.String).Value
 
 			obj := vm.pop()
+			fmt.Printf("[DEBUG-GET] OpGetAttribute attr=%q objType=%T\n", attrName, obj)
 
 			if instance, ok := obj.(*objects.Instance); ok {
 				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.INSTANCE_OBJ}
+				fmt.Printf("[DEBUG-GET] attr=%q class=%q cacheHit=%v\n", attrName, instance.Class.Name, false)
 				if entry, hit := vm.attrCache[cacheKey]; hit {
 					if entry.ClassName == instance.Class.Name {
+						fmt.Printf("[DEBUG-GET] cache HIT for attr=%q isMethod=%v\n", attrName, entry.IsMethod)
 						if entry.IsMethod {
 							vm.push(instance)
 							vm.push(entry.Value)
@@ -952,8 +955,11 @@ func (vm *VM) Run() error {
 							continue
 						}
 						if objects.IsDataDescriptor(classAttr) {
+							fmt.Printf("[DEBUG-GET] data descriptor found for attr=%q\n", attrName)
 							if descInst, ok := classAttr.(*objects.Instance); ok {
-								if getMethod, ok := descInst.GetAttr("__get__"); ok {
+								getMethod, getFound := descInst.GetAttr("__get__")
+								fmt.Printf("[DEBUG-GET] __get__ found=%v type=%T\n", getFound, getMethod)
+								if getFound {
 									vm.push(getMethod)
 									vm.push(descInst)
 									vm.push(instance)
@@ -1158,6 +1164,7 @@ func (vm *VM) Run() error {
 			if instance, ok := obj.(*objects.Instance); ok {
 				if instance.Class != nil {
 					classAttr, found := instance.Class.FindClassAttr(attrName)
+					fmt.Printf("[DEBUG-SET] attr=%q found=%v type=%T isDataDesc=%v\n", attrName, found, classAttr, objects.IsDataDescriptor(classAttr))
 					if found {
 						if prop, ok := classAttr.(*objects.Property); ok {
 							if prop.Fset != nil && prop.Fset != objects.None_ {
@@ -1174,15 +1181,20 @@ func (vm *VM) Run() error {
 						}
 						if objects.IsDataDescriptor(classAttr) {
 							if descInst, ok := classAttr.(*objects.Instance); ok {
-								if setMethod, ok := descInst.GetAttr("__set__"); ok {
+								setMethod, setFound := descInst.GetAttr("__set__")
+								fmt.Printf("[DEBUG-SET] descInst class=%q __set__ found=%v type=%T\n", descInst.Class.Name, setFound, setMethod)
+								if setFound {
 									vm.push(setMethod)
 									vm.push(descInst)
 									vm.push(instance)
 									vm.push(value)
+									fmt.Printf("[DEBUG-SET] calling __set__ with 3 args, sp=%d\n", vm.sp)
 									err := vm.executeCall(3)
 									if err != nil {
+										fmt.Printf("[DEBUG-SET] __set__ call error: %v\n", err)
 										return err
 									}
+									fmt.Printf("[DEBUG-SET] __set__ call succeeded, sp=%d\n", vm.sp)
 									vm.currentFrame().setAttrValue = value
 									continue
 								}

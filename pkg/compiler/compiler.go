@@ -1357,7 +1357,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 	case *ast.FunctionLiteral:
 		outerInstructions := c.instructions
+		outerLastInstruction := c.lastInstruction
+		outerPreviousInstruction := c.previousInstruction
 		c.instructions = make(Instructions, 0)
+		c.lastInstruction = EmittedInstruction{}
+		c.previousInstruction = EmittedInstruction{}
 
 		c.symbolTable = NewEnclosedSymbolTable(c.symbolTable)
 
@@ -1461,6 +1465,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		c.instructions = make(Instructions, 0, len(outerInstructions))
 		c.instructions = append(c.instructions, outerInstructions...)
+		c.lastInstruction = outerLastInstruction
+		c.previousInstruction = outerPreviousInstruction
 
 		// Determine if this function needs to be a closure
 		// It needs to be a closure if:
@@ -1849,7 +1855,17 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 	for _, method := range node.Methods {
 		compiledFn := c.compileFunction(method)
 		if compiledFn != nil {
-			class.Methods[method.Name] = compiledFn
+			var methodObj objects.Object = compiledFn
+			for _, dec := range method.Decorators {
+				if ident, ok := dec.(*ast.Identifier); ok {
+					if ident.Value == "staticmethod" {
+						methodObj = &objects.StaticMethod{Fn: compiledFn}
+					} else if ident.Value == "classmethod" {
+						methodObj = &objects.ClassMethod{Fn: compiledFn}
+					}
+				}
+			}
+			class.Methods[method.Name] = methodObj
 		}
 	}
 
@@ -1906,7 +1922,11 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 
 func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 	savedInstructions := c.instructions
+	savedLastInstruction := c.lastInstruction
+	savedPreviousInstruction := c.previousInstruction
 	c.instructions = []byte{}
+	c.lastInstruction = EmittedInstruction{}
+	c.previousInstruction = EmittedInstruction{}
 
 	c.enterScope()
 
@@ -1916,11 +1936,14 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 
 	for _, stmt := range fn.Body.Statements {
 		if err := c.Compile(stmt); err != nil {
+			c.instructions = savedInstructions
+			c.lastInstruction = savedLastInstruction
+			c.previousInstruction = savedPreviousInstruction
 			return nil
 		}
 	}
 
-	if c.lastInstruction.Opcode != OpReturnValue && c.lastInstruction.Opcode != OpReturn {
+	if !c.lastInstructionIs(OpReturnValue) && !c.lastInstructionIs(OpReturn) {
 		c.emit(OpNull)
 		c.emit(OpReturnValue)
 	}
@@ -1929,11 +1952,11 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 	free := c.symbolTable.Free
 	c.exitScope()
 
-	// Get function instructions before restoring outer scope instructions
 	fnInstructions := c.instructions
-	
-	// Restore outer scope instructions
+
 	c.instructions = savedInstructions
+	c.lastInstruction = savedLastInstruction
+	c.previousInstruction = savedPreviousInstruction
 
 	return &CompiledFunction{
 		Instructions:   fnInstructions,

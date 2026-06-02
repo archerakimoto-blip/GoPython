@@ -208,12 +208,14 @@ func (p *Parser) parseStatement() ast.Statement {
 	// 解析装饰器
 	var decorators []ast.Expression
 	for p.curTokenIs(lexer.AT) {
-		p.nextToken() // 消耗 @ 符号
+		p.nextToken()
 		decorator := p.parseExpression(LOWEST)
 		if decorator != nil {
 			decorators = append(decorators, decorator)
 		}
-		// 处理可能的换行符后继续解析
+		if !p.curTokenIs(lexer.AT) && !p.curTokenIs(lexer.FUNCTION) && !p.curTokenIs(lexer.ASYNC) {
+			p.nextToken()
+		}
 		for p.curTokenIs(lexer.INDENT) || p.curTokenIs(lexer.DEDENT) || p.curTokenIs(lexer.SEMICOLON) {
 			p.nextToken()
 		}
