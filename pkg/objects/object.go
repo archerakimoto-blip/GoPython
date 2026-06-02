@@ -38,6 +38,9 @@ const (
 	ENUM_OBJ           ObjectType = "ENUM"
 	ENUM_MEMBER_OBJ    ObjectType = "ENUM_MEMBER"
 	BYTES_OBJ          ObjectType = "BYTES"
+	PROPERTY_OBJ       ObjectType = "PROPERTY"
+	CLASSMETHOD_OBJ    ObjectType = "CLASSMETHOD"
+	STATICMETHOD_OBJ   ObjectType = "STATICMETHOD"
 )
 
 type Object interface {
@@ -527,16 +530,78 @@ func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
 func (c *Closure) Inspect() string  { return "closure" }
 
 type Class struct {
-	Name        string
-	Methods     map[string]Object
-	Fields      map[string]Object
-	SuperClass  *Class
+	Name         string
+	Methods      map[string]Object
+	Fields       map[string]Object
+	SuperClass   *Class
 	SuperClasses []*Class
-	MRO         []*Class
+	MRO          []*Class
+	Slots        []string
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }
 func (c *Class) Inspect() string  { return fmt.Sprintf("<class %s>", c.Name) }
+
+func (c *Class) HasSlots() bool {
+	return len(c.Slots) > 0
+}
+
+func (c *Class) IsSlotAllowed(name string) bool {
+	if !c.HasSlots() {
+		return true
+	}
+	for _, s := range c.Slots {
+		if s == name {
+			return true
+		}
+	}
+	if c.SuperClass != nil {
+		return c.SuperClass.IsSlotAllowed(name)
+	}
+	for _, sc := range c.SuperClasses {
+		if sc.IsSlotAllowed(name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Class) FindClassAttr(name string) (Object, bool) {
+	if val, ok := c.Methods[name]; ok {
+		return val, true
+	}
+	if val, ok := c.Fields[name]; ok {
+		return val, true
+	}
+	if len(c.MRO) > 0 {
+		for _, cls := range c.MRO {
+			if val, ok := cls.Methods[name]; ok {
+				return val, true
+			}
+			if val, ok := cls.Fields[name]; ok {
+				return val, true
+			}
+		}
+	} else if c.SuperClass != nil {
+		if val, ok := c.SuperClass.Methods[name]; ok {
+			return val, true
+		}
+		if val, ok := c.SuperClass.Fields[name]; ok {
+			return val, true
+		}
+	}
+	if len(c.SuperClasses) > 0 {
+		for _, sc := range c.SuperClasses {
+			if val, ok := sc.Methods[name]; ok {
+				return val, true
+			}
+			if val, ok := sc.Fields[name]; ok {
+				return val, true
+			}
+		}
+	}
+	return nil, false
+}
 
 type Instance struct {
 	Class  *Class
@@ -579,6 +644,83 @@ func (i *Instance) GetAttr(name string) (Object, bool) {
 func (i *Instance) SetAttr(name string, value Object) {
 	i.Fields[name] = value
 }
+
+type Descriptor interface {
+	Object
+	DescGet(obj Object, classObj *Class) (Object, error)
+	DescSet(obj Object, value Object) error
+	IsDataDesc() bool
+}
+
+func IsDescriptor(obj Object) bool {
+	if _, ok := obj.(Descriptor); ok {
+		return true
+	}
+	inst, ok := obj.(*Instance)
+	if !ok {
+		return false
+	}
+	_, hasGet := inst.GetAttr("__get__")
+	return hasGet
+}
+
+func IsDataDescriptor(obj Object) bool {
+	if desc, ok := obj.(Descriptor); ok {
+		return desc.IsDataDesc()
+	}
+	inst, ok := obj.(*Instance)
+	if !ok {
+		return false
+	}
+	_, hasSet := inst.GetAttr("__set__")
+	return hasSet
+}
+
+type Property struct {
+	Fget Object
+	Fset Object
+	Fdel Object
+}
+
+func (p *Property) Type() ObjectType { return PROPERTY_OBJ }
+func (p *Property) Inspect() string  { return "<property object>" }
+func (p *Property) DescGet(obj Object, classObj *Class) (Object, error) {
+	return nil, nil
+}
+func (p *Property) DescSet(obj Object, value Object) error {
+	return nil
+}
+func (p *Property) IsDataDesc() bool {
+	return p.Fset != nil && p.Fset != None_
+}
+
+type ClassMethod struct {
+	Fn Object
+}
+
+func (cm *ClassMethod) Type() ObjectType { return CLASSMETHOD_OBJ }
+func (cm *ClassMethod) Inspect() string  { return "<classmethod object>" }
+func (cm *ClassMethod) DescGet(obj Object, classObj *Class) (Object, error) {
+	return nil, nil
+}
+func (cm *ClassMethod) DescSet(obj Object, value Object) error {
+	return nil
+}
+func (cm *ClassMethod) IsDataDesc() bool { return false }
+
+type StaticMethod struct {
+	Fn Object
+}
+
+func (sm *StaticMethod) Type() ObjectType { return STATICMETHOD_OBJ }
+func (sm *StaticMethod) Inspect() string  { return "<staticmethod object>" }
+func (sm *StaticMethod) DescGet(obj Object, classObj *Class) (Object, error) {
+	return nil, nil
+}
+func (sm *StaticMethod) DescSet(obj Object, value Object) error {
+	return nil
+}
+func (sm *StaticMethod) IsDataDesc() bool { return false }
 
 func (c *Class) ComputeMRO() []*Class {
 	if len(c.SuperClasses) == 0 {

@@ -300,7 +300,7 @@ func (p *Parser) parseStatement() ast.Statement {
 		case lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ:
 			return p.parseAugAssignStatement()
 		default:
-			return p.parseExpressionStatement()
+			return p.parseExpressionOrAttrAssign()
 		}
 	case lexer.ASSIGN, lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ:
 		return nil
@@ -532,6 +532,39 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 	
 	if stmt.Expression == nil {
 		return nil
+	}
+
+	if p.peekTokenIs(lexer.SEMICOLON) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseExpressionOrAttrAssign() ast.Statement {
+	stmt := &ast.ExpressionStatement{Token: p.curToken.Literal}
+
+	stmt.Expression = p.parseExpression(LOWEST)
+
+	if stmt.Expression == nil {
+		return nil
+	}
+
+	if ma, ok := stmt.Expression.(*ast.MemberAccess); ok && p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken()
+		p.nextToken()
+		value := p.parseExpression(LOWEST)
+
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+
+		return &ast.AttributeAssignStatement{
+			Token:  ma.Token,
+			Object: ma.Object,
+			Attr:   ma.Member,
+			Value:  value,
+		}
 	}
 
 	if p.peekTokenIs(lexer.SEMICOLON) {

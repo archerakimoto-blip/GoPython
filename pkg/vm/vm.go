@@ -30,11 +30,13 @@ type ExceptionHandler struct {
 }
 
 type Frame struct {
-	fn          *compiler.CompiledFunction
-	ip          int
-	basePointer int
-	generator   *objects.Generator // 指向创建此帧的生成器（如果是生成器帧）
-	freeVars    []objects.Object   // 闭包的自由变量值
+	fn            *compiler.CompiledFunction
+	ip            int
+	basePointer   int
+	generator     *objects.Generator
+	freeVars      []objects.Object
+	initInstance  objects.Object
+	setAttrValue  objects.Object
 }
 
 type AttrCacheKey struct {
@@ -422,7 +424,6 @@ func (vm *VM) Run() error {
 				return nil
 			}
 			
-			// 检查是否是从生成器返回
 			if len(vm.frames) > 0 && vm.sp > 0 {
 				calleeIndex := vm.sp - 1
 				if calleeIndex >= 0 {
@@ -434,9 +435,21 @@ func (vm *VM) Run() error {
 			
 			vm.sp = frame.basePointer - 1
 
-			err := vm.push(returnValue)
-			if err != nil {
-				return err
+			if frame.setAttrValue != nil {
+				err := vm.push(frame.setAttrValue)
+				if err != nil {
+					return err
+				}
+			} else if frame.initInstance != nil {
+				err := vm.push(frame.initInstance)
+				if err != nil {
+					return err
+				}
+			} else {
+				err := vm.push(returnValue)
+				if err != nil {
+					return err
+				}
 			}
 
 		case compiler.OpReturn:
@@ -446,7 +459,6 @@ func (vm *VM) Run() error {
 				return nil
 			}
 			
-			// 检查是否是从生成器返回
 			if len(vm.frames) > 0 && vm.sp > 0 {
 				calleeIndex := vm.sp - 1
 				if calleeIndex >= 0 {
@@ -458,9 +470,21 @@ func (vm *VM) Run() error {
 			
 			vm.sp = frame.basePointer - 1
 
-			err := vm.push(objects.None_)
-			if err != nil {
-				return err
+			if frame.setAttrValue != nil {
+				err := vm.push(frame.setAttrValue)
+				if err != nil {
+					return err
+				}
+			} else if frame.initInstance != nil {
+				err := vm.push(frame.initInstance)
+				if err != nil {
+					return err
+				}
+			} else {
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
 			}
 
 		case compiler.OpSetLocal:
@@ -902,35 +926,164 @@ func (vm *VM) Run() error {
 					}
 				}
 
-				if val, ok := instance.GetAttr(attrName); ok {
-					if method, ok := val.(*compiler.CompiledFunction); ok {
-						vm.attrCache[cacheKey] = AttrCacheEntry{
-							Value:     method,
-							IsMethod:  true,
-							ClassName: instance.Class.Name,
+				if instance.Class != nil {
+					if classAttr, ok := instance.Class.FindClassAttr(attrName); ok {
+						if prop, ok := classAttr.(*objects.Property); ok {
+							if prop.Fget != nil && prop.Fget != objects.None_ {
+								vm.push(prop.Fget)
+								vm.push(instance)
+								err := vm.executeCall(1)
+								if err != nil {
+									return err
+								}
+								continue
+							}
 						}
-						vm.push(instance)
-						vm.push(method)
-						continue
+						if cm, ok := classAttr.(*objects.ClassMethod); ok {
+							vm.push(instance.Class)
+							vm.push(cm.Fn)
+							continue
+						}
+						if sm, ok := classAttr.(*objects.StaticMethod); ok {
+							err := vm.push(sm.Fn)
+							if err != nil {
+								return err
+							}
+							continue
+						}
+						if objects.IsDataDescriptor(classAttr) {
+							if descInst, ok := classAttr.(*objects.Instance); ok {
+								if getMethod, ok := descInst.GetAttr("__get__"); ok {
+									vm.push(getMethod)
+									vm.push(descInst)
+									vm.push(instance)
+									classObj := &objects.String{Value: instance.Class.Name}
+									vm.push(classObj)
+									err := vm.executeCall(3)
+									if err != nil {
+										return err
+									}
+									continue
+								}
+							}
+						}
 					}
+				}
+
+				if val, ok := instance.Fields[attrName]; ok {
 					vm.attrCache[cacheKey] = AttrCacheEntry{
 						Value:     val,
 						IsMethod:  false,
 						ClassName: instance.Class.Name,
 					}
-					return vm.push(val)
-				}
-				if classMethod, ok := instance.Class.Methods[attrName]; ok {
-					vm.attrCache[cacheKey] = AttrCacheEntry{
-						Value:     classMethod,
-						IsMethod:  true,
-						ClassName: instance.Class.Name,
+					err := vm.push(val)
+					if err != nil {
+						return err
 					}
-					vm.push(instance)
-					vm.push(classMethod)
 					continue
 				}
-				return vm.push(objects.None_)
+
+				if instance.Class != nil {
+					if classAttr, ok := instance.Class.FindClassAttr(attrName); ok {
+						if cm, ok := classAttr.(*objects.ClassMethod); ok {
+							vm.push(instance.Class)
+							vm.push(cm.Fn)
+							continue
+						}
+						if sm, ok := classAttr.(*objects.StaticMethod); ok {
+							err := vm.push(sm.Fn)
+							if err != nil {
+								return err
+							}
+							continue
+						}
+						if objects.IsDescriptor(classAttr) && !objects.IsDataDescriptor(classAttr) {
+							if descInst, ok := classAttr.(*objects.Instance); ok {
+								if getMethod, ok := descInst.GetAttr("__get__"); ok {
+									vm.push(getMethod)
+									vm.push(descInst)
+									vm.push(instance)
+									classObj := &objects.String{Value: instance.Class.Name}
+									vm.push(classObj)
+									err := vm.executeCall(3)
+									if err != nil {
+										return err
+									}
+									continue
+								}
+							}
+						}
+						if method, ok := classAttr.(*compiler.CompiledFunction); ok {
+							vm.attrCache[cacheKey] = AttrCacheEntry{
+								Value:     method,
+								IsMethod:  true,
+								ClassName: instance.Class.Name,
+							}
+							vm.push(instance)
+							vm.push(method)
+							continue
+						}
+						vm.attrCache[cacheKey] = AttrCacheEntry{
+							Value:     classAttr,
+							IsMethod:  false,
+							ClassName: instance.Class.Name,
+						}
+						err := vm.push(classAttr)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+				}
+
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			if classObj, ok := obj.(*objects.Class); ok {
+				if classAttr, ok := classObj.FindClassAttr(attrName); ok {
+					if cm, ok := classAttr.(*objects.ClassMethod); ok {
+						vm.push(classObj)
+						vm.push(cm.Fn)
+						continue
+					}
+					if sm, ok := classAttr.(*objects.StaticMethod); ok {
+						err := vm.push(sm.Fn)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+					if prop, ok := classAttr.(*objects.Property); ok {
+						if prop.Fget != nil && prop.Fget != objects.None_ {
+							vm.push(prop.Fget)
+							vm.push(objects.None_)
+							err := vm.executeCall(1)
+							if err != nil {
+								return err
+							}
+							continue
+						}
+					}
+					if method, ok := classAttr.(*compiler.CompiledFunction); ok {
+						vm.push(classObj)
+						vm.push(method)
+						continue
+					}
+					err := vm.push(classAttr)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
 			}
 
 			if module, ok := obj.(*objects.Module); ok {
@@ -1003,11 +1156,83 @@ func (vm *VM) Run() error {
 			obj := vm.pop()
 			
 			if instance, ok := obj.(*objects.Instance); ok {
+				if instance.Class != nil {
+					classAttr, found := instance.Class.FindClassAttr(attrName)
+					if found {
+						if prop, ok := classAttr.(*objects.Property); ok {
+							if prop.Fset != nil && prop.Fset != objects.None_ {
+								vm.push(prop.Fset)
+								vm.push(instance)
+								vm.push(value)
+								err := vm.executeCall(2)
+								if err != nil {
+									return err
+								}
+								vm.currentFrame().setAttrValue = value
+								continue
+							}
+						}
+						if objects.IsDataDescriptor(classAttr) {
+							if descInst, ok := classAttr.(*objects.Instance); ok {
+								if setMethod, ok := descInst.GetAttr("__set__"); ok {
+									vm.push(setMethod)
+									vm.push(descInst)
+									vm.push(instance)
+									vm.push(value)
+									err := vm.executeCall(3)
+									if err != nil {
+										return err
+									}
+									vm.currentFrame().setAttrValue = value
+									continue
+								}
+							}
+						}
+					}
+				}
+				vm.attrCache = make(map[AttrCacheKey]AttrCacheEntry)
+				if instance.Class != nil && instance.Class.HasSlots() && !instance.Class.IsSlotAllowed(attrName) {
+					errObj := objects.NewAttributeError("'%s' object has no attribute '%s'", instance.Class.Name, attrName)
+					caught := vm.raiseException(errObj)
+					if !caught {
+						return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+					}
+					continue
+				}
 				instance.SetAttr(attrName, value)
-				return vm.push(value)
+				err := vm.push(value)
+				if err != nil {
+					return err
+				}
+				continue
 			}
 			
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+		case compiler.OpSetClassField:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+			fieldName := vm.constants[idx].(*objects.String).Value
+
+			value := vm.pop()
+			classObj := vm.pop()
+
+			if classInst, ok := classObj.(*objects.Class); ok {
+				delete(classInst.Methods, fieldName)
+				classInst.Fields[fieldName] = value
+				if fieldName == "__slots__" {
+					if listObj, ok := value.(*objects.List); ok {
+						slots := make([]string, 0, len(listObj.Elements))
+						for _, elem := range listObj.Elements {
+							if strElem, ok := elem.(*objects.String); ok {
+								slots = append(slots, strElem.Value)
+							}
+						}
+						classInst.Slots = slots
+					}
+				}
+			} else {
+				return fmt.Errorf("cannot set class field on non-class: %T", classObj)
+			}
 		case compiler.OpFormatString:
 			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
@@ -1093,38 +1318,65 @@ func (vm *VM) executeCall(numArgs int) error {
 			Fields: make(map[string]objects.Object),
 		}
 
+		if initMethod, ok := classObj.Methods["__init__"]; ok {
+			if fn, ok := initMethod.(*compiler.CompiledFunction); ok {
+				args := make([]objects.Object, numArgs)
+				for i := 0; i < numArgs; i++ {
+					args[i] = vm.stack[vm.sp-numArgs+i]
+				}
+				vm.stack[calleeIndex] = instance
+				vm.stack[calleeIndex+1] = instance
+				for i := 0; i < numArgs; i++ {
+					vm.stack[calleeIndex+2+i] = args[i]
+				}
+				vm.sp = calleeIndex + 2 + numArgs
+				basePointer := calleeIndex + 1
+				frame := NewFrame(fn, basePointer)
+				frame.initInstance = instance
+				vm.pushFrame(frame)
+				vm.sp = frame.basePointer + fn.NumLocals
+				return nil
+			}
+		}
+
 		for i := 0; i < numArgs; i++ {
 			instance.Fields[fmt.Sprintf("arg%d", i)] = vm.stack[vm.sp-numArgs+i]
 		}
 
-		vm.sp = vm.sp - numArgs
-		vm.stack[vm.sp] = instance
-		vm.sp++
-
-		if initMethod, ok := classObj.Methods["__init__"]; ok {
-			if fn, ok := initMethod.(*compiler.CompiledFunction); ok {
-				frame := NewFrame(fn, vm.sp-numArgs)
-				vm.pushFrame(frame)
-			}
-		}
+		vm.stack[calleeIndex] = instance
+		vm.sp = calleeIndex + 1
 
 		return nil
 	}
 
-	// Check if this is a method call where instance is on the stack
-	// Stack is [..., prev, instance, method] and we're calling method with numArgs
-	// We need to arrange stack as [..., prev, method, self, arg0, arg1, ...]
-	// where calleeIndex points to method and method will be called with self + numArgs arguments
 	if calleeIndex > 0 && numArgs == 0 {
 		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
 			if instance, isInstance := vm.stack[calleeIndex-1].(*objects.Instance); isInstance {
-				// This is a method call with no additional arguments
-				// Current stack: [..., prev, instance, method]
-				// Rearrange to: [..., prev, method, self]
-				vm.stack[calleeIndex-1] = calleeObj  // method
-				vm.stack[calleeIndex] = instance       // self
-				// vm.sp stays the same (method is already at calleeIndex)
-				numArgs = 1  // method needs self as its only argument
+				vm.stack[calleeIndex-1] = calleeObj
+				vm.stack[calleeIndex] = instance
+				numArgs = 1
+			} else if cls, isClass := vm.stack[calleeIndex-1].(*objects.Class); isClass {
+				vm.stack[calleeIndex-1] = calleeObj
+				vm.stack[calleeIndex] = cls
+				numArgs = 1
+			}
+		}
+	}
+
+	if calleeIndex > 0 && numArgs > 0 {
+		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
+			if cls, isClass := vm.stack[calleeIndex-1].(*objects.Class); isClass {
+				args := make([]objects.Object, numArgs)
+				for i := 0; i < numArgs; i++ {
+					args[i] = vm.stack[vm.sp-numArgs+i]
+				}
+				vm.stack[calleeIndex-1] = calleeObj
+				vm.stack[calleeIndex] = cls
+				for i := 0; i < numArgs; i++ {
+					vm.stack[calleeIndex+1+i] = args[i]
+				}
+				vm.sp = calleeIndex + 1 + numArgs
+				numArgs = numArgs + 1
 			}
 		}
 	}

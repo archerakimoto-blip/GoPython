@@ -712,6 +712,19 @@ func (as *AssignStatement) String() string {
 	return out.String()
 }
 
+type AttributeAssignStatement struct {
+	Token  string
+	Object Expression
+	Attr   *Identifier
+	Value  Expression
+}
+
+func (aas *AttributeAssignStatement) statementNode()       {}
+func (aas *AttributeAssignStatement) TokenLiteral() string { return aas.Token }
+func (aas *AttributeAssignStatement) String() string {
+	return aas.Object.String() + "." + aas.Attr.String() + " = " + aas.Value.String()
+}
+
 type AugAssignStatement struct {
 	Token   string
 	Name    *Identifier

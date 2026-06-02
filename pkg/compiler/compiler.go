@@ -64,6 +64,7 @@ const (
 	OpCreateClassWithMultiSuper
 	OpGetAttribute
 	OpSetAttribute
+	OpSetClassField
 	OpFormatString
 	OpMakeAsync
 	OpAwait
@@ -912,6 +913,52 @@ func (c *Compiler) registerBuiltins() {
 	enumIndex := len(c.constants)
 	c.constants = append(c.constants, enumBuiltin)
 	c.symbolTable.DefineBuiltin("__enum__", enumIndex)
+
+	propertyBuiltin := &objects.Builtin{
+		Name: "property",
+		Fn: func(args ...objects.Object) objects.Object {
+			prop := &objects.Property{}
+			if len(args) >= 1 {
+				prop.Fget = args[0]
+			}
+			if len(args) >= 2 {
+				prop.Fset = args[1]
+			}
+			if len(args) >= 3 {
+				prop.Fdel = args[2]
+			}
+			return prop
+		},
+	}
+	propertyIndex := len(c.constants)
+	c.constants = append(c.constants, propertyBuiltin)
+	c.symbolTable.DefineBuiltin("property", propertyIndex)
+
+	classmethodBuiltin := &objects.Builtin{
+		Name: "classmethod",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("classmethod() takes exactly 1 argument")
+			}
+			return &objects.ClassMethod{Fn: args[0]}
+		},
+	}
+	classmethodIndex := len(c.constants)
+	c.constants = append(c.constants, classmethodBuiltin)
+	c.symbolTable.DefineBuiltin("classmethod", classmethodIndex)
+
+	staticmethodBuiltin := &objects.Builtin{
+		Name: "staticmethod",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewError("staticmethod() takes exactly 1 argument")
+			}
+			return &objects.StaticMethod{Fn: args[0]}
+		},
+	}
+	staticmethodIndex := len(c.constants)
+	c.constants = append(c.constants, staticmethodBuiltin)
+	c.symbolTable.DefineBuiltin("staticmethod", staticmethodIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -1159,13 +1206,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 	case *ast.AssignStatement:
-		// 编译右侧表达式
 		err := c.Compile(node.Value)
 		if err != nil {
 			return err
 		}
 
-		// 查找变量，如果不存在就自动定义
 		symbol, ok := c.symbolTable.Resolve(node.Names[0].Value)
 		if !ok {
 			symbol = c.symbolTable.Define(node.Names[0].Value)
@@ -1176,6 +1221,20 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			c.emit1(OpSetLocal, symbol.Index)
 		}
+
+	case *ast.AttributeAssignStatement:
+		err := c.Compile(node.Object)
+		if err != nil {
+			return err
+		}
+
+		err = c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+
+		c.emit(OpSetAttribute, c.addConstant(&objects.String{Value: node.Attr.Value}))
+		c.emit(OpPop)
 
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
@@ -1816,6 +1875,31 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 
 	symbol := c.symbolTable.Define(node.Name.Value)
 	c.emit(OpSetGlobal, symbol.Index)
+
+	for _, method := range node.Methods {
+		if compiledFn, ok := class.Methods[method.Name]; ok {
+			idx := c.addConstant(compiledFn)
+			c.symbolTable.DefineBuiltin(method.Name, idx)
+		}
+	}
+
+	for _, stmt := range node.Body.Statements {
+		if stmt == nil {
+			continue
+		}
+		if assign, ok := stmt.(*ast.AssignStatement); ok && len(assign.Names) == 1 {
+			c.emit(OpGetGlobal, symbol.Index)
+			err := c.Compile(assign.Value)
+			if err != nil {
+				return err
+			}
+			c.emit(OpSetClassField, c.addConstant(&objects.String{Value: assign.Names[0].Value}))
+		}
+	}
+
+	for _, method := range node.Methods {
+		delete(c.symbolTable.store, method.Name)
+	}
 	
 	return nil
 }
