@@ -1522,7 +1522,7 @@ func CreateSysModule() *Module {
 
 	// sys.version
 	sysModule.Fields["version"] = &String{
-		Value: "GoPython 0.1.0 (Go implementation)",
+		Value: "GoPython 0.11.0 (Go implementation)",
 	}
 
 	// sys.platform
@@ -1534,7 +1534,7 @@ func CreateSysModule() *Module {
 	sysModule.Fields["version_info"] = &Tuple{
 		Elements: []Object{
 			&Integer{Value: 0},
-			&Integer{Value: 1},
+			&Integer{Value: 11},
 			&Integer{Value: 0},
 			&String{Value: "final"},
 			&Integer{Value: 0},

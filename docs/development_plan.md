@@ -76,6 +76,10 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ## 进行中
 
+### Bug 修复
+
+- [ ] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。根因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1。修复方案：在 `OpBeginTry` 中编码 `finallyStartIP`（类似 `handlerIP` 的方式）
+
 ### 脱糖层增强
 
 - [ ] `@property` 的 `@x.deleter` 端到端测试
@@ -103,20 +107,20 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
   高影响力   │ ✅ P1-3 is/is not │ ✅ P1-7 super()   │ ✅ P0-15 match/case│
             │ ✅ P1-13 负数索引 │ ✅ P3-5 特化操作码 │ ✅ P0-16 多继承    │
             │ ✅ P3-7 range惰性 │ ✅ P3-13 常量折叠 │ ✅ P3-6 内联缓存   │
-            │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ P3-15 直接线程    │
+            │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ ❌ P3-15 直接线程  │
             ├───────────────────┼───────────────────┼───────────────────┤
-            │ ✅ P1-9 @abstrmeth│ ✅ P1-10 lru_cache│ P3-16 寄存器VM    │
-            │ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ P0-33 描述符      │
-  中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ P0-34 元类        │
-            │ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ P3-19 分代GC      │
+            │ ✅ P1-9 @abstrmeth│ ✅ P1-10 lru_cache│ ❌ P3-16 寄存器VM  │
+            │ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ ✅ P0-33 描述符    │
+  中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ ❌ P0-34 元类      │
+            │ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ ❌ P3-19 分代GC    │
             │ ✅ P3-9 全局变量缓存│ ✅ P3-12 对象池  │                   │
             │ ✅ P3-10 BoundMethod│ ✅ P3-17 Dict优化│                   │
             ├───────────────────┼───────────────────┼───────────────────┤
-            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ P1-21 仅位置参数  │
-            │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ P0-18 仅位置参数  │
-  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ P0-12 复数        │
-            │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ P0-14 Ellipsis    │
-            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ P0-34 元类        │
+            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ ❌ P1-21 仅位置参数│
+            │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ ❌ P0-18 仅位置参数│
+  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ ❌ P0-12 复数    │
+            │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ ❌ P0-14 Ellipsis│
+            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ ❌ P0-34 元类     │
             └───────────────────┴───────────────────┴───────────────────┘
 ```
 
@@ -279,7 +283,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | `pkg/compiler/optimize.go` | `instructionSize`：`OpBeginTry` 从 5 字节改为 7 字节；`EliminateDeadCode`：`OpBeginTry` 标记 `handlerIP` 位置为可达；重写时更新 `handlerIP` |
 | `pkg/vm/vm.go` | `OpBeginTry`：读取 `handlerIP` 操作数；`OpRaise`/`OpEndTry`：使用 `handlerIP` 扫描 `OpExceptHandler`；`ExceptionHandler.handlerIP` 在 `OpBeginTry` 时设置；`raiseException`：使用 `handlerIP` 替代 `tryBlockStartIP` 扫描；移除 `handlerIP == -1` 检查，改用 `exceptCount == 0` |
 
-### 待办：脱糖迁移
+### 待办：v0.12 脱糖迁移 + Bug 修复
 
 当前 property/classmethod/staticmethod/__slots__ 的处理仍在 VM 和 compiler 中。根据脱糖优先原则，应迁移到脱糖层：
 
@@ -287,3 +291,4 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] `@classmethod` → 脱糖生成 `__getattr__` 中返回 `__bind_method__(cls._desugar_cm_foo, cls)`
 - [ ] `@staticmethod` → 脱糖生成 `__getattr__` 中返回 `cls._desugar_sm_bar`
 - [ ] `__slots__` → 脱糖生成 `__setattr__` 白名单检查
+- [ ] try-only-finally 异常穿透修复 — `OpBeginTry` 编码 `finallyStartIP`

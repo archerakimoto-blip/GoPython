@@ -4,9 +4,9 @@
 
 GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 Python 提供高性能的 JIT 编译实现。本文档详细规划了未来版本的特性开发优先级和实现路线图。
 
-**当前版本**: 0.2.x
+**当前版本**: 0.11.x
 **目标版本**: 1.0.0
-**最后更新**: 2026年
+**最后更新**: 2026-06
 
 ---
 
@@ -28,7 +28,7 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 
 ### 已实现的核心特性
 
-#### 1. 基础语法 (完成度: 93.75%)
+#### 1. 基础语法 (完成度: 98%)
 ✅ 整数、浮点数、布尔值、字符串
 ✅ 数组、字典、集合
 ✅ 基本算术运算 (+, -, *, /, %, //, **)
@@ -40,6 +40,7 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ✅ 增强赋值 (+=, -=, *=, /=, %=, **=)
 ✅ 函数定义和调用
 ✅ 关键字参数和 *args/**kwargs
+✅ 仅关键字参数 (*分隔符)
 ✅ 条件语句 (if/elif/else)
 ✅ 循环语句 (for/while)
 ✅ break/continue 语句
@@ -47,13 +48,21 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ✅ 生成器表达式
 ✅ 切片操作（支持步长）
 ✅ pass 语句
-✅ **Walrus 运算符 (:=)** - Python 3.8+
-✅ **global/nonlocal 语句**
-✅ **类型注解**
-✅ **del 语句** ✨ 新增
-✅ **yield from 语句** ✨ 新增
-✅ **async for 语句** ✨ 新增
-✅ **async with 语句** ✨ 新增
+✅ Walrus 运算符 (:=) - Python 3.8+
+✅ global/nonlocal 语句
+✅ 类型注解
+✅ del 语句
+✅ yield from 语句
+✅ async for 语句
+✅ async with 语句
+✅ assert 语句
+✅ 位运算符 (& | ^ ~ << >>)
+✅ Raw strings (r"...")
+✅ 三引号字符串 ("""...""")
+✅ Byte strings (b"...")
+✅ 0x/0b/0o 字面量 + 数字下划线
+✅ match/case 模式匹配 - Python 3.10+
+⚠️ 仅位置参数 (/) - **未实现**
 
 #### 2. 并发特性 (完成度: 60%)
 ✅ Goroutine 协程
@@ -67,21 +76,47 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ⚠️ asyncio 模块 - **部分实现**
 ⚠️ async comprehensions - **未实现**
 
-#### 3. 高级特性 (完成度: 75%)
-✅ 异常处理 (try/except/finally)
+#### 3. 高级特性 (完成度: 90%)
+✅ 异常处理 (try/except/finally) + 跨帧异常捕获 + 异常链 (raise E from e)
 ✅ 上下文管理器 (with)
 ✅ 生成器 (yield, yield from)
 ✅ Lambda 表达式和闭包
-✅ 类、对象、继承
+✅ 类、对象、单继承/多继承
+✅ C3 MRO 算法
 ✅ 装饰器 (Decorators)
-✅ f-string 格式化字符串
+✅ f-string 格式化字符串（含格式化规格）
 ✅ 模块导入系统
+✅ 描述符协议 (__get__/__set__/__delete__)
+✅ 内置描述符 (property/classmethod/staticmethod)
+✅ __slots__ 实例属性限制
+✅ @dataclass 装饰器
+✅ @abstractmethod 装饰器
+✅ @lru_cache 装饰器
+✅ NamedTuple
+✅ Enum
 ✅ JIT 即时编译器
 ✅ 调试器和性能分析器
 ✅ 垃圾回收器 (GC)
 ✅ CPython 互操作
+⚠️ Metaclasses - **未实现**
+⚠️ Exception groups - **未实现**
 
-#### 4. 标准库 (完成度: 70%)
+#### 4. 运行时优化 (完成度: 75%)
+✅ 内联缓存 (attrCache)
+✅ 全局变量缓存 (globalCache/globalVersions)
+✅ 特化操作码 (int+int 快速路径)
+✅ 常量折叠
+✅ 对象池 (GetCachedInteger/GetCachedString)
+✅ Dict 优化 (KeyOrder + NewDictWithCapacity)
+✅ 死代码消除 (EliminateDeadCode)
+✅ 字符串驻留
+✅ BoundMethod 对象
+✅ Range/Zip 惰性迭代器
+⚠️ 寄存器 VM - **未实现**
+⚠️ 分代 GC - **未实现**
+⚠️ 直接线程 - **未实现**
+
+#### 5. 标准库 (完成度: 70%)
 ✅ math, sys, os, json, gc
 ✅ random, string, time, datetime
 ✅ concurrency
@@ -90,36 +125,26 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 
 ### 未实现的 Python 特性
 
-#### 🔴 严重缺失 (15 项)
+#### 🔴 严重缺失 (5 项)
 
-1. **Pattern matching (match/case)** - 结构化模式匹配
-2. **Exception chaining (from)** - 异常原因链
-3. **Exception groups** - 异常组支持
-4. **完整 f-string 支持** - 所有格式化选项
-5. **字符串方法** - str.upper(), str.split() 等
-6. **Raw strings (r"...")** - 原始字符串
-7. **多继承** - 多父类继承
-8. **MRO (Method Resolution Order)** - 方法解析顺序
-9. **Descriptors** - 属性描述符
-10. **Metaclasses** - 元类
-11. **__slots__** - 实例属性限制
-12. **Async comprehensions** - 异步推导式
-13. **Keyword-only arguments** - 仅关键字参数
-14. **Positional-only arguments (/)** - 仅位置参数
-15. **正则表达式 (re 模块)** - 完整支持
+1. **Metaclasses** - 元类
+2. **Exception groups** - 异常组支持
+3. **Positional-only arguments (/)** - 仅位置参数
+4. **正则表达式 (re 模块)** - 完整支持
+5. **Async comprehensions** - 异步推导式
 
-#### 🟡 部分实现 (10 项)
+#### 🟡 部分实现 (5 项)
 
-16. **Abstract Base Classes** - 抽象基类
-17. **Data Classes** - 数据类
-18. **Named Tuples** - 命名元组
-19. **Type hints generics** - 泛型类型提示
-20. **Ellipsis (...)** - 省略号字面量
-21. **Ordered Dict** - 有序字典
-22. **Dictionary Views** - 字典视图
-23. **Byte strings (b"...")** - 字节串
-24. **Complex numbers** - 复数
-25. **asyncio 模块** - 异步生态
+6. **Type hints generics** - 泛型类型提示
+7. **Ellipsis (...)** - 省略号字面量
+8. **Dictionary Views** - 字典视图
+9. **Complex numbers** - 复数
+10. **asyncio 模块** - 异步生态
+
+#### 🐛 已知问题 (2 项)
+
+1. **try-only-finally 异常穿透** — `try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。原因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1
+2. **描述符未迁移到脱糖层** — property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，违反脱糖优先原则（功能正确，架构待优化）
 
 ---
 
@@ -130,17 +155,17 @@ GoPython 是一个用 Go 语言编写的高效 Python 解释器，目标是为 P
 ```
         低难度        中难度        高难度
 高影响力  ┌──────────┬──────────┬──────────┐
-         │字符串方法 │多继承    │match/case│
-         │async     │异常链    │Descriptors│
-         │comprehens│__slots__ │Metaclasses│
+         │✅字符串方法│✅多继承  │✅match/case│
+         │✅async    │✅异常链  │✅Descriptors│
+         │✅comprehens│✅__slots__│❌Metaclasses│
          └──────────┼──────────┼──────────┤
-中影响力  │Raw strings│Keyword- │正则表达式│
-         │Ellipsis  │only args│Exception  │
-         │Byte str  │         │groups     │
+中影响力  │✅Raw strings│✅Keyword-│❌正则表达式│
+         │❌Ellipsis │✅only args│❌Exception│
+         │✅Byte str │         │  groups   │
          └──────────┼──────────┼──────────┤
-低影响力  │Ordered   │Complex  │          │
-         │Dict      │numbers  │          │
-         │Dict views│         │          │
+低影响力  │✅Ordered  │❌Complex │❌仅位置参数│
+         │✅Dict     │numbers  │❌Ellipsis │
+         │✅Dict views│         │❌Metaclasses│
          └──────────┴──────────┴──────────┘
 ```
 
@@ -868,44 +893,68 @@ gopy disasm script.py
 
 ## 里程碑规划
 
-### 版本 0.3.0 - 增强的字符串和函数特性
-**目标日期**: 2026-Q2
+### 版本 0.3–0.5 — 基础特性补齐 ✅ 已完成
 
 - ✅ 完整的字符串方法支持
 - ✅ Raw strings (r"...")
 - ✅ Keyword-only arguments
-- ✅ Positional-only arguments
-- ✅ Ellipsis support
-- ✅ 字符串测试覆盖率 > 90%
+- ✅ @dataclass / @abstractmethod / @lru_cache 装饰器
+- ✅ 默认参数值 / super() / f-string 格式化规格
+- ✅ 位运算符 / 常量折叠 / 特化操作码
 
-### 版本 0.4.0 - 高级面向对象
-**目标日期**: 2026-Q3
+### 版本 0.6–0.7 — 高级语言特性 ✅ 已完成
 
-- ✅ 多继承支持
-- ✅ C3 MRO 算法
-- ✅ Descriptors
+- ✅ match/case 模式匹配
+- ✅ 多继承 + C3 MRO 算法
+- ✅ 内联缓存 / 全局变量缓存
+- ✅ @lru_cache / NamedTuple / zip() 惰性迭代器
+- ✅ 对象池 / Dict 优化
+
+### 版本 0.8–0.9 — 语言兼容性 ✅ 已完成
+
+- ✅ 0x/0b/0o 字面量 + 数字下划线
+- ✅ 仅关键字参数 + Enum + Byte strings
+- ✅ 死代码消除
+
+### 版本 0.10–0.11 — 描述符与异常处理 ✅ 已完成
+
+- ✅ 描述符协议 (__get__/__set__/__delete__)
+- ✅ property / classmethod / staticmethod
 - ✅ __slots__
-- ✅ property/classmethod/staticmethod
-- ✅ Metaclasses (基础)
+- ✅ try/except 编译器修复 + 跨帧异常捕获
 
-### 版本 0.5.0 - 模式匹配
-**目标日期**: 2026-Q4
+### 版本 0.12 — 脱糖迁移 + Bug 修复 (计划中)
 
-- ✅ match/case 语法
-- ✅ 所有模式类型
-- ✅ Guard 子句
-- ✅ 优化模式匹配性能
+- [ ] @property → 脱糖生成 __getattr__ + __setattr__
+- [ ] @classmethod → 脱糖生成 __getattr__ 返回绑定方法
+- [ ] @staticmethod → 脱糖生成 __getattr__ 返回原始函数
+- [ ] __slots__ → 脱糖生成 __setattr__ 白名单检查
+- [ ] try-only-finally 异常穿透修复 — 在 OpBeginTry 中编码 finallyStartIP
+
+### 版本 0.13 — 剩余高难度特性 (计划中)
+
+- [ ] Metaclasses
+- [ ] 仅位置参数 (/)
+- [ ] Exception groups
+
+### 版本 0.14 — 低影响力特性 (计划中)
+
+- [ ] Ellipsis (...)
+- [ ] Complex numbers
+- [ ] Dictionary Views
+
+### 版本 0.15 — 标准库与运行时 (计划中)
+
+- [ ] re 正则表达式模块
+- [ ] Async comprehensions
+- [ ] 分代 GC
+- [ ] 寄存器 VM
 
 ### 版本 1.0.0 - Production Ready
-**目标日期**: 2027-Q1
 
-- ✅ 异常链和异常组
-- ✅ Abstract Base Classes
-- ✅ Data Classes
-- ✅ Async comprehensions
-- ✅ 完整的 asyncio 模块
-- ✅ 性能基准测试达标
-- ✅ 生产环境验证
+- [ ] 完整的 asyncio 模块
+- [ ] 性能基准测试达标
+- [ ] 生产环境验证
 
 ---
 
@@ -1016,15 +1065,16 @@ gopy disasm script.py
 ✅ 导入系统
 
 # 高级语法
-⚠️ Pattern matching (待实现)
+✅ Pattern matching (match/case)
 ✅ 生成器
 ✅ 装饰器
 ✅ 上下文管理器
-✅ 元编程特性 (部分实现)
+✅ 描述符协议
+✅ 元编程特性 (部分实现，缺 Metaclasses)
 
 # 标准库
 ✅ 内置函数
-⚠️ 字符串方法 (部分实现)
+✅ 字符串方法
 ✅ 列表/字典/集合
 ⚠️ 正则表达式 (未实现)
 ⚠️ IO 操作 (部分实现)

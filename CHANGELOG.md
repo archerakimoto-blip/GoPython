@@ -20,6 +20,11 @@
 - **`matchesException` catch-all**：裸 `except:` 现在能捕获非 ERROR_OBJ 类型的异常（如字符串 raise）
 - **DCE 删除异常处理器**：死代码消除器现在理解 `OpBeginTry` 的控制流，不会删除 `OpExceptHandler` 指令
 
+### 已知问题
+
+- **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时仍为 -1
+- **描述符未迁移到脱糖层**：property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，功能正确但违反脱糖优先原则，计划在 v0.12 迁移
+
 ### del 语句
 
 - **del 语句**：支持删除变量、列表元素、字典键或对象属性，自动脱糖为 `__delitem__` 或 `__delattr__` 调用
