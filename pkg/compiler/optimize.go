@@ -24,8 +24,10 @@ func instructionSize(op Opcode) int {
 	case OpClosure:
 		return 4
 
-	case OpBeginTry,
-		OpExceptHandler:
+	case OpBeginTry:
+		return 7
+
+	case OpExceptHandler:
 		return 5
 
 	case OpCall,
@@ -59,7 +61,10 @@ func readOperand(ins Instructions, pos int, op Opcode) (int, int) {
 	case OpClosure:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 3
 
-	case OpBeginTry, OpExceptHandler:
+	case OpBeginTry:
+		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 6
+
+	case OpExceptHandler:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 4
 
 	case OpCall, OpSetLocal, OpGetLocal, OpGetFree:
@@ -111,6 +116,17 @@ func EliminateDeadCode(ins Instructions) Instructions {
 				queue = append(queue, nextInst)
 			}
 
+		case op == OpBeginTry:
+			if nextInst < len(ins) && !reachable[nextInst] {
+				reachable[nextInst] = true
+				queue = append(queue, nextInst)
+			}
+			handlerIP := int(uint16(ins[current+5])<<8 | uint16(ins[current+6]))
+			if handlerIP > 0 && handlerIP < len(ins) && !reachable[handlerIP] {
+				reachable[handlerIP] = true
+				queue = append(queue, handlerIP)
+			}
+
 		case op == OpReturnValue || op == OpReturn || op == OpRaise:
 
 		default:
@@ -152,6 +168,14 @@ func EliminateDeadCode(ins Instructions) Instructions {
 				if newTarget, ok := posMap[oldTarget]; ok {
 					chunk[1] = byte(newTarget >> 8)
 					chunk[2] = byte(newTarget & 0xFF)
+				}
+			}
+
+			if op == OpBeginTry {
+				oldHandlerIP := int(uint16(ins[oldPos+5])<<8 | uint16(ins[oldPos+6]))
+				if newHandlerIP, ok := posMap[oldHandlerIP]; ok {
+					chunk[5] = byte(newHandlerIP >> 8)
+					chunk[6] = byte(newHandlerIP & 0xFF)
 				}
 			}
 

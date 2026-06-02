@@ -232,3 +232,58 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] OpGetLocal 读取超出 sp：默认参数 IfExpression 的 OpPop 弹出了错误栈位 → 根因是 IfExpression 栈不一致（已修复）
 - [x] Closure 不支持默认参数：`make_adder(n=10)` 调用报错 → Closure 结构体新增默认参数字段 + VM 闭包调用路径支持
 - [x] VarArgs 空参数覆盖：`greet("Alice")` 中 `args` 覆盖了 `name` → 改用 `vm.push` 替代 `vm.stack` 赋值
+
+### v0.10 — 描述符协议与内置描述符 ✅ 已完成
+
+目标：实现 Python 描述符协议，支持 property/classmethod/staticmethod 和 __slots__。
+
+- [x] P0-33：描述符协议 — `__get__`/`__set__`/`__delete__`，数据描述符优先于实例属性
+- [x] 内置 `property` — getter/setter/deleter，VM `OpGetAttribute`/`OpSetAttribute` 中拦截
+- [x] 内置 `classmethod` — `__getattr__` 返回绑定类的方法
+- [x] 内置 `staticmethod` — `__getattr__` 返回原始函数
+- [x] `__slots__` — 实例属性白名单检查，继承场景下父类 slots 合并
+- [x] 属性赋值语法 — `obj.attr = value`（`AttributeAssignStatement` AST 节点）
+- [x] 装饰器解析/编译 — `@property`/`@classmethod`/`@staticmethod` 在类体中的解析和编译
+
+### v0.10 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | 新增 `AttributeAssignStatement` 结构体（`Object`/`Attribute`/`Value` 字段） |
+| `pkg/parser/parser.go` | 新增 `parseExpressionOrAttrAssign()`；类体中装饰器解析修复 |
+| `pkg/objects/object.go` | 新增 `PROPERTY_OBJ`/`CLASSMETHOD_OBJ`/`STATICMETHOD_OBJ` 类型；`Property`/`ClassMethod`/`StaticMethod` 结构体；`Descriptor` 接口 + `IsDescriptor()`/`IsDataDescriptor()` 函数；`Class` 新增 `Slots []string` + `HasSlots()`/`IsSlotAllowed()` |
+| `pkg/compiler/compiler.go` | 新增 `property`/`classmethod`/`staticmethod` 内置函数；`compileClassStatement` 处理 `@staticmethod`/`@classmethod` 装饰器 |
+| `pkg/vm/vm.go` | `OpGetAttribute`：数据描述符 → 实例属性 → 非数据描述符查找优先级；`OpSetAttribute`：property setter / 数据描述符 `__set__` / `__slots__` 检查；`Frame` 新增 `initInstance`/`setAttrValue` 字段 |
+
+### v0.10 Bug 修复
+
+- [x] 编译器 `lastInstruction` 状态泄漏：`compileFunction`/`FunctionLiteral` 进入新作用域时未重置 → 保存/恢复 `lastInstruction`/`previousInstruction`
+- [x] `return vm.push(val)` 导致 VM 提前退出 → 改为 `vm.push(val); continue`
+- [x] `__init__` 返回值覆盖实例 → `Frame.initInstance` 标记
+
+### v0.11 — try/except 编译器修复 ✅ 已完成
+
+目标：修复 try/except 的编译器和 VM 问题，确保异常处理正确工作。
+
+- [x] `OpBeginTry` 新增 `handlerIP` 操作数 — 编译器回填第一个 `OpExceptHandler` 的位置
+- [x] try 块无异常时不穿透到 except 块 — 编译器在 try body 后始终生成 `OpJump`
+- [x] 跨帧异常处理 — `OpRaise`/`raiseException` 正确回退帧到 `try/except` 所在帧
+- [x] `matchesException` catch-all — 裸 `except:` 捕获任何类型异常
+- [x] DCE 保留异常处理器 — `EliminateDeadCode` 理解 `OpBeginTry` 控制流，标记 `handlerIP` 为可达
+
+### v0.11 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/compiler/compiler.go` | `compileTryStatement`：`OpBeginTry` 新增第 3 个操作数 `handlerIP`（7 字节指令）；try body 后始终生成 `OpJump`；回填 `handlerIP` |
+| `pkg/compiler/optimize.go` | `instructionSize`：`OpBeginTry` 从 5 字节改为 7 字节；`EliminateDeadCode`：`OpBeginTry` 标记 `handlerIP` 位置为可达；重写时更新 `handlerIP` |
+| `pkg/vm/vm.go` | `OpBeginTry`：读取 `handlerIP` 操作数；`OpRaise`/`OpEndTry`：使用 `handlerIP` 扫描 `OpExceptHandler`；`ExceptionHandler.handlerIP` 在 `OpBeginTry` 时设置；`raiseException`：使用 `handlerIP` 替代 `tryBlockStartIP` 扫描；移除 `handlerIP == -1` 检查，改用 `exceptCount == 0` |
+
+### 待办：脱糖迁移
+
+当前 property/classmethod/staticmethod/__slots__ 的处理仍在 VM 和 compiler 中。根据脱糖优先原则，应迁移到脱糖层：
+
+- [ ] `@property` → 脱糖生成 `__getattr__` + `__setattr__` 方法
+- [ ] `@classmethod` → 脱糖生成 `__getattr__` 中返回 `__bind_method__(cls._desugar_cm_foo, cls)`
+- [ ] `@staticmethod` → 脱糖生成 `__getattr__` 中返回 `cls._desugar_sm_bar`
+- [ ] `__slots__` → 脱糖生成 `__setattr__` 白名单检查

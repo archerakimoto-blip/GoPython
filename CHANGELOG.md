@@ -6,6 +6,22 @@
 
 ### 新增特性
 
+- **描述符协议 (Descriptor Protocol)**：支持 `__get__`/`__set__`/`__delete__` 描述符协议，包括数据描述符和非数据描述符的属性查找优先级
+- **内置描述符**：`property`（getter/setter/deleter）、`classmethod`、`staticmethod` 内置函数
+- **`__slots__`**：支持 `__slots__` 限制实例属性，包括继承场景下的白名单检查
+- **属性赋值语法**：支持 `obj.attr = value` 语法（`AttributeAssignStatement` AST 节点）
+- **跨帧异常处理**：`raise` 在被调用函数中抛出异常时，能正确回退到调用者的 `try/except` 块捕获
+- **try/except 编译器修复**：`OpBeginTry` 新增 `handlerIP` 操作数，直接编码异常处理器位置；DCE 正确保留 `OpExceptHandler` 指令
+
+### 修复的问题
+
+- **编译器 `lastInstruction` 状态泄漏**：`compileFunction` 和 `FunctionLiteral` 编译时未重置 `lastInstruction`，导致函数体只有 `pass` 时缺少 `OpReturn` 指令
+- **try/except 穿透问题**：try 块无异常时不再错误地落入 except 块
+- **`matchesException` catch-all**：裸 `except:` 现在能捕获非 ERROR_OBJ 类型的异常（如字符串 raise）
+- **DCE 删除异常处理器**：死代码消除器现在理解 `OpBeginTry` 的控制流，不会删除 `OpExceptHandler` 指令
+
+### del 语句
+
 - **del 语句**：支持删除变量、列表元素、字典键或对象属性，自动脱糖为 `__delitem__` 或 `__delattr__` 调用
 - **yield from 语句**：支持从生成器委托到子生成器，自动脱糖为 `for item in iter: yield item` 循环
 - **async for 语句**：支持异步迭代器遍历，保留异步 for 循环结构
