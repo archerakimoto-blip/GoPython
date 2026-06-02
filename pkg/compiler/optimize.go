@@ -25,7 +25,7 @@ func instructionSize(op Opcode) int {
 		return 4
 
 	case OpBeginTry:
-		return 7
+		return 9
 
 	case OpExceptHandler:
 		return 5
@@ -62,7 +62,7 @@ func readOperand(ins Instructions, pos int, op Opcode) (int, int) {
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 3
 
 	case OpBeginTry:
-		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 6
+		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 8
 
 	case OpExceptHandler:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 4
@@ -126,6 +126,11 @@ func EliminateDeadCode(ins Instructions) Instructions {
 				reachable[handlerIP] = true
 				queue = append(queue, handlerIP)
 			}
+			finallyStartIP := int(uint16(ins[current+7])<<8 | uint16(ins[current+8]))
+			if finallyStartIP > 0 && finallyStartIP < len(ins) && !reachable[finallyStartIP] {
+				reachable[finallyStartIP] = true
+				queue = append(queue, finallyStartIP)
+			}
 
 		case op == OpReturnValue || op == OpReturn || op == OpRaise:
 
@@ -176,6 +181,11 @@ func EliminateDeadCode(ins Instructions) Instructions {
 				if newHandlerIP, ok := posMap[oldHandlerIP]; ok {
 					chunk[5] = byte(newHandlerIP >> 8)
 					chunk[6] = byte(newHandlerIP & 0xFF)
+				}
+				oldFinallyStartIP := int(uint16(ins[oldPos+7])<<8 | uint16(ins[oldPos+8]))
+				if newFinallyStartIP, ok := posMap[oldFinallyStartIP]; ok {
+					chunk[7] = byte(newFinallyStartIP >> 8)
+					chunk[8] = byte(newFinallyStartIP & 0xFF)
 				}
 			}
 

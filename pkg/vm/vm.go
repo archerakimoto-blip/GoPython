@@ -529,8 +529,9 @@ func (vm *VM) Run() error {
 		exceptCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 		hasFinally := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
 		handlerIP := int(uint16(ins[ip+5])<<8 | uint16(ins[ip+6]))
-		vm.currentFrame().ip += 6
-		tryBlockStartIP := ip + 7
+		finallyStartIP := int(uint16(ins[ip+7])<<8 | uint16(ins[ip+8]))
+		vm.currentFrame().ip += 8
+		tryBlockStartIP := ip + 9
 
 		handler := ExceptionHandler{
 			handlerIP:       handlerIP,
@@ -540,7 +541,7 @@ func (vm *VM) Run() error {
 			handlerStartIP:  -1,
 			tryBlockStartIP: tryBlockStartIP,
 			hasFinally:      hasFinally == 1,
-			finallyStartIP:  -1,
+			finallyStartIP:  finallyStartIP,
 			finallyEndIP:    -1,
 			pendingError:    nil,
 			frameIndex:      vm.framesIndex,
@@ -923,6 +924,13 @@ func (vm *VM) Run() error {
 			obj := vm.pop()
 
 			if instance, ok := obj.(*objects.Instance); ok {
+				if attrName == "__class__" {
+					err := vm.push(instance.Class)
+					if err != nil {
+						return err
+					}
+					continue
+				}
 				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.INSTANCE_OBJ}
 				if entry, hit := vm.attrCache[cacheKey]; hit {
 					if entry.ClassName == instance.Class.Name {
@@ -943,9 +951,9 @@ func (vm *VM) Run() error {
 					if classAttr, ok := instance.Class.FindClassAttr(attrName); ok {
 						if prop, ok := classAttr.(*objects.Property); ok {
 							if prop.Fget != nil && prop.Fget != objects.None_ {
-								vm.push(prop.Fget)
 								vm.push(instance)
-								err := vm.executeCall(1)
+								vm.push(prop.Fget)
+								err := vm.executeCall(0)
 								if err != nil {
 									return err
 								}
@@ -1058,6 +1066,13 @@ func (vm *VM) Run() error {
 			}
 
 			if classObj, ok := obj.(*objects.Class); ok {
+				if attrName == "__name__" {
+					err := vm.push(&objects.String{Value: classObj.Name})
+					if err != nil {
+						return err
+					}
+					continue
+				}
 				if classAttr, ok := classObj.FindClassAttr(attrName); ok {
 					if cm, ok := classAttr.(*objects.ClassMethod); ok {
 						vm.push(classObj)
@@ -1175,14 +1190,21 @@ func (vm *VM) Run() error {
 					if found {
 						if prop, ok := classAttr.(*objects.Property); ok {
 							if prop.Fset != nil && prop.Fset != objects.None_ {
-								vm.push(prop.Fset)
 								vm.push(instance)
+								vm.push(prop.Fset)
 								vm.push(value)
-								err := vm.executeCall(2)
+								err := vm.executeCall(1)
 								if err != nil {
 									return err
 								}
 								vm.currentFrame().setAttrValue = value
+								continue
+							} else {
+								errObj := objects.NewAttributeError("can't set attribute '%s'", attrName)
+								caught := vm.raiseException(errObj)
+								if !caught {
+									return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+								}
 								continue
 							}
 						}
@@ -1380,7 +1402,19 @@ func (vm *VM) executeCall(numArgs int) error {
 
 	if calleeIndex > 0 && numArgs > 0 {
 		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
-			if cls, isClass := vm.stack[calleeIndex-1].(*objects.Class); isClass {
+			if instance, isInstance := vm.stack[calleeIndex-1].(*objects.Instance); isInstance {
+				args := make([]objects.Object, numArgs)
+				for i := 0; i < numArgs; i++ {
+					args[i] = vm.stack[vm.sp-numArgs+i]
+				}
+				vm.stack[calleeIndex-1] = calleeObj
+				vm.stack[calleeIndex] = instance
+				for i := 0; i < numArgs; i++ {
+					vm.stack[calleeIndex+1+i] = args[i]
+				}
+				vm.sp = calleeIndex + 1 + numArgs
+				numArgs = numArgs + 1
+			} else if cls, isClass := vm.stack[calleeIndex-1].(*objects.Class); isClass {
 				args := make([]objects.Object, numArgs)
 				for i := 0; i < numArgs; i++ {
 					args[i] = vm.stack[vm.sp-numArgs+i]
@@ -1702,9 +1736,9 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 
 	switch op {
 	case compiler.OpEqual:
-		return vm.push(nativeBoolToBooleanObject(left == right))
+		return vm.push(nativeBoolToBooleanObject(objects.Equal(left, right)))
 	case compiler.OpNotEqual:
-		return vm.push(nativeBoolToBooleanObject(left != right))
+		return vm.push(nativeBoolToBooleanObject(!objects.Equal(left, right)))
 	case compiler.OpGreaterThan:
 		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() > right.Inspect()))
 	case compiler.OpLessThan:

@@ -1706,7 +1706,7 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 	hasExcept := len(ts.Excepts) > 0
 	hasFinally := ts.Finally != nil
 
-	beginTryPos := c.emit(OpBeginTry, len(ts.Excepts), boolToInt(hasFinally), 0)
+	beginTryPos := c.emit(OpBeginTry, len(ts.Excepts), boolToInt(hasFinally), 0, 0)
 
 	if err := c.Compile(ts.Body); err != nil {
 		return err
@@ -1771,6 +1771,7 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 		for _, pos := range jumpPositions {
 			c.changeOperand(pos, finallyStartPos)
 		}
+		c.changeOperand(beginTryPos+6, finallyStartPos)
 	} else {
 		afterTryPos := len(c.instructions)
 		for _, pos := range jumpPositions {
@@ -1869,6 +1870,26 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 						methodObj = &objects.StaticMethod{Fn: compiledFn}
 					} else if ident.Value == "classmethod" {
 						methodObj = &objects.ClassMethod{Fn: compiledFn}
+					} else if ident.Value == "property" {
+						methodObj = &objects.Property{Fget: compiledFn}
+					}
+				}
+				if ma, ok := dec.(*ast.MemberAccess); ok {
+					if ident, ok := ma.Object.(*ast.Identifier); ok {
+						if ident.Value == method.Name {
+							prop := &objects.Property{Fget: objects.None_}
+							if existing, ok := class.Methods[method.Name]; ok {
+								if existingProp, ok := existing.(*objects.Property); ok {
+									prop = existingProp
+								}
+							}
+							if ma.Member.Value == "setter" {
+								prop.Fset = compiledFn
+							} else if ma.Member.Value == "deleter" {
+								prop.Fdel = compiledFn
+							}
+							methodObj = prop
+						}
 					}
 				}
 			}
