@@ -1162,6 +1162,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		if c.lastInstructionIs(OpPop) {
 			c.removeLastPop()
+		} else {
+			c.emit(OpNull)
 		}
 
 		jumpPos := c.emit(OpJump, 9999)
@@ -1178,6 +1180,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 			if c.lastInstructionIs(OpPop) {
 				c.removeLastPop()
+			} else {
+				c.emit(OpNull)
 			}
 		}
 
