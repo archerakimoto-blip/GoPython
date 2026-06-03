@@ -41,6 +41,7 @@ const (
 	PROPERTY_OBJ       ObjectType = "PROPERTY"
 	CLASSMETHOD_OBJ    ObjectType = "CLASSMETHOD"
 	STATICMETHOD_OBJ   ObjectType = "STATICMETHOD"
+	SUPER_OBJ          ObjectType = "SUPER"
 )
 
 type Object interface {
@@ -524,6 +525,8 @@ type Closure struct {
 	ParameterNames        []string
 	IsGenerator           bool
 	Free                  []Object
+	VarArgs               bool
+	KwArgs                bool
 }
 
 func (c *Closure) Type() ObjectType { return FUNCTION_OBJ }
@@ -706,6 +709,14 @@ func (cm *ClassMethod) DescGet(obj Object, classObj *Class) (Object, error) {
 func (cm *ClassMethod) DescSet(obj Object, value Object) error {
 	return nil
 }
+
+type Super struct {
+	Instance  *Instance
+	SuperClass *Class
+}
+
+func (s *Super) Type() ObjectType { return SUPER_OBJ }
+func (s *Super) Inspect() string  { return "<super object>" }
 func (cm *ClassMethod) IsDataDesc() bool { return false }
 
 type StaticMethod struct {

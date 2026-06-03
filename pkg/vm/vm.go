@@ -41,8 +41,9 @@ type Frame struct {
 }
 
 type AttrCacheKey struct {
-	IP      int
-	ObjType objects.ObjectType
+	FrameIndex int
+	IP         int
+	ObjType    objects.ObjectType
 }
 
 type AttrCacheEntry struct {
@@ -242,6 +243,8 @@ func (vm *VM) Run() error {
 				ParameterNames:        fn.ParameterNames,
 				IsGenerator:           fn.IsGenerator,
 				Free:                  free,
+				VarArgs:               fn.VarArgs,
+				KwArgs:                fn.KwArgs,
 			}
 
 			err := vm.push(closure)
@@ -939,7 +942,7 @@ func (vm *VM) Run() error {
 					}
 					continue
 				}
-				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.INSTANCE_OBJ}
+				cacheKey := AttrCacheKey{FrameIndex: vm.framesIndex - 1, IP: ip, ObjType: objects.INSTANCE_OBJ}
 				if entry, hit := vm.attrCache[cacheKey]; hit {
 					if entry.ClassName == instance.Class.Name {
 						if entry.IsMethod {
@@ -1124,7 +1127,7 @@ func (vm *VM) Run() error {
 			}
 
 			if module, ok := obj.(*objects.Module); ok {
-				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.MODULE_OBJ}
+				cacheKey := AttrCacheKey{FrameIndex: vm.framesIndex - 1, IP: ip, ObjType: objects.MODULE_OBJ}
 				if entry, hit := vm.attrCache[cacheKey]; hit {
 					if entry.ClassName == module.Name {
 						err := vm.push(entry.Value)
@@ -1154,7 +1157,7 @@ func (vm *VM) Run() error {
 			}
 
 			if enumObj, ok := obj.(*objects.Enum); ok {
-				cacheKey := AttrCacheKey{IP: ip, ObjType: objects.ENUM_OBJ}
+				cacheKey := AttrCacheKey{FrameIndex: vm.framesIndex - 1, IP: ip, ObjType: objects.ENUM_OBJ}
 				if entry, hit := vm.attrCache[cacheKey]; hit {
 					if entry.ClassName == enumObj.Name {
 						err := vm.push(entry.Value)
@@ -1183,7 +1186,42 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			// Handle super() attribute access
+			if superObj, ok := obj.(*objects.Super); ok {
+				if superObj.SuperClass != nil {
+					if classAttr, ok := superObj.SuperClass.FindClassAttr(attrName); ok {
+						if method, ok := classAttr.(*compiler.CompiledFunction); ok {
+							vm.push(superObj.Instance)
+							vm.push(method)
+							continue
+						}
+						if prop, ok := classAttr.(*objects.Property); ok {
+							if prop.Fget != nil && prop.Fget != objects.None_ {
+								vm.push(superObj.Instance)
+								vm.push(prop.Fget)
+								err := vm.executeCall(0)
+								if err != nil {
+									return err
+								}
+								continue
+							}
+						}
+						err := vm.push(classAttr)
+						if err != nil {
+							return err
+						}
+						continue
+					}
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
+
 		case compiler.OpSetAttribute:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			attrName := vm.constants[idx].(*objects.String).Value
@@ -1253,6 +1291,61 @@ func (vm *VM) Run() error {
 			}
 			
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
+
+		case compiler.OpDelAttribute:
+			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			attrName := vm.constants[idx].(*objects.String).Value
+			vm.currentFrame().ip += 2
+
+			obj := vm.pop()
+
+			if instance, ok := obj.(*objects.Instance); ok {
+				if instance.Class != nil {
+					classAttr, found := instance.Class.FindClassAttr(attrName)
+					if found {
+						if prop, ok := classAttr.(*objects.Property); ok {
+							if prop.Fdel != nil && prop.Fdel != objects.None_ {
+								vm.push(instance)
+								vm.push(prop.Fdel)
+								err := vm.executeCall(0)
+								if err != nil {
+									return err
+								}
+								vm.pop() // pop the return value of deleter
+								continue
+							} else {
+								errObj := objects.NewAttributeError("can't delete attribute '%s'", attrName)
+								caught := vm.raiseException(errObj)
+								if !caught {
+									return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+								}
+								continue
+							}
+						}
+						if objects.IsDataDescriptor(classAttr) {
+							if descInst, ok := classAttr.(*objects.Instance); ok {
+								delMethod, delFound := descInst.GetAttr("__delete__")
+								if delFound {
+									vm.push(delMethod)
+									vm.push(descInst)
+									vm.push(instance)
+									err := vm.executeCall(1)
+									if err != nil {
+										return err
+									}
+									vm.pop() // pop return value
+									continue
+								}
+							}
+						}
+					}
+				}
+				vm.attrCache = make(map[AttrCacheKey]AttrCacheEntry)
+				delete(instance.Fields, attrName)
+				continue
+			}
+
+			return fmt.Errorf("cannot delete attribute on non-instance: %s", obj.Type())
 		case compiler.OpSetClassField:
 			idx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
@@ -1393,6 +1486,39 @@ func (vm *VM) executeCall(numArgs int) error {
 		return nil
 	}
 
+	// Handle super() call
+	if builtin, ok := calleeObj.(*objects.Builtin); ok && builtin.Name == "super" {
+		// Find self (the current instance) from the caller's frame
+		var currentInstance *objects.Instance
+		var currentClass *objects.Class
+		// Search all frames for the nearest Instance
+		for fi := vm.framesIndex - 2; fi >= 0; fi-- {
+			frame := vm.frames[fi]
+			for i := frame.basePointer; i < frame.basePointer+frame.fn.NumLocals+frame.fn.NumParameters+5 && i < vm.sp; i++ {
+				if inst, ok := vm.stack[i].(*objects.Instance); ok {
+					currentInstance = inst
+					currentClass = inst.Class
+					break
+				}
+			}
+			if currentInstance != nil {
+				break
+			}
+		}
+		if currentInstance == nil {
+			vm.sp = calleeIndex + 1
+			vm.stack[calleeIndex] = objects.None_
+			return nil
+		}
+		superObj := &objects.Super{
+			Instance:   currentInstance,
+			SuperClass: currentClass.SuperClass,
+		}
+		vm.sp = calleeIndex + 1
+		vm.stack[calleeIndex] = superObj
+		return nil
+	}
+
 	if calleeIndex > 0 && numArgs == 0 {
 		if _, isMethod := calleeObj.(*compiler.CompiledFunction); isMethod {
 			if instance, isInstance := vm.stack[calleeIndex-1].(*objects.Instance); isInstance {
@@ -1473,7 +1599,47 @@ func (vm *VM) executeCall(numArgs int) error {
 			}
 		}
 
-		if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 {
+		if closure.VarArgs || closure.KwArgs {
+			minParams := closure.NumParameters
+			if closure.VarArgs {
+				minParams -= 1
+			}
+			if closure.KwArgs {
+				minParams -= 1
+			}
+
+			if posArgsCount < minParams {
+				return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+					minParams, posArgsCount)
+			}
+
+			if closure.VarArgs {
+				if posArgsCount > minParams {
+					extraArgs := posArgsCount - minParams
+					args := make([]objects.Object, extraArgs)
+					for i := 0; i < extraArgs; i++ {
+						args[i] = vm.stack[vm.sp-numArgs+minParams+i]
+					}
+					tuple := &objects.List{Elements: args}
+					vm.stack[vm.sp-numArgs+minParams] = tuple
+					vm.sp = vm.sp - extraArgs
+					numArgs = minParams + 1
+					posArgsCount = numArgs
+				} else if posArgsCount == minParams {
+					vm.push(&objects.List{Elements: []objects.Object{}})
+					numArgs = minParams + 1
+					posArgsCount = numArgs
+				}
+			}
+
+			if closure.KwArgs {
+				if kwargsDict == nil {
+					kwargsDict = objects.NewDict()
+				}
+				vm.stack[vm.sp-numArgs+posArgsCount] = kwargsDict
+				numArgs = posArgsCount + 1
+			}
+		} else if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 {
 			maxPosArgs := closure.NumParameters - closure.NumKeywordOnly
 			minPosArgs := maxPosArgs - closure.NumPositionalDefaults
 			if posArgsCount < minPosArgs {
@@ -1521,6 +1687,8 @@ func (vm *VM) executeCall(numArgs int) error {
 			NumPositionalDefaults: closure.NumPositionalDefaults,
 			ParameterNames:        closure.ParameterNames,
 			IsGenerator:           closure.IsGenerator,
+			VarArgs:               closure.VarArgs,
+			KwArgs:                closure.KwArgs,
 		}
 
 		freeVarsCopy := make([]objects.Object, len(closure.Free))

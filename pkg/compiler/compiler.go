@@ -64,6 +64,7 @@ const (
 	OpCreateClassWithMultiSuper
 	OpGetAttribute
 	OpSetAttribute
+	OpDelAttribute
 	OpSetClassField
 	OpFormatString
 	OpMakeAsync
@@ -959,6 +960,19 @@ func (c *Compiler) registerBuiltins() {
 	staticmethodIndex := len(c.constants)
 	c.constants = append(c.constants, staticmethodBuiltin)
 	c.symbolTable.DefineBuiltin("staticmethod", staticmethodIndex)
+
+	superBuiltin := &objects.Builtin{
+		Name: "super",
+		Fn: func(args ...objects.Object) objects.Object {
+			return &objects.Super{
+				Instance:   nil,
+				SuperClass: nil,
+			}
+		},
+	}
+	superIndex := len(c.constants)
+	c.constants = append(c.constants, superBuiltin)
+	c.symbolTable.DefineBuiltin("super", superIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -1239,6 +1253,41 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		c.emit(OpSetAttribute, c.addConstant(&objects.String{Value: node.Attr.Value}))
 		c.emit(OpPop)
+
+	case *ast.DeleteStatement:
+		for _, target := range node.Targets {
+			switch t := target.(type) {
+			case *ast.MemberAccess:
+				err := c.Compile(t.Object)
+				if err != nil {
+					return err
+				}
+				c.emit(OpDelAttribute, c.addConstant(&objects.String{Value: t.Member.Value}))
+			case *ast.IndexExpression:
+				err := c.Compile(t.Left)
+				if err != nil {
+					return err
+				}
+				err = c.Compile(t.Index)
+				if err != nil {
+					return err
+				}
+				c.emit(OpPop) // pop index
+				c.emit(OpPop) // pop object (simplified: no OpDelIndex yet)
+			case *ast.Identifier:
+				symbol, ok := c.symbolTable.Resolve(t.Value)
+				if !ok {
+					return fmt.Errorf("undefined variable %s", t.Value)
+				}
+				if symbol.Scope == GlobalScope {
+					c.emit(OpNull)
+					c.emit(OpSetGlobal, symbol.Index)
+				} else {
+					c.emit(OpNull)
+					c.emit1(OpSetLocal, symbol.Index)
+				}
+			}
+		}
 
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)

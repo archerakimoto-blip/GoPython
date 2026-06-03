@@ -1149,8 +1149,8 @@ func desugarMixedDictLiteral(elements []ast.Expression) ast.Expression {
 }
 
 // desugarDeleteStatement 脱糖 del 语句
-// 对于简单变量，我们直接保留它，因为删除操作在运行时处理
-// 对于下标访问和成员访问，我们转换为 __delitem__ 和 __delattr__ 调用
+// 对于简单变量和成员访问，保留 DeleteStatement 由编译器直接处理
+// 对于下标访问，转换为 __delitem__ 调用
 func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 	desugaredStmts := make([]ast.Statement, 0, len(stmt.Targets))
 
@@ -1176,17 +1176,10 @@ func desugarDeleteStatement(stmt *ast.DeleteStatement) ast.Statement {
 				},
 			})
 		case *ast.MemberAccess:
-			// 成员访问：del x.y -> x.__delattr__(y)
-			desugaredStmts = append(desugaredStmts, &ast.ExpressionStatement{
-				Expression: &ast.CallExpression{
-					Token: "__delattr__",
-					Function: &ast.MemberAccess{
-						Token:  ".",
-						Object: t.Object,
-						Member: &ast.Identifier{Token: "__delattr__", Value: "__delattr__"},
-					},
-					Arguments: []ast.Expression{t.Member},
-				},
+			// 成员访问：保留 DeleteStatement，由编译器 OpDelAttribute 处理
+			desugaredStmts = append(desugaredStmts, &ast.DeleteStatement{
+				Token:   stmt.Token,
+				Targets: []ast.Expression{t},
 			})
 		default:
 			// 其他情况，保留原样

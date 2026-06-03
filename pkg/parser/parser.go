@@ -121,6 +121,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.OR, p.parseInfixExpression)
 	p.registerInfix(lexer.IF, p.parseTernaryExpression)
 	p.registerInfix(lexer.WALRUS, p.parseNamedExpression)
+	p.registerInfix(lexer.DOT, p.parseDotExpression)
 
 	p.nextToken()
 	p.nextToken()
@@ -1095,6 +1096,29 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 	exp := &ast.CallExpression{Token: p.curToken.Literal, Function: function}
 	exp.Arguments = p.parseExpressionList(lexer.RPAREN)
 	return exp
+}
+
+func (p *Parser) parseDotExpression(left ast.Expression) ast.Expression {
+	// consume the DOT
+	p.nextToken()
+
+	member := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+
+	if p.peekTokenIs(lexer.LPAREN) {
+		p.nextToken()
+		args := p.parseExpressionList(lexer.RPAREN)
+		return &ast.MethodCall{
+			Token:     p.curToken.Literal,
+			Object:    left,
+			Method:    member,
+			Arguments: args,
+		}
+	}
+
+	return &ast.MemberAccess{
+		Object: left,
+		Member: member,
+	}
 }
 
 func (p *Parser) parseListLiteral() ast.Expression {

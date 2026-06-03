@@ -152,10 +152,12 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 9. **Complex numbers** - 复数
 10. **asyncio 模块** - 异步生态
 
-#### 🐛 已知问题 (2 项)
+#### 🐛 已知问题 (4 项)
 
 1. **try-only-finally 异常穿透** — `try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。原因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1
 2. **描述符未迁移到脱糖层** — property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，违反脱糖优先原则（功能正确，架构待优化）
+3. **自定义描述符 `__get__` 参数数量** — `__get__(self, obj, objtype=None)` 有默认参数，VM 调用时参数数量不匹配
+4. **varargs/kwargs 装饰器包装** — `@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误
 
 ---
 
@@ -393,6 +395,34 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | `pkg/compiler/optimize.go` | `instructionSize`：`OpBeginTry` 从 5 字节改为 7 字节；`EliminateDeadCode`：`OpBeginTry` 标记 `handlerIP` 位置为可达；重写时更新 `handlerIP` |
 | `pkg/vm/vm.go` | `OpBeginTry`：读取 `handlerIP` 操作数；`OpRaise`/`OpEndTry`：使用 `handlerIP` 扫描 `OpExceptHandler`；`ExceptionHandler.handlerIP` 在 `OpBeginTry` 时设置；`raiseException`：使用 `handlerIP` 替代 `tryBlockStartIP` 扫描；移除 `handlerIP == -1` 检查，改用 `exceptCount == 0` |
 
+### v0.11.1 — 关键 Bug 修复 + super() 实现 ✅
+
+目标：修复影响核心功能的多个关键 bug，实现 `super()` 内建函数。
+
+**Bug 修复：**
+
+- [x] **if 语句解析 bug**：顶层 `if` 语句被 parser 当作表达式解析，后续语句被误解析为 if 的调用（如 `if true: print("a") print("b")` → `if_expr("b")`）。修复：在 `parseStatement` 中添加 `case lexer.IF`，将顶层 if 作为 `ExpressionStatement` 处理，设置 `lastStmtAdvanced`
+- [x] **OpCreateClassWithMultiSuper numParents 读取位置错误**：`numParents := int(ins[ip+1])` 读取了 idx 的低字节而非 `ins[ip+3]`，导致多继承时父类数量解析错误。修复：改为 `numParents := int(ins[ip+3])`
+- [x] **attrCache key 缺少 FrameIndex**：`AttrCacheKey{IP: ip, ObjType: ...}` 在不同函数帧中 IP 相同时缓存污染（如 `self.name` 和 `self.sound` 在不同函数中 IP 相同，缓存命中返回错误值）。修复：`AttrCacheKey` 新增 `FrameIndex int` 字段
+- [x] **字符串比较 bug**：`OpEqual`/`OpNotEqual` 对非数值类型使用 Go 指针比较，导致 `"abc" == "abc"` 返回 `false`。修复：使用 `objects.Equal()` 进行值比较
+- [x] **IfExpression 栈不平衡**：`compileIfExpression` 中 consequence/alternative 块没有值时未 emit `OpNull`，导致栈不平衡。修复：对不以 `OpPop` 结尾的块 emit `OpNull`
+- [x] **OpEndTry 异常对象栈泄漏**：except 块处理后 pending error 对象仍留在栈上。修复：在 `OpEndTry` 中检查 `vm.sp > handler.stackPtr` 时 pop 错误对象
+
+**新功能：**
+
+- [x] **`super()` 内建函数**：支持 `super().__init__(args)` 调用模式。在 `executeCall` 中检测 `super()` 调用，从调用者帧中搜索 Instance 对象，返回 `Super{Instance, SuperClass}` 对象
+- [x] **`parseDotExpression` infix handler**：注册 `lexer.DOT` 的 infix 解析器，支持 `expr.attr` 和 `expr.method(args)` 语法（如 `super().__init__(name)`）
+- [x] **`Super` 对象类型**：`objects.Super` 结构体 + `SUPER_OBJ` 类型 + `OpGetAttribute` 中 Super 对象的属性查找（委托给父类）
+
+**v0.11.1 变更详情：**
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/parser/parser.go` | 新增 `case lexer.IF` 在 `parseStatement` 中处理顶层 if 语句；注册 `lexer.DOT` infix handler → `parseDotExpression`；新增 `parseDotExpression` 函数处理 `expr.member` 和 `expr.method(args)` |
+| `pkg/compiler/compiler.go` | `compileIfExpression` 修复：consequence/alternative 不以 OpPop 结尾时 emit OpNull；注册 `super` 内建函数 |
+| `pkg/vm/vm.go` | `AttrCacheKey` 新增 `FrameIndex` 字段；`OpCreateClassWithMultiSuper` 修复 numParents 读取位置；`executeComparison` 使用 `objects.Equal()`；`executeCall` 新增 `super()` 处理：搜索调用者帧中的 Instance，返回 Super 对象；`OpGetAttribute` 新增 Super 对象属性查找；`OpEndTry` 修复异常对象栈泄漏 |
+| `pkg/objects/object.go` | 新增 `SUPER_OBJ` 类型；`Super` 结构体（`Instance`/`SuperClass` 字段） |
+
 ---
 
 ## 进行中
@@ -400,13 +430,12 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ### Bug 修复
 
 - [ ] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。根因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1。修复方案：在 `OpBeginTry` 中编码 `finallyStartIP`（类似 `handlerIP` 的方式）
+- [ ] **自定义描述符 `__get__` 参数数量**：`__get__(self, obj, objtype=None)` 有默认参数，VM 调用时参数数量不匹配
+- [ ] **varargs/kwargs 装饰器包装**：`@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误
 
 ### 脱糖层增强
 
 - [ ] `@property` 的 `@x.deleter` 端到端测试
-- [ ] `@classmethod` / `@staticmethod` 端到端测试
-- [ ] `__slots__` 端到端测试
-- [ ] 装饰器与继承的交互测试
 - [ ] 用户自定义 `__getattr__` / `__setattr__` 与脱糖生成代码的合并测试
 
 ### 词法分析器 / 解析器

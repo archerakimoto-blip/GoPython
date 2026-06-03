@@ -17,6 +17,7 @@ func instructionSize(op Opcode) int {
 		OpCreateClassWithMultiSuper,
 		OpGetAttribute,
 		OpSetAttribute,
+		OpDelAttribute,
 		OpFormatString,
 		OpFinally:
 		return 3
@@ -54,7 +55,7 @@ func readOperand(ins Instructions, pos int, op Opcode) (int, int) {
 	switch op {
 	case OpConstant, OpJump, OpJumpNotTruthy, OpSetGlobal, OpGetGlobal,
 		OpArray, OpHash, OpSet, OpCreateClass, OpCreateClassWithSuper,
-		OpCreateClassWithMultiSuper, OpGetAttribute, OpSetAttribute,
+		OpCreateClassWithMultiSuper, OpGetAttribute, OpSetAttribute, OpDelAttribute,
 		OpFormatString, OpFinally:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 2
 
