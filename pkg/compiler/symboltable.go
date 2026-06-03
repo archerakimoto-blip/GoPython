@@ -185,6 +185,22 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 
 				return newSymbol, true
 			}
+			if obj.Scope == FreeScope {
+				// 外层作用域的 free 变量需要传播到当前作用域
+				if s.Free == nil {
+					s.Free = []Symbol{}
+				}
+
+				s.FreeSymbols = append(s.FreeSymbols, obj)
+				newSymbol := Symbol{Name: obj.Name, Scope: FreeScope, Index: len(s.Free)}
+				s.Free = append(s.Free, newSymbol)
+
+				// 注意：不需要将 free 变量添加到外层作用域的 NestedFreeSymbols
+				// 因为外层作用域创建闭包时已经会把自己的 free 变量加载到栈上
+				// 如果再添加到 NestedFreeSymbols，会导致该变量在 allFreeVars 中出现两次
+
+				return newSymbol, true
+			}
 			return obj, true
 		}
 	}

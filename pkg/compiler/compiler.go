@@ -1453,6 +1453,7 @@ func (c *Compiler) Compile(node ast.Node) error {
 		fnInstructions := c.instructions
 		numLocals := c.symbolTable.numDefinitions
 		freeVars := c.symbolTable.Free
+		freeSymbols := c.symbolTable.FreeSymbols
 		numFree := len(freeVars)
 
 		// Get the nested free symbols before exiting scope
@@ -1530,16 +1531,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 		if needsClosure {
 			// Emit instructions to load free variables onto stack
 			// First, load this function's own free variables
-			for _, free := range freeVars {
-				if free.Scope == GlobalScope {
-					c.emit(OpGetGlobal, free.Index)
+			// Use FreeSymbols (original scope info) to determine the correct opcode
+			for _, freeSym := range freeSymbols {
+				if freeSym.Scope == GlobalScope {
+					c.emit(OpGetGlobal, freeSym.Index)
+				} else if freeSym.Scope == FreeScope {
+					c.emit1(OpGetFree, freeSym.Index)
 				} else {
-					c.emit1(OpGetLocal, free.Index)
+					c.emit1(OpGetLocal, freeSym.Index)
 				}
 			}
 			// Then, load the nested free variables (locals that nested functions need)
 			for _, nestedFree := range nestedFreeSymbols {
-				c.emit1(OpGetLocal, nestedFree.Index)
+				if nestedFree.Scope == FreeScope {
+					c.emit1(OpGetFree, nestedFree.Index)
+				} else {
+					c.emit1(OpGetLocal, nestedFree.Index)
+				}
 			}
 			totalFree := numFree + len(nestedFreeSymbols)
 			c.emitClosure(c.addConstant(compiledFn), totalFree)

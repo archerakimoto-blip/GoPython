@@ -589,58 +589,9 @@ func (vm *VM) Run() error {
 				}
 
 				if pendingError != nil {
-					err := vm.push(pendingError)
-					if err != nil {
-						return err
-					}
-					caught := false
-
-					for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
-						handler := vm.exceptionStack[i]
-						if handler.exceptCount == 0 && !handler.hasFinally {
-							continue
-						}
-
-						if handler.handlerIP >= 0 {
-							scanIP := handler.handlerIP
-							ins := vm.currentFrame().fn.Instructions
-							for scanIP < len(ins) {
-								op := compiler.Opcode(ins[scanIP])
-								if op == compiler.OpExceptHandler {
-									typeIdx := int(uint16(ins[scanIP+2])<<8 | uint16(ins[scanIP+1]))
-									var exceptionType string
-									if typeIdx > 0 && typeIdx < len(vm.constants) {
-										if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
-											exceptionType = typeObj.Value
-										}
-									}
-									if exceptionType == "" || matchesException(pendingError, exceptionType) {
-										vm.sp = handler.stackPtr
-										if err := vm.push(pendingError); err != nil {
-											return err
-										}
-										vm.currentFrame().ip = scanIP + 5 - 1
-										caught = true
-									}
-									break
-								}
-								if op == compiler.OpFinally || op == compiler.OpEndTry {
-									break
-								}
-								scanIP++
-							}
-						}
-
-						if !caught && handler.hasFinally && handler.finallyStartIP > 0 {
-							vm.exceptionStack[i].pendingError = pendingError
-							vm.currentFrame().ip = handler.finallyStartIP - 1
-							caught = true
-						}
-						if caught {
-							break
-						}
-					}
-
+					// try-only-finally: finally 块执行完后，异常需要继续传播
+					// 使用 raiseException 让异常正确传播到外层帧
+					caught := vm.raiseException(pendingError)
 					if !caught {
 						vm.pendingError = pendingError
 						return fmt.Errorf("unhandled exception: %s", pendingError.Inspect())
