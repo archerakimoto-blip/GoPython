@@ -1637,6 +1637,7 @@ func (vm *VM) executeCall(numArgs int) error {
 					kwargsDict = objects.NewDict()
 				}
 				vm.stack[vm.sp-numArgs+posArgsCount] = kwargsDict
+				vm.sp++
 				numArgs = posArgsCount + 1
 			}
 		} else if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 {
@@ -1694,7 +1695,7 @@ func (vm *VM) executeCall(numArgs int) error {
 		freeVarsCopy := make([]objects.Object, len(closure.Free))
 		copy(freeVarsCopy, closure.Free)
 
-		basePointer := vm.sp - numArgs
+		basePointer := calleeIndex + 1
 		frame := NewFrameWithFreeVars(fn, basePointer, freeVarsCopy)
 		vm.pushFrame(frame)
 		vm.sp = frame.basePointer + closure.NumLocals
