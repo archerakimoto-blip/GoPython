@@ -156,7 +156,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 1. **try-only-finally 异常穿透** — 已修复：`OpEndTry` 改用 `raiseException()` 传播异常
 2. **描述符保留 VM 原生实现** — 这是正确的架构选择（性能关键路径不应迁移到脱糖层）
-3. **range 迭代器死循环** — `for i in range(5)` 打印无限个 0，迭代器未正确递增
+3. **range 迭代器死循环** — 已修复：`desugarForToWhile` 改用 `AssignStatement` + 嵌套循环唯一索引变量名
 
 ---
 
@@ -428,7 +428,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ### Bug 修复
 
-- [ ] **range 迭代器死循环**：`for i in range(5)` 打印无限个 0，迭代器未正确递增
+_(v0.12 所有计划中的 bug 修复已完成)_
 
 ### 已完成
 
@@ -452,7 +452,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ## 路线图
 
-### v0.12 — Bug 修复 + 运行时增强 (进行中)
+### v0.12 — Bug 修复 + 运行时增强 ✅
 
 > **架构决策**：v0.12 不再将 property/classmethod/staticmethod/__slots__ 迁移到脱糖层。
 > 原因：脱糖迁移会导致 (1) 性能崩塌——每次属性访问都要经过方法查找+帧创建+函数调用，
@@ -467,8 +467,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] varargs/kwargs 装饰器包装修复 — `OpListUnpack`/`OpDictUnpack` VM 实现 + Closure VarArgs/KwArgs 字段
 - [x] `del obj.attr` 完整支持 — `OpDelAttribute` + property deleter
 - [x] 嵌套闭包自由变量捕获修复 — `Resolve` FreeScope 传播 + `FreeSymbols` 保存 + `store` 缓存
-- [ ] `__slots__` 内存优化 — Instance 使用固定字段数组替代 `map[string]Object`
-- [ ] range 迭代器死循环修复 — 迭代器未正确递增
+- [x] `__slots__` 内存优化 — Instance 使用 `SlotValues []Object` 固定数组替代 `map[string]Object`，O(1) 索引访问，节省内存
+- [x] range 迭代器死循环修复 — `desugarForToWhile` 改用 `AssignStatement` + 嵌套循环唯一索引变量名
 
 ### v0.13 — 剩余高难度特性 (计划中)
 

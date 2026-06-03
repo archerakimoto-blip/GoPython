@@ -607,14 +607,68 @@ func (c *Class) FindClassAttr(name string) (Object, bool) {
 }
 
 type Instance struct {
-	Class  *Class
-	Fields map[string]Object
+	Class      *Class
+	Fields     map[string]Object // 非 __slots__ 实例使用
+	SlotValues []Object          // __slots__ 实例使用，按 AllSlotIndices 索引
+}
+
+// GetSlotIndex 返回属性名在类的所有 slots 中的索引，-1 表示不在 slots 中
+func (i *Instance) GetSlotIndex(name string) int {
+	if i.Class == nil {
+		return -1
+	}
+	for idx, slotName := range i.Class.AllSlotNames() {
+		if slotName == name {
+			return idx
+		}
+	}
+	return -1
+}
+
+// AllSlotNames 返回类及其所有父类的 slot 名称（按 MRO 顺序）
+func (c *Class) AllSlotNames() []string {
+	if len(c.Slots) == 0 && c.SuperClass == nil && len(c.SuperClasses) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var names []string
+	// 按 MRO 顺序收集
+	classes := c.MRO
+	if len(classes) == 0 {
+		classes = []*Class{c}
+		if c.SuperClass != nil {
+			classes = append([]*Class{c.SuperClass}, classes...)
+		}
+	}
+	for _, cls := range classes {
+		for _, s := range cls.Slots {
+			if !seen[s] {
+				seen[s] = true
+				names = append(names, s)
+			}
+		}
+	}
+	return names
+}
+
+// IsSlottedInstance 返回实例是否使用 __slots__ 优化
+func (i *Instance) IsSlottedInstance() bool {
+	return len(i.SlotValues) > 0
 }
 
 func (i *Instance) Type() ObjectType { return INSTANCE_OBJ }
 func (i *Instance) Inspect() string  { return fmt.Sprintf("<%s instance>", i.Class.Name) }
 
 func (i *Instance) GetAttr(name string) (Object, bool) {
+	// 优先从 SlotValues 中查找
+	if len(i.SlotValues) > 0 {
+		if idx := i.GetSlotIndex(name); idx >= 0 && idx < len(i.SlotValues) {
+			if i.SlotValues[idx] != nil {
+				return i.SlotValues[idx], true
+			}
+			return nil, false
+		}
+	}
 	if val, ok := i.Fields[name]; ok {
 		return val, true
 	}
@@ -645,6 +699,15 @@ func (i *Instance) GetAttr(name string) (Object, bool) {
 }
 
 func (i *Instance) SetAttr(name string, value Object) {
+	if len(i.SlotValues) > 0 {
+		if idx := i.GetSlotIndex(name); idx >= 0 {
+			i.SlotValues[idx] = value
+			return
+		}
+	}
+	if i.Fields == nil {
+		i.Fields = make(map[string]Object)
+	}
 	i.Fields[name] = value
 }
 

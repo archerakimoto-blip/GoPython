@@ -953,8 +953,11 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 	return lc
 }
 
+var forLoopCounter int
+
 func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
-	indexVar := &ast.Identifier{Token: "_i", Value: "_i"}
+	forLoopCounter++
+	indexVar := &ast.Identifier{Token: fmt.Sprintf("_i_%d", forLoopCounter), Value: fmt.Sprintf("_i_%d", forLoopCounter)}
 	iterable := desugarExpression(forStmt.Iterable)
 
 	condition := &ast.InfixExpression{
@@ -982,11 +985,15 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 
 	loopBodyStmts = append(loopBodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
 
-	loopBodyStmts = append(loopBodyStmts, &ast.AugAssignStatement{
-		Token:    "+=",
-		Name:     indexVar,
-		Operator: "+",
-		Value:    &ast.IntegerLiteral{Token: "1", Value: 1},
+	loopBodyStmts = append(loopBodyStmts, &ast.AssignStatement{
+		Token: "+=",
+		Names: []*ast.Identifier{indexVar},
+		Value: &ast.InfixExpression{
+			Token:    "+",
+			Left:     indexVar,
+			Operator: "+",
+			Right:    &ast.IntegerLiteral{Token: "1", Value: 1},
+		},
 	})
 
 	loopBody := &ast.BlockStatement{

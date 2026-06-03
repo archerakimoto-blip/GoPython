@@ -975,6 +975,29 @@ func (vm *VM) Run() error {
 					}
 				}
 
+				// 查找实例属性：优先 SlotValues，然后 Fields
+				if instance.IsSlottedInstance() {
+					if idx := instance.GetSlotIndex(attrName); idx >= 0 && idx < len(instance.SlotValues) {
+						if instance.SlotValues[idx] != nil {
+							val := instance.SlotValues[idx]
+							vm.attrCache[cacheKey] = AttrCacheEntry{
+								Value:     val,
+								IsMethod:  false,
+								ClassName: instance.Class.Name,
+							}
+							vm.push(val)
+							continue
+						} else {
+							// slot 存在但值为 nil（已被 del），抛出 AttributeError
+							errObj := objects.NewAttributeError("'%s' object has no attribute '%s'", instance.Class.Name, attrName)
+							caught := vm.raiseException(errObj)
+							if !caught {
+								return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+							}
+							continue
+						}
+					}
+				}
 				if val, ok := instance.Fields[attrName]; ok {
 					vm.attrCache[cacheKey] = AttrCacheEntry{
 						Value:     val,
@@ -1313,7 +1336,20 @@ func (vm *VM) Run() error {
 					}
 				}
 				vm.attrCache = make(map[AttrCacheKey]AttrCacheEntry)
-				delete(instance.Fields, attrName)
+				if instance.IsSlottedInstance() {
+					idx := instance.GetSlotIndex(attrName)
+					if idx >= 0 && idx < len(instance.SlotValues) {
+						instance.SlotValues[idx] = nil
+					} else {
+						errObj := objects.NewAttributeError("'%s' object has no attribute '%s'", instance.Class.Name, attrName)
+						caught := vm.raiseException(errObj)
+						if !caught {
+							return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+						}
+					}
+				} else {
+					delete(instance.Fields, attrName)
+				}
 				continue
 			}
 
@@ -1423,8 +1459,14 @@ func (vm *VM) executeCall(numArgs int) error {
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
 		instance := &objects.Instance{
-			Class:  classObj,
-			Fields: make(map[string]objects.Object),
+			Class: classObj,
+		}
+		// 当类有 __slots__ 时，使用固定数组替代 map，节省内存
+		if classObj.HasSlots() {
+			allSlots := classObj.AllSlotNames()
+			instance.SlotValues = make([]objects.Object, len(allSlots))
+		} else {
+			instance.Fields = make(map[string]objects.Object)
 		}
 
 		if initMethod, ok := classObj.Methods["__init__"]; ok {
