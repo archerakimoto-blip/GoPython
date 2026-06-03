@@ -152,12 +152,11 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 9. **Complex numbers** - 复数
 10. **asyncio 模块** - 异步生态
 
-#### 🐛 已知问题 (4 项)
+#### 🐛 已知问题 (3 项)
 
 1. **try-only-finally 异常穿透** — `try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。原因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1
-2. **描述符未迁移到脱糖层** — property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，违反脱糖优先原则（功能正确，架构待优化）
-3. **自定义描述符 `__get__` 参数数量** — `__get__(self, obj, objtype=None)` 有默认参数，VM 调用时参数数量不匹配
-4. **varargs/kwargs 装饰器包装** — `@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误
+2. **描述符保留 VM 原生实现** — property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，这是正确的架构选择（性能关键路径不应迁移到脱糖层）
+3. **嵌套闭包自由变量捕获** — 三层嵌套闭包（如 `repeat(times)` → `decorator(func)` → `wrapper(*args, **kwargs)`）无法正确捕获外层自由变量，`times` 被错误捕获为 `func`
 
 ---
 
@@ -430,13 +429,18 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ### Bug 修复
 
 - [ ] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。根因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1。修复方案：在 `OpBeginTry` 中编码 `finallyStartIP`（类似 `handlerIP` 的方式）
-- [ ] **自定义描述符 `__get__` 参数数量**：`__get__(self, obj, objtype=None)` 有默认参数，VM 调用时参数数量不匹配
-- [ ] **varargs/kwargs 装饰器包装**：`@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误
+- [ ] **嵌套闭包自由变量捕获**：三层嵌套闭包无法正确捕获外层自由变量
+
+### 已完成
+
+- [x] **`del obj.attr` 完整支持**：新增 `OpDelAttribute` 操作码 + compiler 编译 `DeleteStatement` + VM 处理 property deleter 和实例属性删除 + desugar 修复 MemberAccess 参数错误
+- [x] **`@x.deleter` 端到端测试**：test_property_deleter.py 通过
+- [x] **varargs/kwargs 装饰器包装**：`@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误 — Closure 结构体新增 VarArgs/KwArgs 字段，VM executeCall Closure 分支添加 VarArgs/KwArgs 处理，OpListUnpack/OpDictUnpack VM 实现
+- [x] **自定义描述符 `__set__`/`__get__`/`__delete__` 在 `__init__` 内参数数量错误**：根因是描述符方法调用的栈布局与 `executeCall` 的自动 Instance 检测冲突——`calleeIndex-1` 位置恰好是 `__init__` 的 `self` 实例，导致多插入一个参数。修复：将 `descInst` 放在 callee 下面，利用自动检测正确添加 `self`，与 property setter/deleter 的调用模式一致
 
 ### 脱糖层增强
 
-- [ ] `@property` 的 `@x.deleter` 端到端测试
-- [ ] 用户自定义 `__getattr__` / `__setattr__` 与脱糖生成代码的合并测试
+- [ ] 用户自定义 `__getattr__` / `__setattr__` 与 VM 内置描述符的共存测试
 
 ### 词法分析器 / 解析器
 
@@ -447,15 +451,21 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ## 路线图
 
-### v0.12 — 脱糖迁移 + Bug 修复 (计划中)
+### v0.12 — Bug 修复 + 运行时增强 (进行中)
 
-当前 property/classmethod/staticmethod/__slots__ 的处理仍在 VM 和 compiler 中。根据脱糖优先原则，应迁移到脱糖层：
+> **架构决策**：v0.12 不再将 property/classmethod/staticmethod/__slots__ 迁移到脱糖层。
+> 原因：脱糖迁移会导致 (1) 性能崩塌——每次属性访问都要经过方法查找+帧创建+函数调用，
+> 远慢于 VM OpGetAttribute/OpSetAttribute 的直接拦截；(2) `__slots__` 失去优化内存的本意——
+> 脱糖生成的 `__setattr__` 白名单是运行时方法调用，而 VM 的 HasSlots()/IsSlotAllowed() 是 O(1) 直接判断，
+> 且 `__slots__` 在 CPython 中的核心价值是节省 `__dict__` 内存，脱糖方案无法实现；
+> (3) 脱糖生成的 `__getattr__`/`__setattr__` 会与用户自定义的方法冲突。
+> **结论**：性能关键的内核特性应保留 VM 原生实现，脱糖优先原则应有合理边界。
 
-- [ ] `@property` → 脱糖生成 `__getattr__` + `__setattr__` 方法
-- [ ] `@classmethod` → 脱糖生成 `__getattr__` 中返回 `__bind_method__(cls._desugar_cm_foo, cls)`
-- [ ] `@staticmethod` → 脱糖生成 `__getattr__` 中返回 `cls._desugar_sm_bar`
-- [ ] `__slots__` → 脱糖生成 `__setattr__` 白名单检查
 - [ ] try-only-finally 异常穿透修复 — `OpBeginTry` 编码 `finallyStartIP`
+- [x] 自定义描述符 `__set__`/`__get__`/`__delete__` 参数数量修复 — 栈布局与 executeCall 自动 Instance 检测对齐
+- [x] varargs/kwargs 装饰器包装修复 — `OpListUnpack`/`OpDictUnpack` VM 实现 + Closure VarArgs/KwArgs 字段
+- [x] `del obj.attr` 完整支持 — `OpDelAttribute` + property deleter
+- [ ] `__slots__` 内存优化 — Instance 使用固定字段数组替代 `map[string]Object`
 
 ### v0.13 — 剩余高难度特性 (计划中)
 

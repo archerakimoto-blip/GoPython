@@ -73,6 +73,8 @@ type VM struct {
 	pendingError   objects.Object     // 待处理的异常
 	inFinally      bool               // 是否正在执行 finally 块
 
+	unpackExtraArgs int // OpListUnpack 展开的额外参数数量（用于调整 OpCall 的 numArgs）
+
 	gcEnabled      bool              // 是否启用垃圾回收
 	gcThreshold    int64             // 垃圾回收阈值（字节）
 	allocatedBytes int64             // 当前已分配字节数
@@ -410,9 +412,28 @@ func (vm *VM) Run() error {
 				return err
 			}
 
+		case compiler.OpListUnpack:
+			listObj := vm.pop()
+			if list, ok := listObj.(*objects.List); ok {
+				for _, elem := range list.Elements {
+					err := vm.push(elem)
+					if err != nil {
+						return err
+					}
+				}
+				vm.unpackExtraArgs += len(list.Elements) - 1 // -1 因为 list 本身占1个位置
+			}
+
+		case compiler.OpDictUnpack:
+			// Dict 已经在栈上，executeCall 会检测最后一个参数是否是 Dict
+			// 不需要额外操作
+
 		case compiler.OpCall:
 			numArgs := int(ins[ip+1])
 			vm.currentFrame().ip += 1
+
+			numArgs += vm.unpackExtraArgs
+			vm.unpackExtraArgs = 0
 
 			err := vm.executeCall(numArgs)
 			if err != nil {
@@ -987,12 +1008,12 @@ func (vm *VM) Run() error {
 							if descInst, ok := classAttr.(*objects.Instance); ok {
 								getMethod, getFound := descInst.GetAttr("__get__")
 								if getFound {
-									vm.push(getMethod)
 									vm.push(descInst)
+									vm.push(getMethod)
 									vm.push(instance)
 									classObj := &objects.String{Value: instance.Class.Name}
 									vm.push(classObj)
-									err := vm.executeCall(3)
+									err := vm.executeCall(2)
 									if err != nil {
 										return err
 									}
@@ -1033,12 +1054,12 @@ func (vm *VM) Run() error {
 						if objects.IsDescriptor(classAttr) && !objects.IsDataDescriptor(classAttr) {
 							if descInst, ok := classAttr.(*objects.Instance); ok {
 								if getMethod, ok := descInst.GetAttr("__get__"); ok {
-									vm.push(getMethod)
 									vm.push(descInst)
+									vm.push(getMethod)
 									vm.push(instance)
 									classObj := &objects.String{Value: instance.Class.Name}
 									vm.push(classObj)
-									err := vm.executeCall(3)
+									err := vm.executeCall(2)
 									if err != nil {
 										return err
 									}
@@ -1258,11 +1279,11 @@ func (vm *VM) Run() error {
 							if descInst, ok := classAttr.(*objects.Instance); ok {
 								setMethod, setFound := descInst.GetAttr("__set__")
 								if setFound {
-									vm.push(setMethod)
 									vm.push(descInst)
+									vm.push(setMethod)
 									vm.push(instance)
 									vm.push(value)
-									err := vm.executeCall(3)
+									err := vm.executeCall(2)
 									if err != nil {
 										return err
 									}
@@ -1326,8 +1347,8 @@ func (vm *VM) Run() error {
 							if descInst, ok := classAttr.(*objects.Instance); ok {
 								delMethod, delFound := descInst.GetAttr("__delete__")
 								if delFound {
-									vm.push(delMethod)
 									vm.push(descInst)
+									vm.push(delMethod)
 									vm.push(instance)
 									err := vm.executeCall(1)
 									if err != nil {
@@ -1622,7 +1643,7 @@ func (vm *VM) executeCall(numArgs int) error {
 					}
 					tuple := &objects.List{Elements: args}
 					vm.stack[vm.sp-numArgs+minParams] = tuple
-					vm.sp = vm.sp - extraArgs
+					vm.sp = vm.sp - extraArgs + 1 // +1 因为 tuple 占1个位置替代了 extraArgs 个元素
 					numArgs = minParams + 1
 					posArgsCount = numArgs
 				} else if posArgsCount == minParams {
@@ -1675,8 +1696,18 @@ func (vm *VM) executeCall(numArgs int) error {
 				numArgs = closure.NumParameters
 			}
 		} else if numArgs != closure.NumParameters {
-			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
-				closure.NumParameters, numArgs)
+			// 如果有 kwargs dict 但函数不接受 kwargs，检查 posArgsCount
+			if kwargsDict != nil && posArgsCount == closure.NumParameters {
+				// kwargs dict 是空的或包含不需要的关键字参数，移除它
+				vm.sp--
+				numArgs = posArgsCount
+			} else if kwargsDict != nil && posArgsCount != closure.NumParameters {
+				return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+					closure.NumParameters, posArgsCount)
+			} else {
+				return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+					closure.NumParameters, numArgs)
+			}
 		}
 
 		fn := &compiler.CompiledFunction{
@@ -1767,7 +1798,7 @@ func (vm *VM) executeCall(numArgs int) error {
 				}
 				tuple := &objects.List{Elements: args}
 				vm.stack[vm.sp-numArgs+minParams] = tuple
-				vm.sp = vm.sp - extraArgs
+				vm.sp = vm.sp - extraArgs + 1 // +1 因为 tuple 占1个位置替代了 extraArgs 个元素
 				numArgs = minParams + 1
 				posArgsCount = numArgs
 			} else if posArgsCount == minParams {
@@ -1834,7 +1865,14 @@ func (vm *VM) executeCall(numArgs int) error {
 		numArgs = callee.NumParameters
 		basePointer = vm.sp - numArgs
 	} else {
-		if numArgs != callee.NumParameters {
+		if kwargsDict != nil && posArgsCount == callee.NumParameters {
+			// 函数不接受 kwargs，但传入了空的 kwargs dict，移除它
+			vm.sp--
+			numArgs = posArgsCount
+		} else if kwargsDict != nil && posArgsCount != callee.NumParameters {
+			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
+				callee.NumParameters, posArgsCount)
+		} else if numArgs != callee.NumParameters {
 			return fmt.Errorf("wrong number of arguments: want=%d, got=%d",
 				callee.NumParameters, numArgs)
 		}
