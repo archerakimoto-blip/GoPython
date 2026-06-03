@@ -169,6 +169,7 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 				s.FreeSymbols = append(s.FreeSymbols, obj)
 				newSymbol := Symbol{Name: obj.Name, Scope: FreeScope, Index: len(s.Free)}
 				s.Free = append(s.Free, newSymbol)
+				s.store[name] = newSymbol
 
 				// Notify the outer scope that one of its locals is being referenced by a nested function
 				// This is crucial for closure support - outer function needs to know what to capture
@@ -194,6 +195,7 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 				s.FreeSymbols = append(s.FreeSymbols, obj)
 				newSymbol := Symbol{Name: obj.Name, Scope: FreeScope, Index: len(s.Free)}
 				s.Free = append(s.Free, newSymbol)
+				s.store[name] = newSymbol
 
 				// 注意：不需要将 free 变量添加到外层作用域的 NestedFreeSymbols
 				// 因为外层作用域创建闭包时已经会把自己的 free 变量加载到栈上

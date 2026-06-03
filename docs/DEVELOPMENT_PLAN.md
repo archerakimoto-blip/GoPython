@@ -154,9 +154,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 #### 🐛 已知问题 (3 项)
 
-1. **try-only-finally 异常穿透** — `try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。原因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1
-2. **描述符保留 VM 原生实现** — property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，这是正确的架构选择（性能关键路径不应迁移到脱糖层）
-3. **嵌套闭包自由变量捕获** — 三层嵌套闭包（如 `repeat(times)` → `decorator(func)` → `wrapper(*args, **kwargs)`）无法正确捕获外层自由变量，`times` 被错误捕获为 `func`
+1. **try-only-finally 异常穿透** — 已修复：`OpEndTry` 改用 `raiseException()` 传播异常
+2. **描述符保留 VM 原生实现** — 这是正确的架构选择（性能关键路径不应迁移到脱糖层）
+3. **range 迭代器死循环** — `for i in range(5)` 打印无限个 0，迭代器未正确递增
 
 ---
 
@@ -428,8 +428,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ### Bug 修复
 
-- [ ] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。根因：`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时 `finallyStartIP` 仍为 -1。修复方案：在 `OpBeginTry` 中编码 `finallyStartIP`（类似 `handlerIP` 的方式）
-- [ ] **嵌套闭包自由变量捕获**：三层嵌套闭包无法正确捕获外层自由变量
+- [ ] **range 迭代器死循环**：`for i in range(5)` 打印无限个 0，迭代器未正确递增
 
 ### 已完成
 
@@ -437,6 +436,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **`@x.deleter` 端到端测试**：test_property_deleter.py 通过
 - [x] **varargs/kwargs 装饰器包装**：`@log_decorator` 包装的函数通过 `*args, **kwargs` 调用时参数数量错误 — Closure 结构体新增 VarArgs/KwArgs 字段，VM executeCall Closure 分支添加 VarArgs/KwArgs 处理，OpListUnpack/OpDictUnpack VM 实现
 - [x] **自定义描述符 `__set__`/`__get__`/`__delete__` 在 `__init__` 内参数数量错误**：根因是描述符方法调用的栈布局与 `executeCall` 的自动 Instance 检测冲突——`calleeIndex-1` 位置恰好是 `__init__` 的 `self` 实例，导致多插入一个参数。修复：将 `descInst` 放在 callee 下面，利用自动检测正确添加 `self`，与 property setter/deleter 的调用模式一致
+- [x] **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块执行后异常不传播到外层。根因：`OpEndTry` 的 `pendingError` 处理只在当前帧的 `exceptionStack` 中查找处理器，无法跨帧传播。修复：改用 `raiseException()` 让异常正确传播到外层帧
+- [x] **嵌套闭包自由变量捕获**：三层嵌套闭包（如 `repeat(times)` → `decorator(func)` → `wrapper()`）无法正确捕获外层自由变量。三个根因：(1) `Resolve` 方法不处理 `FreeScope` 变量传播——外层 free 变量不会传递到内层作用域；(2) 编译器在退出作用域后读取 `FreeSymbols`，但此时 `c.symbolTable` 已恢复为外层——需在退出前保存；(3) `Resolve` 不缓存结果到 `s.store`——同一变量被多次解析时重复添加到 `Free` 列表
 
 ### 脱糖层增强
 
@@ -461,11 +462,13 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 > (3) 脱糖生成的 `__getattr__`/`__setattr__` 会与用户自定义的方法冲突。
 > **结论**：性能关键的内核特性应保留 VM 原生实现，脱糖优先原则应有合理边界。
 
-- [ ] try-only-finally 异常穿透修复 — `OpBeginTry` 编码 `finallyStartIP`
+- [x] try-only-finally 异常穿透修复 — `OpEndTry` 改用 `raiseException()` 传播异常
 - [x] 自定义描述符 `__set__`/`__get__`/`__delete__` 参数数量修复 — 栈布局与 executeCall 自动 Instance 检测对齐
 - [x] varargs/kwargs 装饰器包装修复 — `OpListUnpack`/`OpDictUnpack` VM 实现 + Closure VarArgs/KwArgs 字段
 - [x] `del obj.attr` 完整支持 — `OpDelAttribute` + property deleter
+- [x] 嵌套闭包自由变量捕获修复 — `Resolve` FreeScope 传播 + `FreeSymbols` 保存 + `store` 缓存
 - [ ] `__slots__` 内存优化 — Instance 使用固定字段数组替代 `map[string]Object`
+- [ ] range 迭代器死循环修复 — 迭代器未正确递增
 
 ### v0.13 — 剩余高难度特性 (计划中)
 
