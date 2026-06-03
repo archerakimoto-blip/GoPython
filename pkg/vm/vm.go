@@ -240,9 +240,11 @@ func (vm *VM) Run() error {
 				NumLocals:             fn.NumLocals,
 				NumParameters:         fn.NumParameters,
 				NumKeywordOnly:        fn.NumKeywordOnly,
+				NumPositionalOnly:     fn.NumPositionalOnly,
 				NumDefaults:           fn.NumDefaults,
 				NumPositionalDefaults: fn.NumPositionalDefaults,
 				ParameterNames:        fn.ParameterNames,
+				PositionalOnly:        fn.PositionalOnly,
 				IsGenerator:           fn.IsGenerator,
 				Free:                  free,
 				VarArgs:               fn.VarArgs,
@@ -1654,23 +1656,71 @@ func (vm *VM) executeCall(numArgs int) error {
 				vm.sp++
 				numArgs = posArgsCount + 1
 			}
-		} else if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 {
+		} else if closure.NumKeywordOnly > 0 || closure.NumDefaults > 0 || closure.NumPositionalOnly > 0 {
 			maxPosArgs := closure.NumParameters - closure.NumKeywordOnly
 			minPosArgs := maxPosArgs - closure.NumPositionalDefaults
-			if posArgsCount < minPosArgs {
-				return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
-					minPosArgs, maxPosArgs, posArgsCount)
-			}
-			if posArgsCount > maxPosArgs {
-				return fmt.Errorf("takes %d positional arguments but %d were given",
-					maxPosArgs, posArgsCount)
-			}
 
 			if kwargsDict != nil {
+				// 先检查 positional-only 参数不能作为关键字传递
+				for _, hashKey := range kwargsDict.KeyOrder {
+					keyObj, ok := kwargsDict.Keys[hashKey]
+					if !ok {
+						continue
+					}
+					keyStr, ok := keyObj.(*objects.String)
+					if !ok {
+						continue
+					}
+					for i, paramName := range closure.ParameterNames {
+						if paramName == keyStr.Value && i < len(closure.PositionalOnly) && closure.PositionalOnly[i] {
+							errObj := objects.NewTypeError("function() got some positional-only arguments passed as keyword arguments: '%s'",
+								keyStr.Value)
+							caught := vm.raiseException(errObj)
+							if !caught {
+								return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+							}
+							return nil
+						}
+					}
+				}
+				// 计算 kwargs 中有多少非 keyword-only 参数（可作为位置参数的补充）
+				kwargsPosCount := 0
+				kwOnlyStart := closure.NumParameters - closure.NumKeywordOnly
+				for _, hashKey := range kwargsDict.KeyOrder {
+					keyObj, ok := kwargsDict.Keys[hashKey]
+					if !ok {
+						continue
+					}
+					keyStr, ok := keyObj.(*objects.String)
+					if !ok {
+						continue
+					}
+					for i, paramName := range closure.ParameterNames {
+						if paramName == keyStr.Value && i < kwOnlyStart && (i >= len(closure.PositionalOnly) || !closure.PositionalOnly[i]) {
+							kwargsPosCount++
+						}
+					}
+				}
+				effectivePosArgs := posArgsCount + kwargsPosCount
+				if effectivePosArgs < minPosArgs {
+					return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
+						minPosArgs, maxPosArgs, posArgsCount)
+				}
+				if posArgsCount > maxPosArgs {
+					return fmt.Errorf("takes %d positional arguments but %d were given",
+						maxPosArgs, posArgsCount)
+				}
+
 				vm.sp--
 				for i := posArgsCount; i < closure.NumParameters; i++ {
 					if i < maxPosArgs {
-						vm.push(objects.None_)
+						paramName := closure.ParameterNames[i]
+						key := &objects.String{Value: paramName}
+						if val, ok := kwargsDict.Get(key); ok {
+							vm.push(val)
+						} else {
+							vm.push(objects.None_)
+						}
 					} else {
 						paramName := closure.ParameterNames[i]
 						key := &objects.String{Value: paramName}
@@ -1708,9 +1758,11 @@ func (vm *VM) executeCall(numArgs int) error {
 			NumLocals:             closure.NumLocals,
 			NumParameters:         closure.NumParameters,
 			NumKeywordOnly:        closure.NumKeywordOnly,
+			NumPositionalOnly:     closure.NumPositionalOnly,
 			NumDefaults:           closure.NumDefaults,
 			NumPositionalDefaults: closure.NumPositionalDefaults,
 			ParameterNames:        closure.ParameterNames,
+			PositionalOnly:        closure.PositionalOnly,
 			IsGenerator:           closure.IsGenerator,
 			VarArgs:               closure.VarArgs,
 			KwArgs:                closure.KwArgs,
@@ -1810,23 +1862,76 @@ func (vm *VM) executeCall(numArgs int) error {
 		}
 
 		basePointer = calleeIndex + 1
-	} else if callee.NumKeywordOnly > 0 || callee.NumDefaults > 0 {
+	} else if callee.NumKeywordOnly > 0 || callee.NumDefaults > 0 || callee.NumPositionalOnly > 0 {
 		maxPosArgs := callee.NumParameters - callee.NumKeywordOnly
 		minPosArgs := maxPosArgs - callee.NumPositionalDefaults
-		if posArgsCount < minPosArgs {
-			return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
-				minPosArgs, maxPosArgs, posArgsCount)
-		}
-		if posArgsCount > maxPosArgs {
-			return fmt.Errorf("takes %d positional arguments but %d were given",
-				maxPosArgs, posArgsCount)
-		}
 
 		if kwargsDict != nil {
+			// 先检查 positional-only 参数不能作为关键字传递
+			for _, hashKey := range kwargsDict.KeyOrder {
+				// 从 Keys map 中获取原始键对象
+				keyObj, ok := kwargsDict.Keys[hashKey]
+				if !ok {
+					continue
+				}
+				keyStr, ok := keyObj.(*objects.String)
+				if !ok {
+					continue
+				}
+				for i, paramName := range callee.ParameterNames {
+					if paramName == keyStr.Value && i < len(callee.PositionalOnly) && callee.PositionalOnly[i] {
+						funcName := callee.Name
+						if funcName == "" {
+							funcName = "function"
+						}
+						errObj := objects.NewTypeError("%s() got some positional-only arguments passed as keyword arguments: '%s'",
+							funcName, keyStr.Value)
+						caught := vm.raiseException(errObj)
+						if !caught {
+							return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+						}
+						return nil
+					}
+				}
+			}
+			// 计算 kwargs 中有多少非 keyword-only 参数（可作为位置参数的补充）
+			kwargsPosCount := 0
+			kwOnlyStart := callee.NumParameters - callee.NumKeywordOnly
+			for _, hashKey := range kwargsDict.KeyOrder {
+				keyObj, ok := kwargsDict.Keys[hashKey]
+				if !ok {
+					continue
+				}
+				keyStr, ok := keyObj.(*objects.String)
+				if !ok {
+					continue
+				}
+				for i, paramName := range callee.ParameterNames {
+					if paramName == keyStr.Value && i < kwOnlyStart && (i >= len(callee.PositionalOnly) || !callee.PositionalOnly[i]) {
+						kwargsPosCount++
+					}
+				}
+			}
+			effectivePosArgs := posArgsCount + kwargsPosCount
+			if effectivePosArgs < minPosArgs {
+				return fmt.Errorf("wrong number of arguments: want=%d to %d, got=%d",
+					minPosArgs, maxPosArgs, posArgsCount)
+			}
+			if posArgsCount > maxPosArgs {
+				return fmt.Errorf("takes %d positional arguments but %d were given",
+					maxPosArgs, posArgsCount)
+			}
+
 			vm.sp--
 			for i := posArgsCount; i < callee.NumParameters; i++ {
 				if i < maxPosArgs {
-					vm.push(objects.None_)
+					paramName := callee.ParameterNames[i]
+					key := &objects.String{Value: paramName}
+					if val, ok := kwargsDict.Get(key); ok {
+						vm.push(val)
+					} else {
+						vm.push(objects.None_)
+					}
 				} else {
 					paramName := callee.ParameterNames[i]
 					key := &objects.String{Value: paramName}

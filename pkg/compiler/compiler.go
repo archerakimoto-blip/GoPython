@@ -53,6 +53,7 @@ const (
 	OpEndTry
 	OpRaise
 	OpExceptHandler
+	OpExceptStarHandler
 	OpFinally
 	OpYield
 	OpEnterContext
@@ -973,6 +974,37 @@ func (c *Compiler) registerBuiltins() {
 	superIndex := len(c.constants)
 	c.constants = append(c.constants, superBuiltin)
 	c.symbolTable.DefineBuiltin("super", superIndex)
+
+	exceptionGroupBuiltin := &objects.Builtin{
+		Name: "ExceptionGroup",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 2 {
+				return objects.NewTypeError("ExceptionGroup() takes at least 2 arguments (%d given)", len(args))
+			}
+			message, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("ExceptionGroup() first argument must be a string")
+			}
+			excList, ok := args[1].(*objects.List)
+			if !ok {
+				return objects.NewTypeError("ExceptionGroup() second argument must be a list")
+			}
+			var exceptions []objects.Object
+			for _, exc := range excList.Elements {
+				if exc.Type() != objects.ERROR_OBJ && exc.Type() != objects.EXCEPTION_GROUP_OBJ {
+					return objects.NewTypeError("ExceptionGroup() second argument must contain exceptions")
+				}
+				exceptions = append(exceptions, exc)
+			}
+			return &objects.ExceptionGroup{
+				Message:    message.Value,
+				Exceptions: exceptions,
+			}
+		},
+	}
+	exceptionGroupIndex := len(c.constants)
+	c.constants = append(c.constants, exceptionGroupBuiltin)
+	c.symbolTable.DefineBuiltin("ExceptionGroup", exceptionGroupIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -1502,14 +1534,23 @@ func (c *Compiler) Compile(node ast.Node) error {
 			paramNames[i] = p.Value
 		}
 
+		numPositionalOnly := 0
+		for _, po := range node.PositionalOnly {
+			if po {
+				numPositionalOnly++
+			}
+		}
+
 		compiledFn := &CompiledFunction{
 			Instructions:          fnInstructions,
 			NumLocals:             numLocals,
 			NumParameters:         len(node.Parameters),
 			NumKeywordOnly:        numKeywordOnly,
+			NumPositionalOnly:     numPositionalOnly,
 			NumDefaults:           numDefaults,
 			NumPositionalDefaults: numPositionalDefaults,
 			ParameterNames:        paramNames,
+			PositionalOnly:        node.PositionalOnly,
 			IsGenerator:           c.hasYieldInBody(node.Body),
 			IsAsync:               node.IsAsync,
 			Free:                  allFreeVars,

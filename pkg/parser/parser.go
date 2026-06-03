@@ -1021,6 +1021,7 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 	lit.Parameters = []*ast.Identifier{}
 	lit.Defaults = []ast.Expression{}
 	lit.KeywordOnly = []bool{}
+	lit.PositionalOnly = []bool{}
 
 	if p.peekTokenIs(lexer.RPAREN) {
 		p.nextToken()
@@ -1038,6 +1039,7 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 				lit.Parameters = append(lit.Parameters, lit.VarArgs)
 				lit.Defaults = append(lit.Defaults, nil)
 				lit.KeywordOnly = append(lit.KeywordOnly, false)
+				lit.PositionalOnly = append(lit.PositionalOnly, false)
 			}
 			seenStar = true
 		} else if p.peekTokenIs(lexer.POWER) {
@@ -1048,6 +1050,16 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 				lit.Parameters = append(lit.Parameters, lit.KwArgs)
 				lit.Defaults = append(lit.Defaults, nil)
 				lit.KeywordOnly = append(lit.KeywordOnly, false)
+				lit.PositionalOnly = append(lit.PositionalOnly, false)
+			}
+		} else if p.peekTokenIs(lexer.SLASH) {
+			// / 分隔符：之前的参数标记为 positional-only
+			p.nextToken()
+			// 回溯标记之前的参数为 positional-only
+			for i := range lit.PositionalOnly {
+				if !lit.KeywordOnly[i] {
+					lit.PositionalOnly[i] = true
+				}
 			}
 		} else if p.peekTokenIs(lexer.IDENT) {
 			p.nextToken()
@@ -1076,6 +1088,7 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			lit.Parameters = append(lit.Parameters, ident)
 			lit.Defaults = append(lit.Defaults, defaultVal)
 			lit.KeywordOnly = append(lit.KeywordOnly, seenStar)
+			lit.PositionalOnly = append(lit.PositionalOnly, false)
 		} else {
 			break
 		}
@@ -1086,6 +1099,9 @@ func (p *Parser) parseFunctionParameters(lit *ast.FunctionLiteral) {
 			break
 		}
 	}
+
+	// 如果有 / 但 / 是最后一个参数（后面没有逗号和更多参数），
+	// 需要确保已标记。这在循环中已处理。
 
 	if !p.expectPeek(lexer.RPAREN) {
 		return
@@ -1808,6 +1824,12 @@ func (p *Parser) parseTryStatement() *ast.TryStatement {
 
 func (p *Parser) parseExceptClause() *ast.ExceptClause {
 	clause := &ast.ExceptClause{Token: p.curToken.Literal}
+
+	// Check for except* syntax
+	if p.peekTokenIs(lexer.ASTERISK) {
+		clause.IsStar = true
+		p.nextToken() // consume *
+	}
 
 	p.nextToken()
 

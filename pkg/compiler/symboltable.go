@@ -224,9 +224,11 @@ type CompiledFunction struct {
 	NumLocals             int
 	NumParameters         int
 	NumKeywordOnly        int
+	NumPositionalOnly     int
 	NumDefaults           int
 	NumPositionalDefaults int
 	ParameterNames        []string
+	PositionalOnly        []bool // parallel to ParameterNames, true if positional-only
 	IsGenerator           bool
 	IsAsync               bool
 	Free                  []Symbol

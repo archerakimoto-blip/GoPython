@@ -42,6 +42,7 @@ const (
 	CLASSMETHOD_OBJ    ObjectType = "CLASSMETHOD"
 	STATICMETHOD_OBJ   ObjectType = "STATICMETHOD"
 	SUPER_OBJ          ObjectType = "SUPER"
+	EXCEPTION_GROUP_OBJ ObjectType = "EXCEPTION_GROUP"
 )
 
 type Object interface {
@@ -445,6 +446,20 @@ type Error struct {
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
 func (e *Error) Inspect() string { return e.ErrorType + ": " + e.Message }
 
+type ExceptionGroup struct {
+	Message    string
+	Exceptions []Object
+}
+
+func (eg *ExceptionGroup) Type() ObjectType { return EXCEPTION_GROUP_OBJ }
+func (eg *ExceptionGroup) Inspect() string {
+	var parts []string
+	for _, exc := range eg.Exceptions {
+		parts = append(parts, exc.Inspect())
+	}
+	return fmt.Sprintf("ExceptionGroup(%q, [%s])", eg.Message, strings.Join(parts, ", "))
+}
+
 type BuiltinFunction func(args ...Object) Object
 
 type Builtin struct {
@@ -520,9 +535,11 @@ type Closure struct {
 	NumLocals             int
 	NumParameters         int
 	NumKeywordOnly        int
+	NumPositionalOnly     int
 	NumDefaults           int
 	NumPositionalDefaults int
 	ParameterNames        []string
+	PositionalOnly        []bool // parallel to ParameterNames, true if positional-only
 	IsGenerator           bool
 	Free                  []Object
 	VarArgs               bool
@@ -1166,6 +1183,8 @@ func Equal(a, b Object) bool {
 				return false
 			}
 		}
+		return true
+	case *None:
 		return true
 	default:
 		return false

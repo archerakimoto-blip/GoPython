@@ -196,16 +196,17 @@ func (bs *BlockStatement) String() string {
 }
 
 type FunctionLiteral struct {
-	Token       string
-	Name        string
-	Parameters  []*Identifier
-	Defaults    []Expression // parallel to Parameters, nil if no default
-	KeywordOnly []bool       // parallel to Parameters, true if keyword-only
-	Body        *BlockStatement
-	VarArgs     *Identifier
-	KwArgs      *Identifier
-	Decorators  []Expression // 装饰器列表
-	IsAsync     bool         // 是否为 async 函数
+	Token         string
+	Name          string
+	Parameters    []*Identifier
+	Defaults      []Expression // parallel to Parameters, nil if no default
+	KeywordOnly   []bool       // parallel to Parameters, true if keyword-only
+	PositionalOnly []bool      // parallel to Parameters, true if positional-only (before /)
+	Body          *BlockStatement
+	VarArgs       *Identifier
+	KwArgs        *Identifier
+	Decorators    []Expression // 装饰器列表
+	IsAsync       bool         // 是否为 async 函数
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -864,10 +865,11 @@ type TryStatement struct {
 }
 
 type ExceptClause struct {
-	Token string
-	Type  Expression
-	Name  *Identifier
-	Body  *BlockStatement
+	Token  string
+	Type   Expression
+	Name   *Identifier
+	Body   *BlockStatement
+	IsStar bool // except* syntax for exception groups
 }
 
 func (ts *TryStatement) statementNode()       {}
@@ -878,14 +880,18 @@ func (ts *TryStatement) String() string {
 	out.WriteString(ts.Body.String())
 	out.WriteString("\n}")
 	for _, ex := range ts.Excepts {
+		keyword := " except"
+		if ex.IsStar {
+			keyword = " except*"
+		}
 		if ex.Type != nil {
 			if ex.Name != nil {
-				out.WriteString(" except " + ex.Type.String() + " as " + ex.Name.String() + " {\n")
+				out.WriteString(keyword + " " + ex.Type.String() + " as " + ex.Name.String() + " {\n")
 			} else {
-				out.WriteString(" except " + ex.Type.String() + " {\n")
+				out.WriteString(keyword + " " + ex.Type.String() + " {\n")
 			}
 		} else {
-			out.WriteString(" except {\n")
+			out.WriteString(keyword + " {\n")
 		}
 		out.WriteString(ex.Body.String())
 		out.WriteString("\n}")

@@ -108,8 +108,8 @@ func main() {
 	for i, c := range bytecode.Constants {
 		switch v := c.(type) {
 		case *compiler.CompiledFunction:
-			fmt.Printf("[%d] CompiledFunction (params=%d, locals=%d, kwOnly=%d, defaults=%d, posDefaults=%d, names=%v)\n",
-				i, v.NumParameters, v.NumLocals, v.NumKeywordOnly, v.NumDefaults, v.NumPositionalDefaults, v.ParameterNames)
+			fmt.Printf("[%d] CompiledFunction (params=%d, locals=%d, kwOnly=%d, posOnly=%d, defaults=%d, posDefaults=%d, names=%v, positionalOnly=%v)\n",
+				i, v.NumParameters, v.NumLocals, v.NumKeywordOnly, v.NumPositionalOnly, v.NumDefaults, v.NumPositionalDefaults, v.ParameterNames, v.PositionalOnly)
 			fmt.Println("  Instructions:")
 			disassemble(v.Instructions, bytecode.Constants)
 		case *objects.None:

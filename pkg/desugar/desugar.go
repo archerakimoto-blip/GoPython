@@ -251,10 +251,11 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 		desugaredTry.Excepts = make([]*ast.ExceptClause, 0, len(s.Excepts))
 		for _, ex := range s.Excepts {
 			desugaredExcept := &ast.ExceptClause{
-				Token: ex.Token,
-				Type:  desugarExpression(ex.Type),
-				Name:  ex.Name,
-				Body:  desugarBlockStatement(ex.Body),
+				Token:  ex.Token,
+				Type:   desugarExpression(ex.Type),
+				Name:   ex.Name,
+				Body:   desugarBlockStatement(ex.Body),
+				IsStar: ex.IsStar,
 			}
 			desugaredTry.Excepts = append(desugaredTry.Excepts, desugaredExcept)
 		}
@@ -779,16 +780,17 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		}
 
 		return &ast.FunctionLiteral{
-			Token:       e.Token,
-			Name:        e.Name,
-			Parameters:  e.Parameters,
-			Defaults:    e.Defaults,
-			KeywordOnly: e.KeywordOnly,
-			Body:        desugaredBody,
-			VarArgs:     e.VarArgs,
-			KwArgs:      e.KwArgs,
-			Decorators:  desugaredDecorators,
-			IsAsync:     e.IsAsync,
+			Token:         e.Token,
+			Name:          e.Name,
+			Parameters:    e.Parameters,
+			Defaults:      e.Defaults,
+			KeywordOnly:   e.KeywordOnly,
+			PositionalOnly: e.PositionalOnly,
+			Body:          desugaredBody,
+			VarArgs:       e.VarArgs,
+			KwArgs:        e.KwArgs,
+			Decorators:    desugaredDecorators,
+			IsAsync:       e.IsAsync,
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
