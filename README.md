@@ -63,15 +63,22 @@ go build -o gopy ./cmd/gopy
 - **并发模块** - concurrency 模块，提供完整的并发编程 API（go、channel、send、recv、sleep、mutex 等）
 
 ### 高级特性
-- 异常处理 (try/except/finally)
+- 异常处理 (try/except/finally) + 异常链 (raise E from e) + **Exception groups** (except*)
 - 上下文管理器 (with 语句，支持多个上下文管理器)
 - 生成器 (yield 语句，yield from 委托)
 - Lambda 表达式和闭包
-- 类、对象、继承和多态
-- 装饰器 (Decorators)
+- 类、对象、**单继承/多继承** (C3 MRO) 和多态
+- **Metaclasses** — `class Foo(metaclass=Meta):` 元类控制类创建和实例化
+- 装饰器 (Decorators)：@property、@classmethod、@staticmethod、@dataclass、@abstractmethod、@lru_cache
+- **描述符协议**：`__get__`/`__set__`/`__delete__`，数据描述符优先级
+- **`__slots__`**：实例属性限制，继承场景下白名单检查
+- **NamedTuple** / **Enum**
 - 标准 Python 缩进语法
-- f-string 格式化字符串
+- f-string 格式化字符串（含格式化规格）
 - 模块导入系统 (import/from...import)
+- **match/case 模式匹配** - Python 3.10+
+- **仅位置参数 (/)** 和仅关键字参数 (*)
+- **位运算符** (& | ^ ~ << >>)
 - JIT 即时编译器（x86-64 和 ARM64）
 - 调试器和性能分析器
 - 垃圾回收器 (GC)
@@ -83,8 +90,11 @@ go build -o gopy ./cmd/gopy
 ## 未支持的特性
 
 以下特性暂不支持，欢迎贡献！
-- match/case 模式匹配
-- 更多 Python 标准库
+- 正则表达式 (re 模块)
+- 复数 (Complex numbers)
+- Ellipsis (...)
+- Async comprehensions
+- asyncio 模块（部分实现）
 
 ## 项目架构
 

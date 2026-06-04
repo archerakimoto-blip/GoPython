@@ -4,122 +4,72 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-04
+
 ### 新增特性
 
-- **描述符协议 (Descriptor Protocol)**：支持 `__get__`/`__set__`/`__delete__` 描述符协议，包括数据描述符和非数据描述符的属性查找优先级
+- **Metaclasses（元类）**：支持 `class Foo(metaclass=Meta):` 语法，metaclass 的 `__call__` 控制实例化过程，metaclass 的 `__init__` 在类创建时自动调用（接收 cls, name, bases 参数）
+- **仅位置参数 (/)**：支持 Python 风格的仅位置参数分隔符 `/`，如 `def func(a, b, /, c, d)`
+- **Exception groups（异常组）**：支持 Python 3.11+ 的 `BaseExceptionGroup`/`ExceptionGroup` 类型和 `except*` 语法，支持异常组分割和多 `except*` 处理器
+- **`True`/`False`/`None` 内置常量**：编译器现在正确识别 `True`、`False`、`None` 为内置常量，不再报 "undefined variable" 错误
+- **Class 对象属性设置**：`OpSetAttribute` 支持 Class 对象，允许在 metaclass `__init__` 中设置类属性（如 `cls._registered = True`）
+
+### 新增操作码
+
+- `OpSetMetaclass`：设置类的 metaclass 字段
+- `OpCallMetaclassInit`：自动调用 metaclass 的 `__init__` 方法
+- `OpExceptStarHandler`：`except*` 异常处理器调度和异常组分割
+
+### 修复的问题
+
+- **`compileFunction` 作用域泄漏**：编译函数体出错时未调用 `exitScope()`，导致符号表永久嵌套在子作用域中，后续所有 `Define()` 创建 LOCAL 而非 GLOBAL 符号
+- **`True`/`False` 未被编译器识别**：`*ast.Identifier` 解析失败时检查 `True`→`OpTrue`、`False`→`OpFalse`、`None`→`OpNull`
+- **`OpSetAttribute` 不支持 Class 对象**：metaclass `__init__` 中 `cls.attr = value` 需要设置类对象属性
+- **`NewError` vet 警告**：`NewError(err.Error())` 非常量格式字符串改为 `NewError("%s", err.Error())`
+
+### 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | `ClassStatement` 新增 `Metaclass *Identifier` 字段；`ExceptClause` 新增 `IsStar bool` 字段 |
+| `pkg/parser/parser.go` | `parseClassStatement` 支持 `metaclass=XXX` 关键字参数解析；`parseExceptClause` 支持 `except*` 语法；仅位置参数 `/` 解析 |
+| `pkg/desugar/desugar.go` | `ClassStatement` 脱糖传播 `Metaclass` 字段 |
+| `pkg/compiler/compiler.go` | 新增 `OpSetMetaclass`/`OpCallMetaclassInit`/`OpExceptStarHandler` 操作码；`*ast.Identifier` 识别 `True`/`False`/`None`；`compileFunction` 错误路径修复 `exitScope()` |
+| `pkg/compiler/optimize.go` | `InstructionSize` 支持新操作码；DCE 理解 `OpExceptStarHandler` 控制流 |
+| `pkg/vm/vm.go` | `Frame` 新增 `metaclassInitClass` 字段；metaclass `__call__` 拦截；`OpSetAttribute` 支持 Class 对象；`OpExceptStarHandler` 异常组分割 |
+| `pkg/objects/object.go` | `Class` 新增 `Metaclass *Class` 字段；新增 `ExceptionGroup` 结构体；`NewErrorWithType` 构造函数 |
+
+## [0.12.0] - 2026-06
+
+### 新增特性
+
+- **描述符协议**：支持 `__get__`/`__set__`/`__delete__` 描述符协议，包括数据描述符和非数据描述符的属性查找优先级
 - **内置描述符**：`property`（getter/setter/deleter）、`classmethod`、`staticmethod` 内置函数
 - **`__slots__`**：支持 `__slots__` 限制实例属性，包括继承场景下的白名单检查
 - **属性赋值语法**：支持 `obj.attr = value` 语法（`AttributeAssignStatement` AST 节点）
 - **跨帧异常处理**：`raise` 在被调用函数中抛出异常时，能正确回退到调用者的 `try/except` 块捕获
 - **try/except 编译器修复**：`OpBeginTry` 新增 `handlerIP` 操作数，直接编码异常处理器位置；DCE 正确保留 `OpExceptHandler` 指令
+- **`super()` 内建函数**：支持 `super().__init__(args)` 调用模式
+- **`del obj.attr` 完整支持**：`OpDelAttribute` 操作码 + property deleter
+- **varargs/kwargs 装饰器包装**：`OpListUnpack`/`OpDictUnpack` + Closure VarArgs/KwArgs 字段
+- **嵌套闭包自由变量捕获**：`Resolve` FreeScope 传播 + `FreeSymbols` 保存 + `store` 缓存
+- **`__slots__` 内存优化**：Instance 使用 `SlotValues []Object` 固定数组替代 `map[string]Object`
+- **range 迭代器死循环修复**：`desugarForToWhile` 改用 `AssignStatement` + 嵌套循环唯一索引变量名
 
 ### 修复的问题
 
-- **编译器 `lastInstruction` 状态泄漏**：`compileFunction` 和 `FunctionLiteral` 编译时未重置 `lastInstruction`，导致函数体只有 `pass` 时缺少 `OpReturn` 指令
+- **编译器 `lastInstruction` 状态泄漏**：`compileFunction` 和 `FunctionLiteral` 编译时未重置 `lastInstruction`
 - **try/except 穿透问题**：try 块无异常时不再错误地落入 except 块
-- **`matchesException` catch-all**：裸 `except:` 现在能捕获非 ERROR_OBJ 类型的异常（如字符串 raise）
-- **DCE 删除异常处理器**：死代码消除器现在理解 `OpBeginTry` 的控制流，不会删除 `OpExceptHandler` 指令
-
-### 已知问题
-
-- **try-only-finally 异常穿透**：`try: ... finally:` (无 except) 中抛出异常时，finally 块不执行。`finallyStartIP` 仅在 `OpFinally` 正常执行时设置，异常发生在 try body 中时仍为 -1
-- **描述符未迁移到脱糖层**：property/classmethod/staticmethod/__slots__ 当前在 VM/Compiler 中实现，功能正确但违反脱糖优先原则，计划在 v0.12 迁移
-
-### del 语句
-
-- **del 语句**：支持删除变量、列表元素、字典键或对象属性，自动脱糖为 `__delitem__` 或 `__delattr__` 调用
-- **yield from 语句**：支持从生成器委托到子生成器，自动脱糖为 `for item in iter: yield item` 循环
-- **async for 语句**：支持异步迭代器遍历，保留异步 for 循环结构
-- **async with 语句**：支持异步上下文管理器，处理多个上下文管理器的嵌套转换
-- **Walrus 运算符 (:=)**：支持 Python 3.8+ 的海象运算符，允许在表达式中赋值变量，例如 `if (n := len(data)) > 10:`
-- **global/nonlocal 语句**：支持 `global` 和 `nonlocal` 声明，在函数内部访问或修改外层/全局变量
-- **类型注解支持**：支持函数参数和返回值的类型注解，例如 `def func(x: int, y: str) -> bool:`
-- **步长切片**：支持带步长的切片操作，例如 `list[::2]`、`list[::-1]`、`list[1:10:2]`
-- **字典/列表解包**：支持函数调用中的 `*args` 和 `**kwargs` 解包，例如 `func(*[1,2,3])` 和 `func(**{'a':1})`
-- **字面量解包**：支持在字典字面量 `{**d1, **d2, 'a': 1}` 和列表字面量 `[*l1, *l2, 3, 4]`
-- **并发架构**：实现了完整的类似 Go 语言 goroutine 的高性能并发架构，无 GIL 锁，支持真正的并行执行
-  - 协程调度器：多线程调度器，支持成千上万并发协程
-  - Channel 通信：支持有缓冲和无缓冲通道，提供协程间安全通信
-  - **async/await 语法**：Python 风格的异步编程语法，支持 `async def` 函数声明和 `await` 表达式
-  - 异步对象：Async 和 Future 对象，用于异步任务管理和结果处理
-  - 并发安全数据结构：ConcurrentList、ConcurrentDict
-  - 同步原语：Mutex、WaitGroup、Once、原子整数、对象池
-  - 并发模块：concurrency 模块，提供完整的并发编程 API（go、channel、send、recv、sleep、mutex 等）
-- **装饰器支持**（Decorators）：支持 `@decorator` 语法，包括简单装饰器、多个装饰器、带参数的装饰器
-- **多重赋值/元组解包**：支持 `let a, b = 1, 2` 和 `x, y = [3,4]` 语法
-- **链式比较**：支持 `a < b < c` 语法，自动转换为 `(a < b) and (b < c)`
-- **关键字参数和 ****kwargs**：支持 `func(a=1, b=2)` 关键字参数调用和 `def func(**kwargs)` 可变关键字参数
-- ****args 可变参数**：支持 `def func(*args)` 可变位置参数
-- **增强赋值**（Augmented Assignment）：支持 `a += 1`、`a -= 1`、`a *= 2`、`a /= 2`、`a %= 2`、`a **= 2` 语法
-- **字典推导式**：完整支持 `{key: value for key, value in iterable}` 和 `{key: value for key, value in iterable if condition}`
-- **集合推导式**（SetComprehension）：支持 `{x for x in iterable}` 语法
-- **生成器表达式**（GeneratorExpression）：支持 `(x for x in iterable)` 语法
-- **多重上下文管理器**：支持 `with a, b:` 语法，自动脱糖成嵌套with语句
-- **属性装饰器**：支持 @property、@name.setter、@name.deleter 装饰器语法（框架已支持，可进一步扩展 property 类型）
-- **elif 语句**：完整支持条件分支 `if-elif-else` 结构
-- **运算符增强**：支持 `%`、`//`、`**` 运算符，包括整数和浮点数
-- **f-string 增强**：支持转义花括号、复杂表达式、多语句 f-string
-- **词法分析器改进**：支持处理包含数字的标识符，支持 Python 风格的 `#` 注释，添加 `async`、`await`、`global`、`nonlocal`、`return_type`、`DEL` 和 `WALRUS` 关键字支持
-- **AST 改进**：添加 `AwaitExpression`、`DeleteStatement`、`YieldFromStatement`、`AsyncForStatement`、`AsyncWithStatement` 节点类型，`FunctionLiteral` 添加 `IsAsync` 字段，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 节点类型
-- **Parser 改进**：添加 `parseAsyncFunction`、`parseAwaitExpression`、`parseDeleteStatement`、`parseYieldStatement`、`parseAsyncForStatement`、`parseAsyncWithStatement` 解析函数，修复 DEDENT token 处理，添加 ELIF 和 ELSE token 支持，修改 parseExpressionList 支持关键字参数解析，添加 `parseNamedExpression`、`parseGlobalStatement`、`parseNonlocalStatement`，支持类型注解和步长切片解析
-- **VM 改进**：修复可变参数 basePointer 计算错误，支持 OpGreaterThan 和 OpLessThan，添加 lastPopped 字段用于修复 Lambda 测试问题，添加 `OpMakeAsync` 和 `OpAwait` 操作码支持，添加 `Async` 和 `Future` 对象类型
-- **Desugar 模块**：完善 For 循环脱糖为 While 循环，增强赋值脱糖，链式比较脱糖，装饰器脱糖，多重赋值脱糖，集合推导式脱糖，生成器表达式脱糖，多重上下文管理器脱糖，添加 `desugarDeleteStatement`、`desugarYieldFromStatement`、`desugarAsyncForStatement`、`desugarAsyncWithStatement` 脱糖函数，保留 `AwaitExpression` 和 `FunctionLiteral.IsAsync`，添加 `NamedExpression`、`GlobalStatement`、`NonlocalStatement`、`DictionaryUnpack`、`ListUnpack`、`SliceExpression` 脱糖支持
-- **Compiler 改进**：添加 `OpMakeAsync` 和 `OpAwait` 操作码，`CompiledFunction` 添加 `IsAsync` 字段，修改 CallExpression 编译支持关键字参数打包成字典，修改 Let 语句和 Assign 语句处理 Names 数组（原先是单个 Name），添加 `OpListUnpack` 和 `OpDictUnpack` 操作码，支持 Walrus 运算符编译，支持步长切片编译，SymbolTable 添加 `DefineGlobal`、`DefineNonlocal`、`IsGlobal`、`IsNonlocal` 方法
-- **新增测试文件**：
-  - tests/features/test_decorators.py
-  - tests/features/test_varargs.py
-  - tests/features/test_kwargs.py
-  - tests/features/test_keyword_args.py
-  - tests/features/test_async_simple.py
-  - tests/features/test_concurrency.py
-  - tests/concurrency_examples/ping_pong.py
-  - tests/concurrency_examples/producer_consumer.py
-- **新增文档**：
-  - docs/concurrency_architecture.md：并发架构设计文档
-
-### 修复的问题
-
-- 修复了 *args 可变参数 basePointer 计算错误，导致访问 stack[-1] panic
-- 修复了 return 语句在 for 循环中丢失的问题
-- 修复了整数比较运算符缺失（OpGreaterThan 和 OpLessThan）
-- 修复了变量赋值需要 `let` 关键字的问题（在测试文件中）
-- 修复了 ELIF/ELSE 解析错误的问题
-- 修复了词法分析器不能处理包含数字的标识符的问题
-- 修复了词法分析器不能处理 Python 注释的问题
-- 修复了 f-string 脱糖处理错误的问题
-- 修复了 Lambda 函数测试失败的问题
-- 修复了词法分析器中重复的 case ':' 分支
-- 修复了 desugar 中重复的 ListLiteral case 分支
-- 修复了 AssignStatement 缺少 Targets 字段的问题
-- 修复了 FunctionLiteral 缺少 ReturnType 字段的问题
-- 修复了未使用的导入导致编译警告的问题
-- 修复了变量作用域解析错误的问题
-
-## [0.2.0] - 2026-05-28
-
-### 新增特性
-
-- **JIT 编译器**：支持 x86-64 和 ARM64 双平台
-- **调试器工具**：支持断点、单步执行、查看变量、堆栈跟踪
-- **性能分析器**：统计函数调用次数和执行时间
-- **垃圾回收器**：使用标记-清除算法，支持自动和手动回收
-- **CPython 互操作**：通过 CGO 调用 CPython 库
-- **新增模块**：random、string、time、datetime
-- **增强的 math 模块**：支持三角函数、指数、对数、弧度角度转换
-- **类继承支持**：支持 `class Child(Parent)` 继承语法
-- **上下文管理器**：支持 `with` 语句
-- **异常处理增强**：完整的 try/except/finally 处理，支持多种异常类型
-- **丰富的内置函数**：zip、min、max、sum 等
-- **字典和集合推导式**
-- **生成器支持**：yield 语句和 next() 函数
-- **模块导入系统**：import 和 from...import 语句
-- **标准 Python 缩进语法**：与大括号语法共存
-
-### 修复的问题
-
-- 多个解析器问题
-- VM 堆栈管理优化
-- 对象系统改进
+- **`matchesException` catch-all**：裸 `except:` 现在能捕获非 ERROR_OBJ 类型的异常
+- **DCE 删除异常处理器**：死代码消除器现在理解 `OpBeginTry` 的控制流
+- **try-only-finally 异常穿透**：`OpEndTry` 改用 `raiseException()` 传播异常
+- **自定义描述符 `__set__`/`__get__`/`__delete__` 参数数量错误**：栈布局与 `executeCall` 自动 Instance 检测对齐
+- **if 语句解析 bug**：顶层 `if` 语句被 parser 当作表达式解析
+- **OpCreateClassWithMultiSuper numParents 读取位置错误**
+- **attrCache key 缺少 FrameIndex**：不同函数帧中 IP 相同导致缓存污染
+- **字符串比较 bug**：`OpEqual`/`OpNotEqual` 对非数值类型使用 Go 指针比较
+- **IfExpression 栈不平衡**：consequence/alternative 块没有值时未 emit `OpNull`
+- **OpEndTry 异常对象栈泄漏**
 
 ## [0.1.0] - 2026-01-01
 
