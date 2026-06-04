@@ -1,7 +1,6 @@
 package concurrency
 
 import (
-	"fmt"
 	"time"
 	"sync"
 
@@ -85,12 +84,12 @@ func CreateConcurrencyModule() *objects.Module {
 			channelsMutex.Unlock()
 			
 			if !ok {
-				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+				return objects.NewError("channel %d not found", chIDArg.Value)
 			}
 			
 			err := ch.Send(args[1])
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			
 			return objects.None_
@@ -113,14 +112,14 @@ func CreateConcurrencyModule() *objects.Module {
 			channelsMutex.Lock()
 			ch, ok := channels[uint64(chIDArg.Value)]
 			channelsMutex.Unlock()
-			
+
 			if !ok {
-				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+				return objects.NewError("channel %d not found", chIDArg.Value)
 			}
-			
+
 			val, _, err := ch.Receive()
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			
 			return val
@@ -143,11 +142,11 @@ func CreateConcurrencyModule() *objects.Module {
 			channelsMutex.Lock()
 			ch, ok := channels[uint64(chIDArg.Value)]
 			channelsMutex.Unlock()
-			
+
 			if !ok {
-				return objects.NewError(fmt.Sprintf("channel %d not found", chIDArg.Value))
+				return objects.NewError("channel %d not found", chIDArg.Value)
 			}
-			
+
 			ch.Close()
 			return objects.None_
 		},
@@ -214,7 +213,7 @@ func CreateConcurrencyModule() *objects.Module {
 			waitGroupsMutex.Unlock()
 			
 			if !ok {
-				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+				return objects.NewError("waitgroup %d not found", wgIDArg.Value)
 			}
 			
 			wg.Add(int(deltaArg.Value))
@@ -238,11 +237,11 @@ func CreateConcurrencyModule() *objects.Module {
 			waitGroupsMutex.Lock()
 			wg, ok := waitGroups[uint64(wgIDArg.Value)]
 			waitGroupsMutex.Unlock()
-			
+
 			if !ok {
-				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+				return objects.NewError("waitgroup %d not found", wgIDArg.Value)
 			}
-			
+
 			wg.Done()
 			return objects.None_
 		},
@@ -264,11 +263,11 @@ func CreateConcurrencyModule() *objects.Module {
 			waitGroupsMutex.Lock()
 			wg, ok := waitGroups[uint64(wgIDArg.Value)]
 			waitGroupsMutex.Unlock()
-			
+
 			if !ok {
-				return objects.NewError(fmt.Sprintf("waitgroup %d not found", wgIDArg.Value))
+				return objects.NewError("waitgroup %d not found", wgIDArg.Value)
 			}
-			
+
 			wg.Wait()
 			return objects.None_
 		},
@@ -307,7 +306,7 @@ func CreateConcurrencyModule() *objects.Module {
 			mutexesMutex.Unlock()
 			
 			if !ok {
-				return objects.NewError(fmt.Sprintf("mutex %d not found", muIDArg.Value))
+				return objects.NewError("mutex %d not found", muIDArg.Value)
 			}
 			
 			mu.Lock()
@@ -331,11 +330,11 @@ func CreateConcurrencyModule() *objects.Module {
 			mutexesMutex.Lock()
 			mu, ok := mutexes[uint64(muIDArg.Value)]
 			mutexesMutex.Unlock()
-			
+
 			if !ok {
-				return objects.NewError(fmt.Sprintf("mutex %d not found", muIDArg.Value))
+				return objects.NewError("mutex %d not found", muIDArg.Value)
 			}
-			
+
 			mu.Unlock()
 			return objects.None_
 		},

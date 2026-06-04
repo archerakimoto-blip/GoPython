@@ -1696,7 +1696,7 @@ func CreateOsModule() *Module {
 			}
 			cwd, err := os.Getwd()
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			return &String{Value: cwd}
 		},
@@ -1715,7 +1715,7 @@ func CreateOsModule() *Module {
 			}
 			err := os.Chdir(path.Value)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			return None_
 		},
@@ -1734,7 +1734,7 @@ func CreateOsModule() *Module {
 			}
 			entries, err := os.ReadDir(path.Value)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			files := make([]Object, 0, len(entries))
 			for _, entry := range entries {
@@ -1763,7 +1763,7 @@ func CreateOsModule() *Module {
 			}
 			err := os.Mkdir(path.Value, os.FileMode(mode))
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			return None_
 		},
@@ -1782,7 +1782,7 @@ func CreateOsModule() *Module {
 			}
 			err := os.Remove(path.Value)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			return None_
 		},
@@ -1802,7 +1802,7 @@ func CreateOsModule() *Module {
 			}
 			err := os.Rename(src.Value, dst.Value)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 			return None_
 		},
@@ -1860,7 +1860,7 @@ func CreateJsonModule() *Module {
 			// 序列化到 JSON
 			data, err := json.Marshal(goValue)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 
 			return &String{Value: string(data)}
@@ -1882,7 +1882,7 @@ func CreateJsonModule() *Module {
 			var data interface{}
 			err := json.Unmarshal([]byte(s.Value), &data)
 			if err != nil {
-				return NewError(err.Error())
+				return NewError("%s", err.Error())
 			}
 
 			return convertToObject(data)

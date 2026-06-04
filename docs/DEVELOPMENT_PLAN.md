@@ -69,7 +69,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ Byte strings (b"...")
 ✅ 0x/0b/0o 字面量 + 数字下划线
 ✅ match/case 模式匹配 - Python 3.10+
-⚠️ 仅位置参数 (/) - **未实现**
+⚠️ 仅位置参数 (/) - **未实现** → ✅ 仅位置参数 (/) - v0.13 实现
 
 ### 2. 高级特性 (完成度: 90%)
 
@@ -94,8 +94,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 调试器和性能分析器
 ✅ 垃圾回收器 (GC)
 ✅ CPython 互操作
-⚠️ Metaclasses - **未实现**
-⚠️ Exception groups - **未实现**
+⚠️ Metaclasses - **未实现** → ✅ Metaclasses - v0.13 实现
+⚠️ Exception groups - **未实现** → ✅ Exception groups - v0.13 实现
 
 ### 3. 并发特性 (完成度: 60%)
 
@@ -138,9 +138,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 #### 🔴 严重缺失 (5 项)
 
-1. **Metaclasses** - 元类
-2. **Exception groups** - 异常组支持
-3. **Positional-only arguments (/)** - 仅位置参数
+1. **Metaclasses** - 元类 → ✅ v0.13 实现
+2. **Exception groups** - 异常组支持 → ✅ v0.13 实现
+3. **Positional-only arguments (/)** - 仅位置参数 → ✅ v0.13 实现
 4. **正则表达式 (re 模块)** - 完整支持
 5. **Async comprehensions** - 异步推导式
 
@@ -173,17 +173,17 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
             │ ✅ P0-26 字符串方法│ ✅ P0-19 默认参数 │ ❌ P3-15 直接线程  │
             ├───────────────────┼───────────────────┼───────────────────┤
             │ ✅ P1-9 @abstrmeth│ ✅ P1-10 lru_cache│ ❌ P3-16 寄存器VM  │
-            │ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ ✅ P0-33 描述符    │
-  中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ ❌ P0-34 元类      │
-            │ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ ❌ P3-19 分代GC    │
+│ ✅ P1-12 for元组解包│ ✅ P1-16 f-string│ ✅ P0-33 描述符    │
+  中影响力   │ ✅ P1-14 异常链   │ ✅ P1-17 多for推导│ ✅ P0-34 元类      │
+│ ✅ P1-15 多except │ ✅ P1-18 NamedTuple│ ❌ P3-19 分代GC    │
             │ ✅ P3-9 全局变量缓存│ ✅ P3-12 对象池  │                   │
             │ ✅ P3-10 BoundMethod│ ✅ P3-17 Dict优化│                   │
             ├───────────────────┼───────────────────┼───────────────────┤
-            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ ❌ P1-21 仅位置参数│
-            │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ ❌ P0-18 仅位置参数│
+            │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ ✅ P1-21 仅位置参数│
+│ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ ✅ P0-18 仅位置参数│
   低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ ❌ P0-12 复数    │
             │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ ❌ P0-14 Ellipsis│
-            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ ❌ P0-34 元类     │
+            │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ ✅ P0-34 元类     │
             └───────────────────┴───────────────────┴───────────────────┘
 ```
 
@@ -470,11 +470,31 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] `__slots__` 内存优化 — Instance 使用 `SlotValues []Object` 固定数组替代 `map[string]Object`，O(1) 索引访问，节省内存
 - [x] range 迭代器死循环修复 — `desugarForToWhile` 改用 `AssignStatement` + 嵌套循环唯一索引变量名
 
-### v0.13 — 剩余高难度特性 (计划中)
+### v0.13 — 剩余高难度特性 ✅
 
-- [ ] Metaclasses
-- [ ] 仅位置参数 (/)
-- [ ] Exception groups
+- [x] Metaclasses — `class Foo(metaclass=Meta):` 语法 + metaclass `__call__` 控制实例化 + metaclass `__init__` 自动调用
+- [x] 仅位置参数 (/) — 解析器 `SLASH` token + `PositionalOnly` 标记 + VM 位置参数处理
+- [x] Exception groups — `BaseExceptionGroup`/`ExceptionGroup` 类型 + `except*` 语法 + 异常组分割
+
+**v0.13 变更详情：**
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/ast/ast.go` | `ClassStatement` 新增 `Metaclass *Identifier` 字段；`ExceptClause` 新增 `IsStar bool` 字段 |
+| `pkg/lexer/lexer.go` | 新增 `SLASH` token（仅位置参数分隔符）；新增 `STAR` 在 `except*` 上下文中的处理 |
+| `pkg/parser/parser.go` | `parseClassStatement` 支持 `metaclass=XXX` 关键字参数解析；`parseExceptClause` 支持 `except*` 语法；仅位置参数 `/` 解析 |
+| `pkg/desugar/desugar.go` | `ClassStatement` 脱糖传播 `Metaclass` 字段 |
+| `pkg/compiler/compiler.go` | 新增 `OpSetMetaclass`/`OpCallMetaclassInit`/`OpExceptStarHandler` 操作码；`compileClassStatement` metaclass 编译；`compileTryStatement` `except*` 编译；`*ast.Identifier` 识别 `True`/`False`/`None` 内置常量；`compileFunction` 错误路径修复 `exitScope()` |
+| `pkg/compiler/optimize.go` | `InstructionSize` 支持 `OpSetMetaclass`/`OpCallMetaclassInit`/`OpExceptStarHandler`；DCE 理解 `OpExceptStarHandler` 控制流 |
+| `pkg/vm/vm.go` | `Frame` 新增 `metaclassInitClass *Class` 字段；`OpSetMetaclass`：设置 class.Metaclass；`OpCallMetaclassInit`：自动调用 metaclass `__init__`；`executeCall` metaclass `__call__` 拦截；`OpSetAttribute` 支持 Class 对象属性设置；`OpExceptStarHandler`：异常组分割和匹配；`splitExceptionGroup`/`findNextExceptStarHandler` 辅助函数；`OpReturn`/`OpReturnValue` metaclassInitClass 返回值处理 |
+| `pkg/objects/object.go` | `Class` 新增 `Metaclass *Class` 字段；新增 `EXCEPTION_GROUP_OBJ` 类型；`ExceptionGroup` 结构体（`Message`/`Exceptions`）；`NewErrorWithType` 构造函数 |
+
+**v0.13 Bug 修复：**
+
+- [x] `True`/`False`/`None` 未被编译器识别为内置常量：`*ast.Identifier` Resolve 失败时检查 `True`→`OpTrue`、`False`→`OpFalse`、`None`→`OpNull`
+- [x] `compileFunction` 作用域泄漏：编译函数体出错时未调用 `exitScope()`，导致符号表永久嵌套在子作用域中，后续所有 `Define()` 创建 LOCAL 而非 GLOBAL 符号
+- [x] `OpSetAttribute` 不支持 Class 对象：`cls._registered = True` 需要 Class 对象属性设置，之前只支持 Instance
+- [x] `NewError` vet 警告：`NewError(err.Error())` 非常量格式字符串 → `NewError("%s", err.Error())`
 
 ### v0.14 — 低影响力特性 (计划中)
 

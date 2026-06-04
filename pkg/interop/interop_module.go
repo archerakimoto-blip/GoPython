@@ -23,7 +23,7 @@ func CreateCPythonModule() *objects.Module {
 
 			pymod, err := ImportModule(name.Value)
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 
 			return wrapModule(pymod)
@@ -43,7 +43,7 @@ func CreateCPythonModule() *objects.Module {
 
 			result, err := Evaluate(expr.Value)
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			return result
 		},
@@ -62,7 +62,7 @@ func CreateCPythonModule() *objects.Module {
 
 			_, err := Evaluate(code.Value)
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			return objects.None_
 		},
@@ -72,7 +72,7 @@ func CreateCPythonModule() *objects.Module {
 		Name: "cpython.initialize",
 		Fn: func(args ...objects.Object) objects.Object {
 			if err := Initialize(); err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			return objects.None_
 		},
@@ -114,7 +114,7 @@ func wrapModule(pyModule *CPythonModule) *objects.Module {
 			callArgs := args[1:]
 			result, err := pyModule.CallMethod(funcName.Value, callArgs...)
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			return result
 		},
@@ -133,7 +133,7 @@ func wrapModule(pyModule *CPythonModule) *objects.Module {
 
 			pyObj, err := pyModule.GetAttr(attrName.Value)
 			if err != nil {
-				return objects.NewError(err.Error())
+				return objects.NewError("%s", err.Error())
 			}
 			defer pyObj.DecRef()
 
