@@ -34,13 +34,14 @@ type ExceptionHandler struct {
 }
 
 type Frame struct {
-	fn            *compiler.CompiledFunction
-	ip            int
-	basePointer   int
-	generator     *objects.Generator
-	freeVars      []objects.Object
-	initInstance  objects.Object
-	setAttrValue  objects.Object
+	fn                  *compiler.CompiledFunction
+	ip                  int
+	basePointer         int
+	generator           *objects.Generator
+	freeVars            []objects.Object
+	initInstance        objects.Object
+	setAttrValue        objects.Object
+	metaclassInitClass  *objects.Class
 }
 
 type AttrCacheKey struct {
@@ -475,6 +476,11 @@ func (vm *VM) Run() error {
 				if err != nil {
 					return err
 				}
+			} else if frame.metaclassInitClass != nil {
+				err := vm.push(frame.metaclassInitClass)
+				if err != nil {
+					return err
+				}
 			} else {
 				err := vm.push(returnValue)
 				if err != nil {
@@ -507,6 +513,11 @@ func (vm *VM) Run() error {
 				}
 			} else if frame.initInstance != nil {
 				err := vm.push(frame.initInstance)
+				if err != nil {
+					return err
+				}
+			} else if frame.metaclassInitClass != nil {
+				err := vm.push(frame.metaclassInitClass)
 				if err != nil {
 					return err
 				}
@@ -1439,6 +1450,26 @@ func (vm *VM) Run() error {
 				continue
 			}
 			
+			if classObj, ok := obj.(*objects.Class); ok {
+				classObj.Fields[attrName] = value
+				if attrName == "__slots__" {
+					if listObj, ok := value.(*objects.List); ok {
+						slots := make([]string, 0, len(listObj.Elements))
+						for _, elem := range listObj.Elements {
+							if strElem, ok := elem.(*objects.String); ok {
+								slots = append(slots, strElem.Value)
+							}
+						}
+						classObj.Slots = slots
+					}
+				}
+				err := vm.push(value)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			return fmt.Errorf("cannot set attribute on non-instance: %s", obj.Type())
 
 		case compiler.OpDelAttribute:
@@ -1533,6 +1564,47 @@ func (vm *VM) Run() error {
 			} else {
 				return fmt.Errorf("cannot set class field on non-class: %T", classObj)
 			}
+		case compiler.OpSetMetaclass:
+			metaclassObj := vm.pop()
+			classObj := vm.pop()
+			if classInst, ok := classObj.(*objects.Class); ok {
+				if metaclass, ok := metaclassObj.(*objects.Class); ok {
+					classInst.Metaclass = metaclass
+				}
+			}
+			vm.push(classObj)
+		case compiler.OpCallMetaclassInit:
+			// Stack top: class object
+			// If class has a metaclass with __init__, call it
+			classObj := vm.pop()
+			if classInst, ok := classObj.(*objects.Class); ok {
+				if classInst.Metaclass != nil {
+					if initMethod, ok := classInst.Metaclass.Methods["__init__"]; ok {
+						if fn, ok := initMethod.(*compiler.CompiledFunction); ok {
+							// metaclass.__init__(self, cls, name, bases)
+							vm.push(nil) // placeholder for callee slot
+							vm.push(classInst.Metaclass) // self
+							vm.push(classInst)           // cls
+							vm.push(&objects.String{Value: classInst.Name}) // name
+							// bases as list
+							bases := &objects.List{Elements: make([]objects.Object, len(classInst.SuperClasses))}
+							for i, sc := range classInst.SuperClasses {
+								bases.Elements[i] = sc
+							}
+							vm.push(bases)
+							bp := vm.sp - 4
+							frame := NewFrame(fn, bp)
+							frame.metaclassInitClass = classInst
+							vm.pushFrame(frame)
+							vm.sp = frame.basePointer + fn.NumLocals
+							continue
+						}
+					}
+				}
+				vm.push(classObj)
+			} else {
+				vm.push(classObj)
+			}
 		case compiler.OpFormatString:
 			partsCount := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
 			vm.currentFrame().ip += 2
@@ -1612,6 +1684,32 @@ func (vm *VM) executeCall(numArgs int) error {
 	calleeObj := vm.stack[calleeIndex]
 
 	if classObj, ok := calleeObj.(*objects.Class); ok {
+		// Check if the class has a metaclass with __call__
+		if classObj.Metaclass != nil {
+			if callMethod, ok := classObj.Metaclass.Methods["__call__"]; ok {
+				if fn, ok := callMethod.(*compiler.CompiledFunction); ok {
+					// metaclass.__call__(self, cls, *args)
+					// self = metaclass instance, cls = class being instantiated
+					args := make([]objects.Object, numArgs)
+					for i := 0; i < numArgs; i++ {
+						args[i] = vm.stack[vm.sp-numArgs+i]
+					}
+					vm.stack[calleeIndex] = nil                 // placeholder
+					vm.stack[calleeIndex+1] = classObj.Metaclass // self
+					vm.stack[calleeIndex+2] = classObj           // cls
+					for i := 0; i < numArgs; i++ {
+						vm.stack[calleeIndex+3+i] = args[i]
+					}
+					vm.sp = calleeIndex + 3 + numArgs
+					basePointer := calleeIndex + 1
+					frame := NewFrame(fn, basePointer)
+					vm.pushFrame(frame)
+					vm.sp = frame.basePointer + fn.NumLocals
+					return nil
+				}
+			}
+		}
+
 		instance := &objects.Instance{
 			Class: classObj,
 		}

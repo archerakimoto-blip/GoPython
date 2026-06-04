@@ -1926,6 +1926,7 @@ func (p *Parser) parseClassStatement() ast.Statement {
 
 	var superClass *ast.Identifier
 	var superClasses []*ast.Identifier
+	var metaclass *ast.Identifier
 	if p.peekTokenIs(lexer.LPAREN) {
 		p.nextToken() // consume '('
 		if p.peekTokenIs(lexer.RPAREN) {
@@ -1935,10 +1936,22 @@ func (p *Parser) parseClassStatement() ast.Statement {
 				if !p.expectPeek(lexer.IDENT) {
 					return nil
 				}
-				parent := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
-				superClasses = append(superClasses, parent)
-				if superClass == nil {
-					superClass = parent
+				// Check for metaclass=XXX keyword argument
+				if p.peekTokenIs(lexer.ASSIGN) {
+					argName := p.curToken.Literal
+					p.nextToken() // consume '='
+					if !p.expectPeek(lexer.IDENT) {
+						return nil
+					}
+					if argName == "metaclass" {
+						metaclass = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+					}
+				} else {
+					parent := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+					superClasses = append(superClasses, parent)
+					if superClass == nil {
+						superClass = parent
+					}
 				}
 				if !p.peekTokenIs(lexer.COMMA) {
 					break
@@ -1978,6 +1991,7 @@ func (p *Parser) parseClassStatement() ast.Statement {
 		Name:         name,
 		SuperClass:   superClass,
 		SuperClasses: superClasses,
+		Metaclass:    metaclass,
 		Body:         body,
 		Methods:      methods,
 	}

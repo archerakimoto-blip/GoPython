@@ -67,6 +67,8 @@ const (
 	OpSetAttribute
 	OpDelAttribute
 	OpSetClassField
+	OpSetMetaclass
+	OpCallMetaclassInit
 	OpFormatString
 	OpMakeAsync
 	OpAwait
@@ -1363,17 +1365,25 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.Identifier:
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
-			return fmt.Errorf("undefined variable %s", node.Value)
-		}
-
-		if symbol.Scope == BuiltinScope {
-			c.emit(OpConstant, symbol.Index)
-		} else if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
-			c.emit(OpGetGlobal, symbol.Index)
-		} else if symbol.Scope == FreeScope {
-			c.emit1(OpGetFree, symbol.Index)
+			if node.Value == "True" {
+				c.emit(OpTrue)
+			} else if node.Value == "False" {
+				c.emit(OpFalse)
+			} else if node.Value == "None" {
+				c.emit(OpNull)
+			} else {
+				return fmt.Errorf("undefined variable %s", node.Value)
+			}
 		} else {
-			c.emit1(OpGetLocal, symbol.Index)
+			if symbol.Scope == BuiltinScope {
+				c.emit(OpConstant, symbol.Index)
+			} else if symbol.Scope == GlobalScope || symbol.Scope == FunctionScope {
+				c.emit(OpGetGlobal, symbol.Index)
+			} else if symbol.Scope == FreeScope {
+				c.emit1(OpGetFree, symbol.Index)
+			} else {
+				c.emit1(OpGetLocal, symbol.Index)
+			}
 		}
 
 	case *ast.ListLiteral:
@@ -2062,6 +2072,16 @@ func (c *Compiler) compileClassStatement(node *ast.ClassStatement) error {
 		c.emit(OpCreateClass, c.addConstant(class))
 	}
 
+	// Set metaclass if specified
+	if node.Metaclass != nil {
+		metaclassIdx, ok := c.symbolTable.Resolve(node.Metaclass.Value)
+		if ok && metaclassIdx.Scope == GlobalScope {
+			c.emit(OpGetGlobal, metaclassIdx.Index)
+			c.emit(OpSetMetaclass)
+			c.emit(OpCallMetaclassInit)
+		}
+	}
+
 	symbol := c.symbolTable.Define(node.Name.Value)
 	c.emit(OpSetGlobal, symbol.Index)
 
@@ -2109,6 +2129,7 @@ func (c *Compiler) compileFunction(fn *ast.FunctionLiteral) *CompiledFunction {
 
 	for _, stmt := range fn.Body.Statements {
 		if err := c.Compile(stmt); err != nil {
+			c.exitScope()
 			c.instructions = savedInstructions
 			c.lastInstruction = savedLastInstruction
 			c.previousInstruction = savedPreviousInstruction

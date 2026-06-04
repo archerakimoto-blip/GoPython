@@ -383,3 +383,118 @@ except:
 		}
 	})
 }
+
+func TestMetaclass(t *testing.T) {
+	t.Run("class with metaclass __call__", func(t *testing.T) {
+		input := `
+class Meta:
+    def __call__(self, cls):
+        return 42
+
+class Foo(metaclass=Meta):
+    pass
+
+_result = Foo()
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.INTEGER_OBJ {
+			t.Fatalf("Expected INTEGER, got %s: %s", result.Type(), result.Inspect())
+		}
+		got := result.(*objects.Integer).Value
+		if got != 42 {
+			t.Errorf("Expected 42, got %d", got)
+		}
+	})
+
+	t.Run("metaclass __call__ with args", func(t *testing.T) {
+		input := `
+class Meta:
+    def __call__(self, cls, x):
+        return x * 2
+
+class Foo(metaclass=Meta):
+    pass
+
+_result = Foo(21)
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.INTEGER_OBJ {
+			t.Fatalf("Expected INTEGER, got %s: %s", result.Type(), result.Inspect())
+		}
+		got := result.(*objects.Integer).Value
+		if got != 42 {
+			t.Errorf("Expected 42, got %d", got)
+		}
+	})
+
+	t.Run("class without metaclass uses default instantiation", func(t *testing.T) {
+		input := `
+class Foo:
+    def __init__(self, x):
+        self.x = x
+
+_result = Foo(10)
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.INSTANCE_OBJ {
+			t.Fatalf("Expected INSTANCE, got %s", result.Type())
+		}
+	})
+
+	t.Run("metaclass __init__ called on class creation", func(t *testing.T) {
+		input := `
+class Meta:
+    def __init__(self, cls, name, bases):
+        cls._registered = True
+
+class Foo(metaclass=Meta):
+    pass
+
+_result = Foo._registered
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.BOOLEAN_OBJ {
+			t.Fatalf("Expected BOOLEAN, got %s: %s", result.Type(), result.Inspect())
+		}
+		got := result.(*objects.Boolean).Value
+		if !got {
+			t.Errorf("Expected True, got %v", got)
+		}
+	})
+
+	t.Run("metaclass __init__ receives class name", func(t *testing.T) {
+		input := `
+class Meta:
+    def __init__(self, cls, name, bases):
+        cls._name = name
+
+class Foo(metaclass=Meta):
+    pass
+
+_result = Foo._name
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.STRING_OBJ {
+			t.Fatalf("Expected STRING, got %s: %s", result.Type(), result.Inspect())
+		}
+		got := result.(*objects.String).Value
+		if got != "Foo" {
+			t.Errorf("Expected 'Foo', got %q", got)
+		}
+	})
+}

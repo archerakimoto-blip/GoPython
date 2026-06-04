@@ -590,12 +590,13 @@ func (ys *YieldStatement) String() string {
 }
 
 type ClassStatement struct {
-	Token       string
-	Name        *Identifier
-	SuperClass  *Identifier
+	Token        string
+	Name         *Identifier
+	SuperClass   *Identifier
 	SuperClasses []*Identifier
-	Body        *BlockStatement
-	Methods     []*FunctionLiteral
+	Metaclass    *Identifier
+	Body         *BlockStatement
+	Methods      []*FunctionLiteral
 }
 
 func (cs *ClassStatement) statementNode()       {}

@@ -338,6 +338,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Name:         s.Name,
 			SuperClass:   s.SuperClass,
 			SuperClasses: s.SuperClasses,
+			Metaclass:    s.Metaclass,
 			Body:         desugarBlockStatement(s.Body),
 			Methods:      s.Methods,
 		}

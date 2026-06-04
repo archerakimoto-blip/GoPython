@@ -557,6 +557,7 @@ type Class struct {
 	SuperClasses []*Class
 	MRO          []*Class
 	Slots        []string
+	Metaclass    *Class
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }
