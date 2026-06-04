@@ -1389,6 +1389,13 @@ func buildMatchCondition(matchVar ast.Expression, pattern ast.Expression) ast.Ex
 			Operator: "==",
 			Right:    p,
 		}
+	case *ast.ComplexLiteral:
+		return &ast.InfixExpression{
+			Token:    "==",
+			Left:     matchVar,
+			Operator: "==",
+			Right:    p,
+		}
 	case *ast.StringLiteral:
 		return &ast.InfixExpression{
 			Token:    "==",

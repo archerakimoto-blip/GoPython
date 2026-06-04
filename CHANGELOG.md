@@ -4,6 +4,36 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-04
+
+### 新增特性
+
+- **Ellipsis (...) 省略号字面量**：支持 `...` 语法和 `Ellipsis` 标识符，两者等价。新增 `OpEllipsis` 操作码和 `EllipsisSingleton` 对象
+- **Complex numbers 复数**：支持 `2j`/`3.14j` 纯虚数字面量，`complex(real, imag)` 内置函数，完整的复数算术运算（+、-、*、/、**），`abs()` 支持复数返回模，复数比较（==、!=），取反运算
+- **Dictionary Views 字典视图**：`dict.keys()`/`dict.values()`/`dict.items()` 返回动态视图对象（`DictKeys`/`DictValues`/`DictItems`），视图引用原字典，修改字典后视图自动更新，支持 `len()`、索引访问和迭代
+
+### 新增操作码
+
+- `OpEllipsis`：推送 Ellipsis 单例对象到栈
+
+### 新增对象类型
+
+- `ELLIPSIS_OBJ`：Ellipsis 省略号对象
+- `COMPLEX_OBJ`：Complex 复数对象（Real + Imag float64）
+- `DICT_KEYS_OBJ`/`DICT_VALUES_OBJ`/`DICT_ITEMS_OBJ`：字典视图对象
+
+### 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | 新增 `ELLIPSIS`/`COMPLEX` token；`readNumber` 支持 `j`/`J` 后缀；`case '.'` 检测 `...` 三点序列 |
+| `pkg/ast/ast.go` | 新增 `EllipsisLiteral`/`ComplexLiteral` AST 节点 |
+| `pkg/parser/parser.go` | 注册 `ELLIPSIS`/`COMPLEX` 前缀解析器 |
+| `pkg/desugar/desugar.go` | `ComplexLiteral` 模式匹配支持 |
+| `pkg/compiler/compiler.go` | `OpEllipsis` 操作码；`ComplexLiteral` 编译为 `OpConstant`；`complex()`/`abs()`/`bool()` 内置函数支持复数；`Ellipsis` 标识符识别 |
+| `pkg/vm/vm.go` | `OpEllipsis` 处理；`executeBinaryComplexOperation` 复数算术；复数比较/取反/真值；Dict 视图属性访问和索引 |
+| `pkg/objects/object.go` | `Ellipsis` 单例；`Complex` 结构体；`DictKeys`/`DictValues`/`DictItems` 视图；`Equal` 支持 Ellipsis/Complex |
+
 ## [0.13.0] - 2026-06-04
 
 ### 新增特性

@@ -66,6 +66,15 @@ func (fl *FloatLiteral) expressionNode()      {}
 func (fl *FloatLiteral) TokenLiteral() string { return fl.Token }
 func (fl *FloatLiteral) String() string       { return fl.Token }
 
+type ComplexLiteral struct {
+	Token string
+	Value string
+}
+
+func (cl *ComplexLiteral) expressionNode()      {}
+func (cl *ComplexLiteral) TokenLiteral() string { return cl.Token }
+func (cl *ComplexLiteral) String() string       { return cl.Value }
+
 type StringLiteral struct {
 	Token string
 	Value string
@@ -113,6 +122,14 @@ type Boolean struct {
 func (b *Boolean) expressionNode()      {}
 func (b *Boolean) TokenLiteral() string { return b.Token }
 func (b *Boolean) String() string       { return b.Token }
+
+type EllipsisLiteral struct {
+	Token string
+}
+
+func (el *EllipsisLiteral) expressionNode()      {}
+func (el *EllipsisLiteral) TokenLiteral() string { return el.Token }
+func (el *EllipsisLiteral) String() string       { return "..." }
 
 type PrefixExpression struct {
 	Token    string

@@ -79,6 +79,9 @@ go build -o gopy ./cmd/gopy
 - **match/case 模式匹配** - Python 3.10+
 - **仅位置参数 (/)** 和仅关键字参数 (*)
 - **位运算符** (& | ^ ~ << >>)
+- **Ellipsis (...)** — 省略号字面量，`...` 等价于 `Ellipsis`
+- **复数 (Complex)** — `2j` 字面量 + `complex(real, imag)` 内置函数 + 复数算术
+- **Dictionary Views** — `dict.keys()`/`dict.values()`/`dict.items()` 返回动态视图
 - JIT 即时编译器（x86-64 和 ARM64）
 - 调试器和性能分析器
 - 垃圾回收器 (GC)
@@ -91,10 +94,9 @@ go build -o gopy ./cmd/gopy
 
 以下特性暂不支持，欢迎贡献！
 - 正则表达式 (re 模块)
-- 复数 (Complex numbers)
-- Ellipsis (...)
 - Async comprehensions
 - asyncio 模块（部分实现）
+- Type hints generics
 
 ## 项目架构
 

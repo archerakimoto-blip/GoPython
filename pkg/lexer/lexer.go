@@ -9,6 +9,7 @@ const (
 	IDENT  = "IDENT"
 	INT    = "INT"
 	FLOAT  = "FLOAT"
+	COMPLEX = "COMPLEX"
 	STRING     = "STRING"
 	FSTRING    = "FSTRING"
 	BYTESTRING = "BYTESTRING"
@@ -33,6 +34,7 @@ const (
 	POWER_EQ = "**="
 	VAR_ARGS = "VAR_ARGS"
 	KW_ARGS  = "KW_ARGS"
+	ELLIPSIS = "ELLIPSIS"
 
 	EQ     = "=="
 	NOT_EQ = "!="
@@ -291,7 +293,17 @@ func (l *Lexer) NextToken() Token {
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
 	case '.':
-		tok = newToken(DOT, l.ch)
+		if l.peekChar() == '.' {
+			l.readChar()
+			if l.peekChar() == '.' {
+				l.readChar()
+				tok = Token{Type: ELLIPSIS, Literal: "..."}
+			} else {
+				tok = newToken(DOT, '.')
+			}
+		} else {
+			tok = newToken(DOT, l.ch)
+		}
 	case '@':
 		tok = newToken(AT, l.ch)
 	case ',':
@@ -435,6 +447,13 @@ func (l *Lexer) readNumber() (TokenType, string) {
 		for isDigit(l.ch) || l.ch == '_' {
 			l.readChar()
 		}
+	}
+
+	// Check for complex number suffix (j or J)
+	if l.ch == 'j' || l.ch == 'J' {
+		l.readChar()
+		literal := stripUnderscores(l.input[position:l.position])
+		return COMPLEX, literal
 	}
 
 	literal := stripUnderscores(l.input[position:l.position])

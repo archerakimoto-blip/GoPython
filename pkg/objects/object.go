@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/cmplx"
 	"math/rand"
 	"os"
 	"runtime"
@@ -38,11 +39,16 @@ const (
 	ENUM_OBJ           ObjectType = "ENUM"
 	ENUM_MEMBER_OBJ    ObjectType = "ENUM_MEMBER"
 	BYTES_OBJ          ObjectType = "BYTES"
+	ELLIPSIS_OBJ       ObjectType = "ELLIPSIS"
 	PROPERTY_OBJ       ObjectType = "PROPERTY"
 	CLASSMETHOD_OBJ    ObjectType = "CLASSMETHOD"
 	STATICMETHOD_OBJ   ObjectType = "STATICMETHOD"
 	SUPER_OBJ          ObjectType = "SUPER"
 	EXCEPTION_GROUP_OBJ ObjectType = "EXCEPTION_GROUP"
+	COMPLEX_OBJ         ObjectType = "COMPLEX"
+	DICT_KEYS_OBJ       ObjectType = "DICT_KEYS"
+	DICT_VALUES_OBJ     ObjectType = "DICT_VALUES"
+	DICT_ITEMS_OBJ      ObjectType = "DICT_ITEMS"
 )
 
 type Object interface {
@@ -109,6 +115,26 @@ type Float struct {
 func (f *Float) Type() ObjectType { return FLOAT_OBJ }
 func (f *Float) Inspect() string  { return fmt.Sprintf("%g", f.Value) }
 
+type Complex struct {
+	Real float64
+	Imag float64
+}
+
+func NewComplex(real, imag float64) *Complex {
+	return &Complex{Real: real, Imag: imag}
+}
+
+func (c *Complex) Type() ObjectType { return COMPLEX_OBJ }
+func (c *Complex) Inspect() string {
+	if c.Real == 0 {
+		return fmt.Sprintf("%gj", c.Imag)
+	}
+	if c.Imag < 0 {
+		return fmt.Sprintf("(%g%gj)", c.Real, c.Imag)
+	}
+	return fmt.Sprintf("(%g+%gj)", c.Real, c.Imag)
+}
+
 type Boolean struct {
 	Value bool
 }
@@ -138,6 +164,11 @@ type None struct{}
 
 func (n *None) Type() ObjectType { return NONE_OBJ }
 func (n *None) Inspect() string  { return "None" }
+
+type Ellipsis struct{}
+
+func (e *Ellipsis) Type() ObjectType { return ELLIPSIS_OBJ }
+func (e *Ellipsis) Inspect() string  { return "Ellipsis" }
 
 type List struct {
 	Elements []Object
@@ -432,10 +463,144 @@ func (d *Dict) KeysSlice() []Object {
 
 func (d *Dict) ValuesSlice() []Object {
 	values := make([]Object, 0, len(d.Pairs))
-	for _, value := range d.Pairs {
-		values = append(values, value)
+	for _, key := range d.KeyOrder {
+		values = append(values, d.Pairs[key])
 	}
 	return values
+}
+
+// DictKeys is a view object for dict.keys()
+type DictKeys struct {
+	Dict *Dict
+}
+
+func NewDictKeys(d *Dict) *DictKeys {
+	return &DictKeys{Dict: d}
+}
+
+func (dk *DictKeys) Type() ObjectType { return DICT_KEYS_OBJ }
+func (dk *DictKeys) Inspect() string {
+	elements := make([]string, len(dk.Dict.KeyOrder))
+	for i, keyStr := range dk.Dict.KeyOrder {
+		key := dk.Dict.Keys[keyStr]
+		elements[i] = key.Inspect()
+	}
+	return fmt.Sprintf("dict_keys([%s])", strings.Join(elements, ", "))
+}
+
+func (dk *DictKeys) Len() int64 {
+	return int64(len(dk.Dict.KeyOrder))
+}
+
+func (dk *DictKeys) ToList() []Object {
+	keys := make([]Object, len(dk.Dict.KeyOrder))
+	for i, keyStr := range dk.Dict.KeyOrder {
+		keys[i] = dk.Dict.Keys[keyStr]
+	}
+	return keys
+}
+
+func (dk *DictKeys) GetItem(index int64) (Object, bool) {
+	length := dk.Len()
+	if index < 0 {
+		index = length + index
+	}
+	if index < 0 || index >= length {
+		return nil, false
+	}
+	keyStr := dk.Dict.KeyOrder[index]
+	return dk.Dict.Keys[keyStr], true
+}
+
+// DictValues is a view object for dict.values()
+type DictValues struct {
+	Dict *Dict
+}
+
+func NewDictValues(d *Dict) *DictValues {
+	return &DictValues{Dict: d}
+}
+
+func (dv *DictValues) Type() ObjectType { return DICT_VALUES_OBJ }
+func (dv *DictValues) Inspect() string {
+	elements := make([]string, len(dv.Dict.KeyOrder))
+	for i, keyStr := range dv.Dict.KeyOrder {
+		val := dv.Dict.Pairs[keyStr]
+		elements[i] = val.Inspect()
+	}
+	return fmt.Sprintf("dict_values([%s])", strings.Join(elements, ", "))
+}
+
+func (dv *DictValues) Len() int64 {
+	return int64(len(dv.Dict.KeyOrder))
+}
+
+func (dv *DictValues) ToList() []Object {
+	values := make([]Object, len(dv.Dict.KeyOrder))
+	for i, keyStr := range dv.Dict.KeyOrder {
+		values[i] = dv.Dict.Pairs[keyStr]
+	}
+	return values
+}
+
+func (dv *DictValues) GetItem(index int64) (Object, bool) {
+	length := dv.Len()
+	if index < 0 {
+		index = length + index
+	}
+	if index < 0 || index >= length {
+		return nil, false
+	}
+	keyStr := dv.Dict.KeyOrder[index]
+	return dv.Dict.Pairs[keyStr], true
+}
+
+// DictItems is a view object for dict.items()
+type DictItems struct {
+	Dict *Dict
+}
+
+func NewDictItems(d *Dict) *DictItems {
+	return &DictItems{Dict: d}
+}
+
+func (di *DictItems) Type() ObjectType { return DICT_ITEMS_OBJ }
+func (di *DictItems) Inspect() string {
+	elements := make([]string, len(di.Dict.KeyOrder))
+	for i, keyStr := range di.Dict.KeyOrder {
+		key := di.Dict.Keys[keyStr]
+		val := di.Dict.Pairs[keyStr]
+		elements[i] = fmt.Sprintf("(%s, %s)", key.Inspect(), val.Inspect())
+	}
+	return fmt.Sprintf("dict_items([%s])", strings.Join(elements, ", "))
+}
+
+func (di *DictItems) Len() int64 {
+	return int64(len(di.Dict.KeyOrder))
+}
+
+func (di *DictItems) ToList() []Object {
+	items := make([]Object, len(di.Dict.KeyOrder))
+	for i, keyStr := range di.Dict.KeyOrder {
+		key := di.Dict.Keys[keyStr]
+		val := di.Dict.Pairs[keyStr]
+		items[i] = &Tuple{Elements: []Object{key, val}}
+	}
+	return items
+}
+
+func (di *DictItems) GetItem(index int64) (Object, bool) {
+	length := di.Len()
+	if index < 0 {
+		index = length + index
+	}
+	if index < 0 || index >= length {
+		return nil, false
+	}
+	keyStr := di.Dict.KeyOrder[index]
+	key := di.Dict.Keys[keyStr]
+	val := di.Dict.Pairs[keyStr]
+	return &Tuple{Elements: []Object{key, val}}, true
 }
 
 type Error struct {
@@ -1059,9 +1224,10 @@ func GetModule(name string) *Module {
 }
 
 var (
-	True  = &Boolean{Value: true}
-	False = &Boolean{Value: false}
-	None_ = &None{}
+	True            = &Boolean{Value: true}
+	False           = &Boolean{Value: false}
+	None_           = &None{}
+	EllipsisSingleton = &Ellipsis{}
 )
 
 func NewErrorWithType(errorType, format string, a ...interface{}) *Error {
@@ -1168,6 +1334,9 @@ func Equal(a, b Object) bool {
 	case *Float:
 		b := b.(*Float)
 		return a.Value == b.Value
+	case *Complex:
+		b := b.(*Complex)
+		return a.Real == b.Real && a.Imag == b.Imag
 	case *String:
 		b := b.(*String)
 		return a.Value == b.Value
@@ -1186,6 +1355,8 @@ func Equal(a, b Object) bool {
 		}
 		return true
 	case *None:
+		return true
+	case *Ellipsis:
 		return true
 	default:
 		return false
@@ -1460,6 +1631,9 @@ func CreateMathModule() *Module {
 					return &Integer{Value: -v.Value}
 				}
 				return v
+			case *Complex:
+				magnitude := cmplx.Abs(complex(v.Real, v.Imag))
+				return &Float{Value: magnitude}
 			default:
 				return NewTypeError("abs() argument must be a number")
 			}

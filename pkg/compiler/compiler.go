@@ -2,7 +2,10 @@ package compiler
 
 import (
 	"fmt"
+	"math/cmplx"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/concurrency"
@@ -74,6 +77,7 @@ const (
 	OpAwait
 	OpListUnpack
 	OpDictUnpack
+	OpEllipsis
 )
 
 type EmittedInstruction struct {
@@ -340,6 +344,12 @@ func (c *Compiler) registerBuiltins() {
 				return &objects.Integer{Value: l}
 			case *objects.Bytes:
 				return &objects.Integer{Value: int64(len(arg.Value))}
+			case *objects.DictKeys:
+				return &objects.Integer{Value: arg.Len()}
+			case *objects.DictValues:
+				return &objects.Integer{Value: arg.Len()}
+			case *objects.DictItems:
+				return &objects.Integer{Value: arg.Len()}
 			default:
 				return objects.NewError("argument to 'len' not supported: %s", arg.Type())
 			}
@@ -523,6 +533,8 @@ func (c *Compiler) registerBuiltins() {
 					return &objects.Integer{Value: 1}
 				}
 				return &objects.Integer{Value: 0}
+			case *objects.Complex:
+				return objects.NewTypeError("can't convert complex to int")
 			default:
 				return objects.NewTypeError("cannot convert %s to int", arg.Type())
 			}
@@ -554,6 +566,8 @@ func (c *Compiler) registerBuiltins() {
 					return &objects.Float{Value: 1.0}
 				}
 				return &objects.Float{Value: 0.0}
+			case *objects.Complex:
+				return objects.NewTypeError("can't convert complex to float")
 			default:
 				return objects.NewTypeError("cannot convert %s to float", arg.Type())
 			}
@@ -603,6 +617,11 @@ func (c *Compiler) registerBuiltins() {
 				return objects.False
 			case *objects.None:
 				return objects.False
+			case *objects.Complex:
+				if arg.Real != 0 || arg.Imag != 0 {
+					return objects.True
+				}
+				return objects.False
 			default:
 				return objects.True
 			}
@@ -628,6 +647,9 @@ func (c *Compiler) registerBuiltins() {
 					return &objects.Float{Value: -arg.Value}
 				}
 				return arg
+			case *objects.Complex:
+				magnitude := cmplx.Abs(complex(arg.Real, arg.Imag))
+				return &objects.Float{Value: magnitude}
 			default:
 				return objects.NewError("abs() argument must be a number")
 			}
@@ -636,6 +658,39 @@ func (c *Compiler) registerBuiltins() {
 	absIndex := len(c.constants)
 	c.constants = append(c.constants, absBuiltin)
 	c.symbolTable.DefineBuiltin("abs", absIndex)
+
+	complexBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("complex() takes exactly 2 arguments")
+			}
+			var realPart, imagPart float64
+			switch arg := args[0].(type) {
+			case *objects.Integer:
+				realPart = float64(arg.Value)
+			case *objects.Float:
+				realPart = arg.Value
+			case *objects.Complex:
+				return objects.NewTypeError("complex() first argument must be a real number, not complex")
+			default:
+				return objects.NewTypeError("complex() argument must be a number")
+			}
+			switch arg := args[1].(type) {
+			case *objects.Integer:
+				imagPart = float64(arg.Value)
+			case *objects.Float:
+				imagPart = arg.Value
+			case *objects.Complex:
+				return objects.NewTypeError("complex() second argument must be a real number, not complex")
+			default:
+				return objects.NewTypeError("complex() argument must be a number")
+			}
+			return objects.NewComplex(realPart, imagPart)
+		},
+	}
+	complexIndex := len(c.constants)
+	c.constants = append(c.constants, complexBuiltin)
+	c.symbolTable.DefineBuiltin("complex", complexIndex)
 
 	rangeBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -686,6 +741,53 @@ func (c *Compiler) registerBuiltins() {
 	rangeIndex := len(c.constants)
 	c.constants = append(c.constants, rangeBuiltin)
 	c.symbolTable.DefineBuiltin("range", rangeIndex)
+
+	listBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("list() takes exactly 1 argument")
+			}
+			switch arg := args[0].(type) {
+			case *objects.List:
+				// Return a copy
+				elements := make([]objects.Object, len(arg.Elements))
+				copy(elements, arg.Elements)
+				return &objects.List{Elements: elements}
+			case *objects.Tuple:
+				return &objects.List{Elements: arg.Elements}
+			case *objects.String:
+				elements := make([]objects.Object, len(arg.Value))
+				for i, ch := range arg.Value {
+					elements[i] = &objects.String{Value: string(ch)}
+				}
+				return &objects.List{Elements: elements}
+			case *objects.Range:
+				return &objects.List{Elements: arg.ToList()}
+			case *objects.Zip:
+				elements := arg.ToList()
+				if elements == nil {
+					return objects.NewTypeError("list() cannot convert zip with non-sequence argument")
+				}
+				return &objects.List{Elements: elements}
+			case *objects.DictKeys:
+				return &objects.List{Elements: arg.ToList()}
+			case *objects.DictValues:
+				return &objects.List{Elements: arg.ToList()}
+			case *objects.DictItems:
+				return &objects.List{Elements: arg.ToList()}
+			case *objects.Dict:
+				// list(dict) returns list of keys, same as Python
+				return &objects.List{Elements: arg.KeysSlice()}
+			case *objects.Set:
+				return &objects.List{Elements: arg.ToSlice()}
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", arg.Type())
+			}
+		},
+	}
+	listIndex := len(c.constants)
+	c.constants = append(c.constants, listBuiltin)
+	c.symbolTable.DefineBuiltin("list", listIndex)
 
 	minBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
@@ -1182,6 +1284,17 @@ func (c *Compiler) Compile(node ast.Node) error {
 		float := &objects.Float{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(float))
 
+	case *ast.ComplexLiteral:
+		// Parse the complex literal string (e.g., "3.14j", "2j")
+		s := node.Value
+		s = strings.TrimRight(s, "jJ")
+		imagPart, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return fmt.Errorf("could not parse complex literal %q: %s", node.Value, err)
+		}
+		complexObj := objects.NewComplex(0, imagPart)
+		c.emit(OpConstant, c.addConstant(complexObj))
+
 	case *ast.StringLiteral:
 		str := &objects.String{Value: node.Value}
 		c.emit(OpConstant, c.addConstant(str))
@@ -1233,6 +1346,9 @@ func (c *Compiler) Compile(node ast.Node) error {
 		} else {
 			c.emit(OpFalse)
 		}
+
+	case *ast.EllipsisLiteral:
+		c.emit(OpEllipsis)
 
 	case *ast.IfExpression:
 		err := c.Compile(node.Condition)
@@ -1366,12 +1482,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		symbol, ok := c.symbolTable.Resolve(node.Value)
 		if !ok {
 			if node.Value == "True" {
-				c.emit(OpTrue)
-			} else if node.Value == "False" {
-				c.emit(OpFalse)
-			} else if node.Value == "None" {
-				c.emit(OpNull)
-			} else {
+			c.emit(OpTrue)
+		} else if node.Value == "False" {
+			c.emit(OpFalse)
+		} else if node.Value == "None" {
+			c.emit(OpNull)
+		} else if node.Value == "Ellipsis" {
+			c.emit(OpEllipsis)
+		} else {
 				return fmt.Errorf("undefined variable %s", node.Value)
 			}
 		} else {

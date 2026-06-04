@@ -70,6 +70,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.IDENT, p.parseIdentifier)
 	p.registerPrefix(lexer.INT, p.parseIntegerLiteral)
 	p.registerPrefix(lexer.FLOAT, p.parseFloatLiteral)
+	p.registerPrefix(lexer.COMPLEX, p.parseComplexLiteral)
 	p.registerPrefix(lexer.STRING, p.parseStringLiteral)
 	p.registerPrefix(lexer.FSTRING, p.parseFStringLiteral)
 	p.registerPrefix(lexer.BYTESTRING, p.parseByteStringLiteral)
@@ -83,6 +84,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.LBRACKET, p.parseListLiteral)
 	p.registerPrefix(lexer.LBRACE, p.parseBraceLiteral)
 	p.registerPrefix(lexer.NONE, p.parseNone)
+	p.registerPrefix(lexer.ELLIPSIS, p.parseEllipsisLiteral)
 	p.registerPrefix(lexer.LAMBDA, p.parseLambdaExpression)
 	p.registerPrefix(lexer.ASYNC, p.parseAsyncFunction)
 	p.registerPrefix(lexer.AWAIT, p.parseAwaitExpression)
@@ -725,6 +727,10 @@ func (p *Parser) parseFloatLiteral() ast.Expression {
 	return lit
 }
 
+func (p *Parser) parseComplexLiteral() ast.Expression {
+	return &ast.ComplexLiteral{Token: p.curToken.Literal, Value: p.curToken.Literal}
+}
+
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken.Literal, Value: p.curToken.Literal}
 }
@@ -808,6 +814,10 @@ func (p *Parser) parseBoolean() ast.Expression {
 
 func (p *Parser) parseNone() ast.Expression {
 	return &ast.Identifier{Token: p.curToken.Literal, Value: "None"}
+}
+
+func (p *Parser) parseEllipsisLiteral() ast.Expression {
+	return &ast.EllipsisLiteral{Token: p.curToken.Literal}
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {

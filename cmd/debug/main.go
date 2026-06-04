@@ -27,6 +27,7 @@ var opNames = map[byte]string{
 	48: "OpCreateClassWithMultiSuper", 49: "OpGetAttribute", 50: "OpSetAttribute",
 	51: "OpFormatString", 52: "OpMakeAsync", 53: "OpAwait",
 	54: "OpListUnpack", 55: "OpDictUnpack",
+	56: "OpEllipsis",
 }
 
 func disassemble(ins []byte, constants []objects.Object) {

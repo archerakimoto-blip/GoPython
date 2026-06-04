@@ -147,9 +147,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 #### 🟡 部分实现 (5 项)
 
 6. **Type hints generics** - 泛型类型提示
-7. **Ellipsis (...)** - 省略号字面量
-8. **Dictionary Views** - 字典视图
-9. **Complex numbers** - 复数
+7. **Ellipsis (...)** - 省略号字面量 → ✅ v0.14 实现
+8. **Dictionary Views** - 字典视图 → ✅ v0.14 实现
+9. **Complex numbers** - 复数 → ✅ v0.14 实现
 10. **asyncio 模块** - 异步生态
 
 #### 🐛 已知问题 (3 项)
@@ -181,8 +181,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
             ├───────────────────┼───────────────────┼───────────────────┤
             │ ✅ P1-4 位运算脱糖 │ ✅ P1-20 仅关键字参数│ ✅ P1-21 仅位置参数│
 │ ✅ P0-1 Raw strings│ ✅ P0-17 仅关键字参数│ ✅ P0-18 仅位置参数│
-  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ ❌ P0-12 复数    │
-            │ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ ❌ P0-14 Ellipsis│
+  低影响力   │ ✅ P0-10 0x/0b/0o │ ✅ P1-19 Enum        │ ✅ P0-12 复数    │
+│ ✅ P0-11 数字下划线│ ✅ P0-2 Byte strings │ ✅ P0-14 Ellipsis│
             │ ✅ P3-11 字符串驻留│ ✅ P3-14 死代码消除  │ ✅ P0-34 元类     │
             └───────────────────┴───────────────────┴───────────────────┘
 ```
@@ -496,11 +496,23 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] `OpSetAttribute` 不支持 Class 对象：`cls._registered = True` 需要 Class 对象属性设置，之前只支持 Instance
 - [x] `NewError` vet 警告：`NewError(err.Error())` 非常量格式字符串 → `NewError("%s", err.Error())`
 
-### v0.14 — 低影响力特性 (计划中)
+### v0.14 — 低影响力特性 ✅
 
-- [ ] Ellipsis (...)
-- [ ] Complex numbers
-- [ ] Dictionary Views
+- [x] Ellipsis (...) — `...` 字面量 + `Ellipsis` 标识符 + `OpEllipsis` 操作码
+- [x] Complex numbers — `2j` 字面量 + `complex(real, imag)` 内置函数 + 复数算术运算
+- [x] Dictionary Views — `dict.keys()`/`dict.values()`/`dict.items()` 返回动态视图对象
+
+**v0.14 变更详情：**
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/lexer/lexer.go` | 新增 `ELLIPSIS`/`COMPLEX` token；`readNumber` 支持 `j`/`J` 后缀；`case '.'` 检测 `...` |
+| `pkg/ast/ast.go` | 新增 `EllipsisLiteral`/`ComplexLiteral` AST 节点 |
+| `pkg/parser/parser.go` | 注册 `ELLIPSIS`/`COMPLEX` 前缀解析器 |
+| `pkg/desugar/desugar.go` | `ComplexLiteral` 模式匹配支持 |
+| `pkg/compiler/compiler.go` | `OpEllipsis` 操作码；`ComplexLiteral` 编译；`complex()`/`abs()`/`bool()` 内置函数支持复数；`Ellipsis` 标识符识别 |
+| `pkg/vm/vm.go` | `OpEllipsis` 处理；复数算术运算（`executeBinaryComplexOperation`）；复数比较/取反/真值；Dict 视图对象属性访问和索引 |
+| `pkg/objects/object.go` | `Ellipsis` 单例对象；`Complex` 结构体；`DictKeys`/`DictValues`/`DictItems` 视图对象；`Equal` 支持 Ellipsis/Complex |
 
 ### v0.15 — 标准库与运行时 (计划中)
 

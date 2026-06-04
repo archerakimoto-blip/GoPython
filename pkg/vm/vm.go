@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"math/cmplx"
 	"strings"
 
 	"github.com/go-py/go-python/pkg/compiler"
@@ -330,6 +331,12 @@ func (vm *VM) Run() error {
 
 		case compiler.OpNull:
 			err := vm.push(objects.None_)
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpEllipsis:
+			err := vm.push(objects.EllipsisSingleton)
 			if err != nil {
 				return err
 			}
@@ -1380,6 +1387,156 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			// Handle Dict attribute access (keys, values, items, etc.)
+			if dictObj, ok := obj.(*objects.Dict); ok {
+				switch attrName {
+				case "keys":
+					err := vm.push(objects.NewDictKeys(dictObj))
+					if err != nil {
+						return err
+					}
+					continue
+				case "values":
+					err := vm.push(objects.NewDictValues(dictObj))
+					if err != nil {
+						return err
+					}
+					continue
+				case "items":
+					err := vm.push(objects.NewDictItems(dictObj))
+					if err != nil {
+						return err
+					}
+					continue
+				case "get":
+					// Return a builtin that captures the dict
+					getFn := &objects.Builtin{
+						Name: "dict.get",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 || len(args) > 2 {
+								return objects.NewTypeError("dict.get() takes at most 2 arguments")
+							}
+							val, ok := dictObj.Get(args[0])
+							if ok {
+								return val
+							}
+							if len(args) == 2 {
+								return args[1]
+							}
+							return objects.None_
+						},
+					}
+					err := vm.push(getFn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "pop":
+					popFn := &objects.Builtin{
+						Name: "dict.pop",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 || len(args) > 2 {
+								return objects.NewTypeError("dict.pop() takes at most 2 arguments")
+							}
+							val, ok := dictObj.Get(args[0])
+							if !ok {
+								if len(args) == 2 {
+									return args[1]
+								}
+								return objects.NewKeyError("'%s'", args[0].Inspect())
+							}
+							dictObj.Delete(args[0])
+							return val
+						},
+					}
+					err := vm.push(popFn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "setdefault":
+					setdefaultFn := &objects.Builtin{
+						Name: "dict.setdefault",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 || len(args) > 2 {
+								return objects.NewTypeError("dict.setdefault() takes at most 2 arguments")
+							}
+							val, ok := dictObj.Get(args[0])
+							if ok {
+								return val
+							}
+							var defaultVal objects.Object = objects.None_
+							if len(args) == 2 {
+								defaultVal = args[1]
+							}
+							dictObj.Set(args[0], defaultVal)
+							return defaultVal
+						},
+					}
+					err := vm.push(setdefaultFn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "update":
+					updateFn := &objects.Builtin{
+						Name: "dict.update",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("dict.update() takes at least 1 argument")
+							}
+							if other, ok := args[0].(*objects.Dict); ok {
+								for _, keyStr := range other.KeyOrder {
+									dictObj.Set(other.Keys[keyStr], other.Pairs[keyStr])
+								}
+							}
+							return objects.None_
+						},
+					}
+					err := vm.push(updateFn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "clear":
+					clearFn := &objects.Builtin{
+						Name: "dict.clear",
+						Fn: func(args ...objects.Object) objects.Object {
+							dictObj.Pairs = make(map[string]objects.Object)
+							dictObj.Keys = make(map[string]objects.Object)
+							dictObj.KeyOrder = make([]string, 0)
+							return objects.None_
+						},
+					}
+					err := vm.push(clearFn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "copy":
+					copyFn := &objects.Builtin{
+						Name: "dict.copy",
+						Fn: func(args ...objects.Object) objects.Object {
+							newDict := objects.NewDict()
+							for _, keyStr := range dictObj.KeyOrder {
+								newDict.Set(dictObj.Keys[keyStr], dictObj.Pairs[keyStr])
+							}
+							return newDict
+						},
+					}
+					err := vm.push(copyFn)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 
 		case compiler.OpSetAttribute:
@@ -2242,6 +2399,8 @@ func isTruthy(obj objects.Object) bool {
 		return false
 	case *objects.Bytes:
 		return len(obj.Value) > 0
+	case *objects.Complex:
+		return obj.Real != 0 || obj.Imag != 0
 	default:
 		return true
 	}
@@ -2250,12 +2409,16 @@ func isTruthy(obj objects.Object) bool {
 func (vm *VM) executeMinusOperator() error {
 	operand := vm.pop()
 
-	if operand.Type() != objects.INTEGER_OBJ {
+	switch op := operand.(type) {
+	case *objects.Integer:
+		return vm.push(objects.GetCachedInteger(-op.Value))
+	case *objects.Float:
+		return vm.push(&objects.Float{Value: -op.Value})
+	case *objects.Complex:
+		return vm.push(objects.NewComplex(-op.Real, -op.Imag))
+	default:
 		return fmt.Errorf("unsupported type for negation: %s", operand.Type())
 	}
-
-	value := operand.(*objects.Integer).Value
-	return vm.push(objects.GetCachedInteger(-value))
 }
 
 func (vm *VM) executeBangOperator() error {
@@ -2290,6 +2453,10 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 
 	if left.Type() == objects.FLOAT_OBJ && right.Type() == objects.FLOAT_OBJ {
 		return vm.executeFloatComparison(op, left, right)
+	}
+
+	if left.Type() == objects.COMPLEX_OBJ && right.Type() == objects.COMPLEX_OBJ {
+		return vm.executeComplexComparison(op, left, right)
 	}
 
 	if left.Type() == objects.BYTES_OBJ && right.Type() == objects.BYTES_OBJ {
@@ -2346,6 +2513,31 @@ func (vm *VM) executeFloatComparison(op compiler.Opcode, left, right objects.Obj
 	}
 }
 
+func (vm *VM) executeComplexComparison(op compiler.Opcode, left, right objects.Object) error {
+	leftValue := left.(*objects.Complex)
+	rightValue := right.(*objects.Complex)
+
+	switch op {
+	case compiler.OpEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue.Real == rightValue.Real && leftValue.Imag == rightValue.Imag))
+	case compiler.OpNotEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue.Real != rightValue.Real || leftValue.Imag != rightValue.Imag))
+	default:
+		return fmt.Errorf("'%s' not supported between instances of 'complex' and 'complex'", opToString(op))
+	}
+}
+
+func opToString(op compiler.Opcode) string {
+	switch op {
+	case compiler.OpGreaterThan:
+		return ">"
+	case compiler.OpLessThan:
+		return "<"
+	default:
+		return "unknown"
+	}
+}
+
 func (vm *VM) executeBytesComparison(op compiler.Opcode, left, right objects.Object) error {
 	leftBytes := left.(*objects.Bytes).Value
 	rightBytes := right.(*objects.Bytes).Value
@@ -2394,6 +2586,23 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 		return vm.executeBinaryFloatOperation(op, left, &objects.Float{Value: float64(right.(*objects.Integer).Value)})
 	}
 
+	// Complex number operations
+	if leftType == objects.COMPLEX_OBJ && rightType == objects.COMPLEX_OBJ {
+		return vm.executeBinaryComplexOperation(op, left, right)
+	}
+	if leftType == objects.COMPLEX_OBJ && rightType == objects.FLOAT_OBJ {
+		return vm.executeBinaryComplexOperation(op, left, objects.NewComplex(right.(*objects.Float).Value, 0))
+	}
+	if leftType == objects.COMPLEX_OBJ && rightType == objects.INTEGER_OBJ {
+		return vm.executeBinaryComplexOperation(op, left, objects.NewComplex(float64(right.(*objects.Integer).Value), 0))
+	}
+	if leftType == objects.FLOAT_OBJ && rightType == objects.COMPLEX_OBJ {
+		return vm.executeBinaryComplexOperation(op, objects.NewComplex(left.(*objects.Float).Value, 0), right)
+	}
+	if leftType == objects.INTEGER_OBJ && rightType == objects.COMPLEX_OBJ {
+		return vm.executeBinaryComplexOperation(op, objects.NewComplex(float64(left.(*objects.Integer).Value), 0), right)
+	}
+
 	if op == compiler.OpAdd {
 		leftStr := toString(left)
 		rightStr := toString(right)
@@ -2411,6 +2620,8 @@ func toString(obj objects.Object) string {
 		return fmt.Sprintf("%d", o.Value)
 	case *objects.Float:
 		return fmt.Sprintf("%g", o.Value)
+	case *objects.Complex:
+		return o.Inspect()
 	case *objects.Boolean:
 		if o.Value {
 			return "True"
@@ -2511,6 +2722,37 @@ func (vm *VM) executeBinaryFloatOperation(op compiler.Opcode, left, right object
 	}
 
 	return vm.push(&objects.Float{Value: result})
+}
+
+func (vm *VM) executeBinaryComplexOperation(op compiler.Opcode, left, right objects.Object) error {
+	leftComplex := left.(*objects.Complex)
+	rightComplex := right.(*objects.Complex)
+
+	lc := complex(leftComplex.Real, leftComplex.Imag)
+	rc := complex(rightComplex.Real, rightComplex.Imag)
+
+	switch op {
+	case compiler.OpAdd:
+		result := lc + rc
+		return vm.push(objects.NewComplex(real(result), imag(result)))
+	case compiler.OpSub:
+		result := lc - rc
+		return vm.push(objects.NewComplex(real(result), imag(result)))
+	case compiler.OpMul:
+		result := lc * rc
+		return vm.push(objects.NewComplex(real(result), imag(result)))
+	case compiler.OpDiv:
+		if rc == 0 {
+			return vm.push(objects.NewZeroDivisionError("complex division by zero"))
+		}
+		result := lc / rc
+		return vm.push(objects.NewComplex(real(result), imag(result)))
+	case compiler.OpPower:
+		result := cmplx.Pow(lc, rc)
+		return vm.push(objects.NewComplex(real(result), imag(result)))
+	default:
+		return fmt.Errorf("unknown complex operator: %d", op)
+	}
 }
 
 func (vm *VM) executeBinaryStringOperation(op compiler.Opcode, left, right objects.Object) error {
@@ -2672,6 +2914,12 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 		return vm.executeStringIndex(left, index)
 	case left.Type() == objects.BYTES_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeBytesIndex(left, index)
+	case left.Type() == objects.DICT_KEYS_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeDictKeysIndex(left, index)
+	case left.Type() == objects.DICT_VALUES_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeDictValuesIndex(left, index)
+	case left.Type() == objects.DICT_ITEMS_OBJ && index.Type() == objects.INTEGER_OBJ:
+		return vm.executeDictItemsIndex(left, index)
 	default:
 		return fmt.Errorf("index operator not supported: %s", left.Type())
 	}
@@ -2749,6 +2997,36 @@ func (vm *VM) executeHashIndex(hash, index objects.Object) error {
 	}
 
 	return vm.push(value)
+}
+
+func (vm *VM) executeDictKeysIndex(left, index objects.Object) error {
+	dk := left.(*objects.DictKeys)
+	idx := index.(*objects.Integer).Value
+	val, ok := dk.GetItem(idx)
+	if !ok {
+		return vm.push(objects.None_)
+	}
+	return vm.push(val)
+}
+
+func (vm *VM) executeDictValuesIndex(left, index objects.Object) error {
+	dv := left.(*objects.DictValues)
+	idx := index.(*objects.Integer).Value
+	val, ok := dv.GetItem(idx)
+	if !ok {
+		return vm.push(objects.None_)
+	}
+	return vm.push(val)
+}
+
+func (vm *VM) executeDictItemsIndex(left, index objects.Object) error {
+	di := left.(*objects.DictItems)
+	idx := index.(*objects.Integer).Value
+	val, ok := di.GetItem(idx)
+	if !ok {
+		return vm.push(objects.None_)
+	}
+	return vm.push(val)
 }
 
 func (vm *VM) executeSliceExpression(left, start, end objects.Object) error {

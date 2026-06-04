@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-py/go-python/pkg/compiler"
@@ -380,6 +381,355 @@ except:
 		got := result.(*objects.Integer).Value
 		if got != 2 {
 			t.Errorf("Expected 2 (plain except catches EG), got %d", got)
+		}
+	})
+}
+
+func TestEllipsis(t *testing.T) {
+	t.Run("ellipsis literal", func(t *testing.T) {
+		input := `_result = ...`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.ELLIPSIS_OBJ {
+			t.Fatalf("Expected ELLIPSIS, got %s", result.Type())
+		}
+		if result.Inspect() != "Ellipsis" {
+			t.Errorf("Expected 'Ellipsis', got %q", result.Inspect())
+		}
+	})
+
+	t.Run("Ellipsis identifier", func(t *testing.T) {
+		input := `_result = Ellipsis`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.ELLIPSIS_OBJ {
+			t.Fatalf("Expected ELLIPSIS, got %s", result.Type())
+		}
+	})
+
+	t.Run("ellipsis is truthy", func(t *testing.T) {
+		input := `
+_result = bool(...)
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.BOOLEAN_OBJ {
+			t.Fatalf("Expected BOOLEAN, got %s", result.Type())
+		}
+		got := result.(*objects.Boolean).Value
+		if got != true {
+			t.Errorf("Expected true, got %v", got)
+		}
+	})
+
+	t.Run("ellipsis equality", func(t *testing.T) {
+		input := `
+_result = ... == Ellipsis
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.BOOLEAN_OBJ {
+			t.Fatalf("Expected BOOLEAN, got %s", result.Type())
+		}
+		got := result.(*objects.Boolean).Value
+		if got != true {
+			t.Errorf("Expected true, got %v", got)
+		}
+	})
+}
+
+func TestComplex(t *testing.T) {
+	t.Run("complex literal", func(t *testing.T) {
+		input := `_result = 2j`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.COMPLEX_OBJ {
+			t.Fatalf("Expected COMPLEX, got %s", result.Type())
+		}
+		c := result.(*objects.Complex)
+		if c.Real != 0 || c.Imag != 2 {
+			t.Errorf("Expected (0+2j), got (%g+%gj)", c.Real, c.Imag)
+		}
+	})
+
+	t.Run("complex addition", func(t *testing.T) {
+		input := `_result = 3 + 4j`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.COMPLEX_OBJ {
+			t.Fatalf("Expected COMPLEX, got %s", result.Type())
+		}
+		c := result.(*objects.Complex)
+		if c.Real != 3 || c.Imag != 4 {
+			t.Errorf("Expected (3+4j), got (%g+%gj)", c.Real, c.Imag)
+		}
+	})
+
+	t.Run("complex arithmetic", func(t *testing.T) {
+		input := `_result = (1+2j) + (3+4j)`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		c := result.(*objects.Complex)
+		if c.Real != 4 || c.Imag != 6 {
+			t.Errorf("Expected (4+6j), got (%g+%gj)", c.Real, c.Imag)
+		}
+	})
+
+	t.Run("complex multiplication", func(t *testing.T) {
+		input := `_result = 2j * 3j`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		c := result.(*objects.Complex)
+		if c.Real != -6 {
+			t.Errorf("Expected real=-6, got %g", c.Real)
+		}
+	})
+
+	t.Run("complex builtin", func(t *testing.T) {
+		input := `_result = complex(3, 4)`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		c := result.(*objects.Complex)
+		if c.Real != 3 || c.Imag != 4 {
+			t.Errorf("Expected (3+4j), got (%g+%gj)", c.Real, c.Imag)
+		}
+	})
+
+	t.Run("abs of complex", func(t *testing.T) {
+		input := `_result = abs(3 + 4j)`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.FLOAT_OBJ {
+			t.Fatalf("Expected FLOAT, got %s", result.Type())
+		}
+		got := result.(*objects.Float).Value
+		if got != 5.0 {
+			t.Errorf("Expected 5.0, got %g", got)
+		}
+	})
+
+	t.Run("complex equality", func(t *testing.T) {
+		input := `_result = (1+2j) == (1+2j)`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		got := result.(*objects.Boolean).Value
+		if got != true {
+			t.Errorf("Expected true, got %v", got)
+		}
+	})
+
+	t.Run("complex negation", func(t *testing.T) {
+		input := `_result = -(3+4j)`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		c := result.(*objects.Complex)
+		if c.Real != -3 || c.Imag != -4 {
+			t.Errorf("Expected (-3-4j), got (%g+%gj)", c.Real, c.Imag)
+		}
+	})
+
+	t.Run("bool of complex", func(t *testing.T) {
+		input := `
+_a = bool(0j)
+_b = bool(1j)
+_result = _a == False and _b == True
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		got := result.(*objects.Boolean).Value
+		if got != true {
+			t.Errorf("Expected true, got %v", got)
+		}
+	})
+}
+
+func TestDictViews(t *testing.T) {
+	t.Run("dict keys view object", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		dk := objects.NewDictKeys(d)
+		if dk.Type() != objects.DICT_KEYS_OBJ {
+			t.Fatalf("Expected DICT_KEYS, got %s", dk.Type())
+		}
+		if dk.Len() != 2 {
+			t.Fatalf("Expected len 2, got %d", dk.Len())
+		}
+		keys := dk.ToList()
+		if len(keys) != 2 {
+			t.Fatalf("Expected 2 keys, got %d", len(keys))
+		}
+		// Test dynamic behavior - add a key to the dict
+		d.Set(&objects.String{Value: "c"}, &objects.Integer{Value: 3})
+		if dk.Len() != 3 {
+			t.Fatalf("Expected dynamic len 3, got %d", dk.Len())
+		}
+	})
+
+	t.Run("dict values view object", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		dv := objects.NewDictValues(d)
+		if dv.Type() != objects.DICT_VALUES_OBJ {
+			t.Fatalf("Expected DICT_VALUES, got %s", dv.Type())
+		}
+		if dv.Len() != 2 {
+			t.Fatalf("Expected len 2, got %d", dv.Len())
+		}
+		vals := dv.ToList()
+		if len(vals) != 2 {
+			t.Fatalf("Expected 2 values, got %d", len(vals))
+		}
+	})
+
+	t.Run("dict items view object", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		di := objects.NewDictItems(d)
+		if di.Type() != objects.DICT_ITEMS_OBJ {
+			t.Fatalf("Expected DICT_ITEMS, got %s", di.Type())
+		}
+		if di.Len() != 2 {
+			t.Fatalf("Expected len 2, got %d", di.Len())
+		}
+		items := di.ToList()
+		if len(items) != 2 {
+			t.Fatalf("Expected 2 items, got %d", len(items))
+		}
+		// Items should be tuples
+		for _, item := range items {
+			if item.Type() != objects.TUPLE_OBJ {
+				t.Fatalf("Expected TUPLE, got %s", item.Type())
+			}
+		}
+	})
+
+	t.Run("dict keys inspect", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		dk := objects.NewDictKeys(d)
+		inspect := dk.Inspect()
+		if !strings.HasPrefix(inspect, "dict_keys([") {
+			t.Errorf("Expected inspect to start with 'dict_keys([', got %q", inspect)
+		}
+	})
+
+	t.Run("dict values inspect", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+
+		dv := objects.NewDictValues(d)
+		inspect := dv.Inspect()
+		if !strings.HasPrefix(inspect, "dict_values([") {
+			t.Errorf("Expected inspect to start with 'dict_values([', got %q", inspect)
+		}
+	})
+
+	t.Run("dict items inspect", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+
+		di := objects.NewDictItems(d)
+		inspect := di.Inspect()
+		if !strings.HasPrefix(inspect, "dict_items([") {
+			t.Errorf("Expected inspect to start with 'dict_items([', got %q", inspect)
+		}
+	})
+
+	t.Run("dict keys getitem", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		dk := objects.NewDictKeys(d)
+		val, ok := dk.GetItem(0)
+		if !ok {
+			t.Fatal("Expected GetItem(0) to succeed")
+		}
+		if val.Type() != objects.STRING_OBJ {
+			t.Fatalf("Expected STRING, got %s", val.Type())
+		}
+
+		// Negative index
+		val, ok = dk.GetItem(-1)
+		if !ok {
+			t.Fatal("Expected GetItem(-1) to succeed")
+		}
+		if val.(*objects.String).Value != "b" {
+			t.Errorf("Expected 'b', got %q", val.(*objects.String).Value)
+		}
+
+		// Out of bounds
+		_, ok = dk.GetItem(10)
+		if ok {
+			t.Fatal("Expected GetItem(10) to fail")
+		}
+	})
+
+	t.Run("dict values getitem", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		dv := objects.NewDictValues(d)
+		val, ok := dv.GetItem(0)
+		if !ok {
+			t.Fatal("Expected GetItem(0) to succeed")
+		}
+		if val.Type() != objects.INTEGER_OBJ {
+			t.Fatalf("Expected INTEGER, got %s", val.Type())
+		}
+	})
+
+	t.Run("dict items getitem", func(t *testing.T) {
+		d := objects.NewDict()
+		d.Set(&objects.String{Value: "a"}, &objects.Integer{Value: 1})
+		d.Set(&objects.String{Value: "b"}, &objects.Integer{Value: 2})
+
+		di := objects.NewDictItems(d)
+		val, ok := di.GetItem(0)
+		if !ok {
+			t.Fatal("Expected GetItem(0) to succeed")
+		}
+		if val.Type() != objects.TUPLE_OBJ {
+			t.Fatalf("Expected TUPLE, got %s", val.Type())
+		}
+		tuple := val.(*objects.Tuple)
+		if len(tuple.Elements) != 2 {
+			t.Fatalf("Expected tuple with 2 elements, got %d", len(tuple.Elements))
 		}
 	})
 }
