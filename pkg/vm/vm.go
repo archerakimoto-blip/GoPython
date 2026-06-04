@@ -28,6 +28,9 @@ type ExceptionHandler struct {
 	finallyEndIP    int
 	pendingError    objects.Object
 	frameIndex      int
+	isStar          bool            // except* handler
+	starUnhandled   []objects.Object // unhandled exceptions from ExceptionGroup for except*
+	exceptOpcodeIP  int             // IP of the OpExceptHandler/OpExceptStarHandler opcode itself
 }
 
 type Frame struct {
@@ -578,21 +581,73 @@ func (vm *VM) Run() error {
 		case compiler.OpEndTry:
 			if len(vm.exceptionStack) > 0 {
 				lastIdx := len(vm.exceptionStack) - 1
-				pendingError := vm.exceptionStack[lastIdx].pendingError
 				handler := vm.exceptionStack[lastIdx]
-				vm.exceptionStack = vm.exceptionStack[:lastIdx]
-				vm.inFinally = false
 
 				// 如果 except 块处理了异常，我们需要把之前 push 到栈上的异常对象 pop 掉
 				// 判断依据是我们当前栈是否比 handler.stackPtr 多一个值（也就是那个 errObj）
 				if vm.sp > handler.stackPtr {
-					// 检查栈顶是不是异常对象（虽然理论上是的）
 					_ = vm.pop()
 				}
 
+				// For except* handlers with unmatched exceptions, try the next except* handler
+				if handler.isStar && len(handler.starUnhandled) > 0 {
+					nextStarIP := vm.findNextExceptStarHandler(handler.exceptOpcodeIP)
+					if nextStarIP >= 0 {
+						ins := vm.currentFrame().fn.Instructions
+						typeIdx := int(uint16(ins[nextStarIP+1])<<8 | uint16(ins[nextStarIP+2]))
+						var exceptionType string
+						if typeIdx > 0 && typeIdx < len(vm.constants) {
+							if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+								exceptionType = typeObj.Value
+							}
+						}
+
+						unhandledEG := &objects.ExceptionGroup{
+							Message:    "unhandled",
+							Exceptions: handler.starUnhandled,
+						}
+						matched, remaining := splitExceptionGroup(unhandledEG, exceptionType)
+
+						if len(matched) > 0 {
+							matchedEG := &objects.ExceptionGroup{
+								Message:    unhandledEG.Message,
+								Exceptions: matched,
+							}
+							// Update handler's starUnhandled with remaining
+							vm.exceptionStack[lastIdx].starUnhandled = remaining
+							// Push matched EG onto stack
+							vm.sp = handler.stackPtr
+							if err := vm.push(matchedEG); err != nil {
+								return err
+							}
+							// Jump to next OpExceptStarHandler instruction
+							// -1 because main loop will increment ip
+							vm.currentFrame().ip = nextStarIP - 1
+							break
+						}
+					}
+
+					// No more matching except* handlers, pop and re-raise
+					vm.exceptionStack = vm.exceptionStack[:lastIdx]
+					vm.inFinally = false
+					unhandledEG := &objects.ExceptionGroup{
+						Message:    "unhandled",
+						Exceptions: handler.starUnhandled,
+					}
+					caught := vm.raiseException(unhandledEG)
+					if !caught {
+						vm.pendingError = unhandledEG
+						return fmt.Errorf("unhandled exception: %s", unhandledEG.Inspect())
+					}
+					break
+				}
+
+				// Normal handling: pop handler
+				pendingError := handler.pendingError
+				vm.exceptionStack = vm.exceptionStack[:lastIdx]
+				vm.inFinally = false
+
 				if pendingError != nil {
-					// try-only-finally: finally 块执行完后，异常需要继续传播
-					// 使用 raiseException 让异常正确传播到外层帧
 					caught := vm.raiseException(pendingError)
 					if !caught {
 						vm.pendingError = pendingError
@@ -626,13 +681,60 @@ func (vm *VM) Run() error {
 					ins := vm.currentFrame().fn.Instructions
 					for scanIP < len(ins) {
 						op := compiler.Opcode(ins[scanIP])
-						if op == compiler.OpExceptHandler {
-							typeIdx := int(uint16(ins[scanIP+2])<<8 | uint16(ins[scanIP+1]))
+						if op == compiler.OpExceptStarHandler {
+							typeIdx := int(uint16(ins[scanIP+1])<<8 | uint16(ins[scanIP+2]))
 							var exceptionType string
 							if typeIdx > 0 && typeIdx < len(vm.constants) {
 								if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
 									exceptionType = typeObj.Value
 								}
+							}
+							// except* handles ExceptionGroup
+							if eg, ok := errObj.(*objects.ExceptionGroup); ok {
+								matched, unmatched := splitExceptionGroup(eg, exceptionType)
+								if len(matched) > 0 {
+									matchedEG := &objects.ExceptionGroup{
+										Message:    eg.Message,
+										Exceptions: matched,
+									}
+									vm.sp = handler.stackPtr
+									if err := vm.push(matchedEG); err != nil {
+										return err
+									}
+									vm.currentFrame().ip = scanIP + 5 - 1
+									vm.exceptionStack[i].starUnhandled = append(vm.exceptionStack[i].starUnhandled, unmatched...)
+									caught = true
+								}
+								break
+							} else if _, ok := errObj.(*objects.Error); ok {
+								if exceptionType == "" || matchesException(errObj, exceptionType) {
+									wrappedEG := &objects.ExceptionGroup{
+										Message:    "",
+										Exceptions: []objects.Object{errObj},
+									}
+									vm.sp = handler.stackPtr
+									if err := vm.push(wrappedEG); err != nil {
+										return err
+									}
+									vm.currentFrame().ip = scanIP + 5 - 1
+									caught = true
+								}
+								break
+							}
+							break
+						}
+						if op == compiler.OpExceptHandler {
+							typeIdx := int(uint16(ins[scanIP+1])<<8 | uint16(ins[scanIP+2]))
+							var exceptionType string
+							if typeIdx > 0 && typeIdx < len(vm.constants) {
+								if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+									exceptionType = typeObj.Value
+								}
+							}
+							// Typed except does NOT catch ExceptionGroup (but bare except: does)
+							if _, isEG := errObj.(*objects.ExceptionGroup); isEG && exceptionType != "" {
+								scanIP += 5
+								continue
 							}
 							if exceptionType == "" || matchesException(errObj, exceptionType) {
 								vm.sp = handler.stackPtr
@@ -702,6 +804,50 @@ func (vm *VM) Run() error {
 						finallyStartIP:  existingHandler.finallyStartIP,
 						finallyEndIP:    existingHandler.finallyEndIP,
 						pendingError:    existingHandler.pendingError,
+						exceptOpcodeIP:  ip,
+					}
+				}
+			}
+		case compiler.OpExceptStarHandler:
+			typeIdx := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			varIdx := int(uint16(ins[ip+3])<<8 | uint16(ins[ip+4]))
+			vm.currentFrame().ip += 4
+
+			var exceptionType, varName string
+			if typeIdx > 0 {
+				if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+					exceptionType = typeObj.Value
+				}
+			}
+			if varIdx > 0 {
+				if varObj, ok := vm.constants[varIdx].(*objects.String); ok {
+					varName = varObj.Value
+				}
+			}
+
+			handlerStartIP := vm.currentFrame().ip + 1
+
+			if len(vm.exceptionStack) > 0 {
+				lastIdx := len(vm.exceptionStack) - 1
+				for lastIdx >= 0 && vm.exceptionStack[lastIdx].handlerIP != -1 {
+					lastIdx--
+				}
+				if lastIdx >= 0 {
+					existingHandler := vm.exceptionStack[lastIdx]
+					vm.exceptionStack[lastIdx] = ExceptionHandler{
+						handlerIP:       vm.currentFrame().ip,
+						stackPtr:        vm.sp - 1,
+						exceptionType:   exceptionType,
+						varName:         varName,
+						handlerStartIP:  handlerStartIP,
+						tryBlockStartIP: existingHandler.tryBlockStartIP,
+						hasFinally:      existingHandler.hasFinally,
+						finallyStartIP:  existingHandler.finallyStartIP,
+						finallyEndIP:    existingHandler.finallyEndIP,
+						pendingError:    existingHandler.pendingError,
+						isStar:          true,
+						starUnhandled:   existingHandler.starUnhandled,
+						exceptOpcodeIP:  ip,
 					}
 				}
 			}
@@ -2672,14 +2818,61 @@ func matchesException(errObj objects.Object, exceptionType string) bool {
 	if exceptionType == "" {
 		return true
 	}
-	if errObj.Type() == objects.ERROR_OBJ {
-		err := errObj.(*objects.Error)
+	switch err := errObj.(type) {
+	case *objects.Error:
 		if exceptionType == "Exception" || exceptionType == "Error" {
 			return true
 		}
 		return err.ErrorType == exceptionType
+	case *objects.ExceptionGroup:
+		// For ExceptionGroup, check if any contained exception matches
+		for _, exc := range err.Exceptions {
+			if matchesException(exc, exceptionType) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
-	return false
+}
+
+// splitExceptionGroup splits an ExceptionGroup into matching and non-matching exceptions
+// based on the exception type. Returns (matched, unmatched) slices.
+// findNextExceptStarHandler scans the bytecode after the given opcode IP
+// to find the next OpExceptStarHandler instruction. Returns its IP or -1 if not found.
+func (vm *VM) findNextExceptStarHandler(afterOpcodeIP int) int {
+	ins := vm.currentFrame().fn.Instructions
+	scanIP := afterOpcodeIP + 5 // skip past the current 5-byte handler instruction
+	for scanIP < len(ins) {
+		op := compiler.Opcode(ins[scanIP])
+		if op == compiler.OpExceptStarHandler {
+			return scanIP
+		}
+		if op == compiler.OpEndTry || op == compiler.OpFinally {
+			return -1
+		}
+		// Skip past this instruction
+		size := compiler.InstructionSize(op)
+		if size <= 0 {
+			scanIP++
+		} else {
+			scanIP += size
+		}
+	}
+	return -1
+}
+
+func splitExceptionGroup(eg *objects.ExceptionGroup, exceptionType string) ([]objects.Object, []objects.Object) {
+	var matched, unmatched []objects.Object
+	for _, exc := range eg.Exceptions {
+		if matchesException(exc, exceptionType) {
+			matched = append(matched, exc)
+		} else {
+			unmatched = append(unmatched, exc)
+		}
+	}
+	return matched, unmatched
 }
 
 func (vm *VM) raiseException(errObj objects.Object) bool {
@@ -2703,13 +2896,65 @@ func (vm *VM) raiseException(errObj objects.Object) bool {
 			scanIP := handler.handlerIP
 			for scanIP < len(ins) {
 				op := compiler.Opcode(ins[scanIP])
-				if op == compiler.OpExceptHandler {
-					typeIdx := int(uint16(ins[scanIP+2])<<8 | uint16(ins[scanIP+1]))
+				if op == compiler.OpExceptStarHandler {
+					typeIdx := int(uint16(ins[scanIP+1])<<8 | uint16(ins[scanIP+2]))
 					var exceptionType string
 					if typeIdx > 0 && typeIdx < len(vm.constants) {
 						if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
 							exceptionType = typeObj.Value
 						}
+					}
+					// except* handles ExceptionGroup
+					if eg, ok := errObj.(*objects.ExceptionGroup); ok {
+						matched, unmatched := splitExceptionGroup(eg, exceptionType)
+						if len(matched) > 0 {
+							matchedEG := &objects.ExceptionGroup{
+								Message:    eg.Message,
+								Exceptions: matched,
+							}
+							vm.sp = handler.stackPtr
+							if err := vm.push(matchedEG); err != nil {
+								return false
+							}
+							vm.currentFrame().ip = scanIP + 5 - 1
+							// Store unhandled exceptions for re-raise after all except* blocks
+							vm.exceptionStack[i].starUnhandled = append(vm.exceptionStack[i].starUnhandled, unmatched...)
+							foundHandler = true
+							break
+						}
+						// No matching exceptions in this group, skip this handler
+						scanIP += 5
+					} else if err, ok := errObj.(*objects.Error); ok {
+						// Plain error with except*: wrap in ExceptionGroup if matches
+						if exceptionType == "" || matchesException(errObj, exceptionType) {
+							wrappedEG := &objects.ExceptionGroup{
+								Message:    "",
+								Exceptions: []objects.Object{err},
+							}
+							vm.sp = handler.stackPtr
+							if err := vm.push(wrappedEG); err != nil {
+								return false
+							}
+							vm.currentFrame().ip = scanIP + 5 - 1
+							foundHandler = true
+							break
+						}
+						scanIP += 5
+					} else {
+						scanIP += 5
+					}
+				} else if op == compiler.OpExceptHandler {
+					typeIdx := int(uint16(ins[scanIP+1])<<8 | uint16(ins[scanIP+2]))
+					var exceptionType string
+					if typeIdx > 0 && typeIdx < len(vm.constants) {
+						if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+							exceptionType = typeObj.Value
+						}
+					}
+					// Typed except does NOT catch ExceptionGroup (but bare except: does)
+					if _, isEG := errObj.(*objects.ExceptionGroup); isEG && exceptionType != "" {
+						scanIP += 5
+						continue
 					}
 					if exceptionType == "" || matchesException(errObj, exceptionType) {
 						vm.sp = handler.stackPtr
@@ -2766,18 +3011,45 @@ func (vm *VM) findMatchingExceptHandlerFrom(startIP int, errObj objects.Object, 
 				}
 			}
 
+			// Typed except does NOT catch ExceptionGroup (but bare except: does)
+			if _, isEG := errObj.(*objects.ExceptionGroup); isEG && exceptionType != "" {
+				ip += 5
+				continue
+			}
+
 			if exceptionType == "" || matchesException(errObj, exceptionType) {
 				handlerStartIP := ip + 5
 				vm.currentFrame().ip = handlerStartIP
 				return handlerStartIP
 			}
 
-			if ip+7 < len(vm.currentFrame().fn.Instructions) {
-				jumpIP := int(uint16(vm.currentFrame().fn.Instructions[ip+6])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+7]))
-				ip = jumpIP
-			} else {
-				break
+			ip += 5
+		} else if op == compiler.OpExceptStarHandler {
+			typeIdx := int(uint16(vm.currentFrame().fn.Instructions[ip+2])<<8 | uint16(vm.currentFrame().fn.Instructions[ip+1]))
+
+			var exceptionType string
+			if typeIdx > 0 && typeIdx < len(vm.constants) {
+				if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+					exceptionType = typeObj.Value
+				}
 			}
+
+			if eg, ok := errObj.(*objects.ExceptionGroup); ok {
+				matched, _ := splitExceptionGroup(eg, exceptionType)
+				if len(matched) > 0 {
+					handlerStartIP := ip + 5
+					vm.currentFrame().ip = handlerStartIP
+					return handlerStartIP
+				}
+			} else if _, ok := errObj.(*objects.Error); ok {
+				if exceptionType == "" || matchesException(errObj, exceptionType) {
+					handlerStartIP := ip + 5
+					vm.currentFrame().ip = handlerStartIP
+					return handlerStartIP
+				}
+			}
+
+			ip += 5
 		} else {
 			break
 		}

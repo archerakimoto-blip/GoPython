@@ -1005,6 +1005,45 @@ func (c *Compiler) registerBuiltins() {
 	exceptionGroupIndex := len(c.constants)
 	c.constants = append(c.constants, exceptionGroupBuiltin)
 	c.symbolTable.DefineBuiltin("ExceptionGroup", exceptionGroupIndex)
+
+	// Exception type constructors
+	exceptionTypes := []struct {
+		name      string
+		errorType string
+	}{
+		{"TypeError", "TypeError"},
+		{"ValueError", "ValueError"},
+		{"KeyError", "KeyError"},
+		{"IndexError", "IndexError"},
+		{"AttributeError", "AttributeError"},
+		{"ZeroDivisionError", "ZeroDivisionError"},
+		{"RuntimeError", "RuntimeError"},
+		{"NameError", "NameError"},
+		{"StopIteration", "StopIteration"},
+		{"NotImplementedError", "NotImplementedError"},
+		{"OverflowError", "OverflowError"},
+	}
+
+	for _, et := range exceptionTypes {
+		errorType := et.errorType
+		builtin := &objects.Builtin{
+			Name: et.name,
+			Fn: func(args ...objects.Object) objects.Object {
+				msg := ""
+				if len(args) > 0 {
+					if s, ok := args[0].(*objects.String); ok {
+						msg = s.Value
+					} else {
+						msg = args[0].Inspect()
+					}
+				}
+				return objects.NewErrorWithType(errorType, msg)
+			},
+		}
+		idx := len(c.constants)
+		c.constants = append(c.constants, builtin)
+		c.symbolTable.DefineBuiltin(et.name, idx)
+	}
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -1841,7 +1880,11 @@ func (c *Compiler) compileTryStatement(ts *ast.TryStatement) error {
 				varIdx = c.addConstant(&objects.String{Value: ""})
 			}
 
-			c.emit(OpExceptHandler, typeIdx, varIdx)
+			if ex.IsStar {
+				c.emit(OpExceptStarHandler, typeIdx, varIdx)
+			} else {
+				c.emit(OpExceptHandler, typeIdx, varIdx)
+			}
 
 			if ex.Name != nil {
 				c.emit(OpDupTop)

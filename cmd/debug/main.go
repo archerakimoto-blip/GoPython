@@ -21,12 +21,12 @@ var opNames = map[byte]string{
 	26: "OpIndex", 27: "OpSlice", 28: "OpCall", 29: "OpReturnValue",
 	30: "OpReturn", 31: "OpGetLocal", 32: "OpSetLocal", 33: "OpGetFree",
 	34: "OpClosure", 35: "OpBeginTry", 36: "OpEndTry", 37: "OpRaise",
-	38: "OpExceptHandler", 39: "OpFinally", 40: "OpYield",
-	41: "OpEnterContext", 42: "OpExitContext", 43: "OpMakeGenerator",
-	44: "OpYieldValue", 45: "OpCreateClass", 46: "OpCreateClassWithSuper",
-	47: "OpCreateClassWithMultiSuper", 48: "OpGetAttribute", 49: "OpSetAttribute",
-	50: "OpFormatString", 51: "OpMakeAsync", 52: "OpAwait",
-	53: "OpListUnpack", 54: "OpDictUnpack",
+	38: "OpExceptHandler", 39: "OpExceptStarHandler", 40: "OpFinally", 41: "OpYield",
+	42: "OpEnterContext", 43: "OpExitContext", 44: "OpMakeGenerator",
+	45: "OpYieldValue", 46: "OpCreateClass", 47: "OpCreateClassWithSuper",
+	48: "OpCreateClassWithMultiSuper", 49: "OpGetAttribute", 50: "OpSetAttribute",
+	51: "OpFormatString", 52: "OpMakeAsync", 53: "OpAwait",
+	54: "OpListUnpack", 55: "OpDictUnpack",
 }
 
 func disassemble(ins []byte, constants []objects.Object) {
@@ -39,7 +39,7 @@ func disassemble(ins []byte, constants []objects.Object) {
 		fmt.Printf("  %04d: %s", i, name)
 
 		switch op {
-		case 0, 18, 19, 21, 22, 23, 24, 25, 45, 46, 47, 48, 49, 50, 39:
+		case 0, 18, 19, 21, 22, 23, 24, 25, 45, 46, 47, 48, 49, 50, 40:
 			if i+2 < len(ins) {
 				operand := int(uint16(ins[i+1])<<8 | uint16(ins[i+2]))
 				fmt.Printf(" %d", operand)
@@ -55,7 +55,7 @@ func disassemble(ins []byte, constants []objects.Object) {
 				fmt.Printf(" const=%d free=%d", constIdx, numFree)
 			}
 			i += 4
-		case 35, 38:
+		case 35, 38, 39:
 			if i+4 < len(ins) {
 				fmt.Printf(" %d %d %d %d", ins[i+1], ins[i+2], ins[i+3], ins[i+4])
 			}

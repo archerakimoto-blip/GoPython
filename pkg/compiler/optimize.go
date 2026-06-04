@@ -2,7 +2,7 @@ package compiler
 
 import "github.com/go-py/go-python/pkg/objects"
 
-func instructionSize(op Opcode) int {
+func InstructionSize(op Opcode) int {
 	switch op {
 	case OpConstant,
 		OpJump,
@@ -28,7 +28,8 @@ func instructionSize(op Opcode) int {
 	case OpBeginTry:
 		return 9
 
-	case OpExceptHandler:
+	case OpExceptHandler,
+		OpExceptStarHandler:
 		return 5
 
 	case OpCall,
@@ -65,7 +66,7 @@ func readOperand(ins Instructions, pos int, op Opcode) (int, int) {
 	case OpBeginTry:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 8
 
-	case OpExceptHandler:
+	case OpExceptHandler, OpExceptStarHandler:
 		return int(uint16(ins[pos+1])<<8 | uint16(ins[pos+2])), 4
 
 	case OpCall, OpSetLocal, OpGetLocal, OpGetFree:
@@ -95,7 +96,7 @@ func EliminateDeadCode(ins Instructions) Instructions {
 		}
 
 		op := Opcode(ins[current])
-		size := instructionSize(op)
+		size := InstructionSize(op)
 		nextInst := current + size
 
 		switch {
@@ -148,7 +149,7 @@ func EliminateDeadCode(ins Instructions) Instructions {
 	newPos := 0
 	for oldPos < len(ins) {
 		op := Opcode(ins[oldPos])
-		size := instructionSize(op)
+		size := InstructionSize(op)
 
 		posMap[oldPos] = newPos
 
@@ -163,7 +164,7 @@ func EliminateDeadCode(ins Instructions) Instructions {
 	oldPos = 0
 	for oldPos < len(ins) {
 		op := Opcode(ins[oldPos])
-		size := instructionSize(op)
+		size := InstructionSize(op)
 
 		if reachable[oldPos] {
 			chunk := make(Instructions, size)

@@ -224,3 +224,159 @@ func TestBooleanOperations(t *testing.T) {
 		})
 	}
 }
+
+func runTestCode(t *testing.T, input string) objects.Object {
+	t.Helper()
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	program = desugar.Desugar(program)
+
+	comp := compiler.New()
+	err := comp.Compile(program)
+	if err != nil {
+		t.Fatalf("Compilation error: %v", err)
+	}
+
+	bc := comp.Bytecode()
+	machine := New(bc)
+	err = machine.Run()
+	if err != nil {
+		t.Fatalf("Execution error: %v", err)
+	}
+
+	for _, obj := range machine.globals {
+		if obj != nil {
+			return obj
+		}
+	}
+	return nil
+}
+
+func runTestCodeGetGlobal(t *testing.T, input string, name string) objects.Object {
+	t.Helper()
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("Parser errors: %v", p.Errors())
+	}
+
+	program = desugar.Desugar(program)
+
+	comp := compiler.New()
+	err := comp.Compile(program)
+	if err != nil {
+		t.Fatalf("Compilation error: %v", err)
+	}
+
+	bc := comp.Bytecode()
+	machine := New(bc)
+	err = machine.Run()
+	if err != nil {
+		t.Fatalf("Execution error: %v", err)
+	}
+
+	// Find the symbol index for the given name
+	symbol, ok := comp.SymbolTable().Resolve(name)
+	if !ok {
+		return nil
+	}
+	if symbol.Scope != compiler.GlobalScope {
+		return nil
+	}
+	return machine.globals[symbol.Index]
+}
+
+func TestExceptionGroup(t *testing.T) {
+	t.Run("create exception group", func(t *testing.T) {
+		input := `
+_result = ExceptionGroup("eg", [TypeError("a"), ValueError("b")])
+`
+		result := runTestCode(t, input)
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.EXCEPTION_GROUP_OBJ {
+			t.Fatalf("Expected EXCEPTION_GROUP, got %s", result.Type())
+		}
+		eg := result.(*objects.ExceptionGroup)
+		if eg.Message != "eg" {
+			t.Errorf("Expected message 'eg', got %q", eg.Message)
+		}
+		if len(eg.Exceptions) != 2 {
+			t.Fatalf("Expected 2 exceptions, got %d", len(eg.Exceptions))
+		}
+	})
+
+	t.Run("except star catches matching exceptions", func(t *testing.T) {
+		input := `
+_caught = None
+try:
+    raise ExceptionGroup("eg", [TypeError("err1"), ValueError("err2")])
+except* TypeError as e:
+    _caught = e
+`
+		result := runTestCode(t, input)
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.EXCEPTION_GROUP_OBJ {
+			t.Fatalf("Expected EXCEPTION_GROUP, got %s", result.Type())
+		}
+		eg := result.(*objects.ExceptionGroup)
+		if len(eg.Exceptions) != 1 {
+			t.Fatalf("Expected 1 exception in caught group, got %d", len(eg.Exceptions))
+		}
+		err := eg.Exceptions[0].(*objects.Error)
+		if err.ErrorType != "TypeError" {
+			t.Errorf("Expected TypeError, got %s", err.ErrorType)
+		}
+	})
+
+	t.Run("except star with multiple handlers", func(t *testing.T) {
+		input := `
+_caught_type = None
+_caught_val = None
+try:
+    raise ExceptionGroup("eg", [TypeError("err1"), ValueError("err2")])
+except* TypeError as e:
+    _caught_type = e
+except* ValueError as e:
+    _caught_val = e
+_result = 1
+`
+		result := runTestCodeGetGlobal(t, input, "_result")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		if result.Type() != objects.INTEGER_OBJ {
+			t.Fatalf("Expected INTEGER, got %s", result.Type())
+		}
+	})
+
+	t.Run("plain except does not catch ExceptionGroup", func(t *testing.T) {
+		input := `
+_caught = 0
+try:
+    try:
+        raise ExceptionGroup("eg", [TypeError("err1")])
+    except TypeError:
+        _caught = 1
+except:
+    _caught = 2
+`
+		result := runTestCodeGetGlobal(t, input, "_caught")
+		if result == nil {
+			t.Fatal("Expected result, got nil")
+		}
+		got := result.(*objects.Integer).Value
+		if got != 2 {
+			t.Errorf("Expected 2 (plain except catches EG), got %d", got)
+		}
+	})
+}

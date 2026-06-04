@@ -1844,6 +1844,11 @@ func (p *Parser) parseExceptClause() *ast.ExceptClause {
 		}
 	} else if !p.curTokenIs(lexer.COLON) {
 		clause.Type = p.parseExpression(LOWEST)
+		// After parseExpression, curToken may still be the type identifier.
+		// Advance to the next token (could be AS or COLON).
+		if clause.Type != nil && !p.curTokenIs(lexer.AS) && !p.curTokenIs(lexer.COLON) {
+			p.nextToken()
+		}
 		if p.curTokenIs(lexer.AS) {
 			p.nextToken()
 			if p.curTokenIs(lexer.IDENT) {

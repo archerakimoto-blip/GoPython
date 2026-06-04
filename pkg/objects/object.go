@@ -1063,7 +1063,7 @@ var (
 	None_ = &None{}
 )
 
-func newErrorWithType(errorType, format string, a ...interface{}) *Error {
+func NewErrorWithType(errorType, format string, a ...interface{}) *Error {
 	return &Error{
 		ErrorType: errorType,
 		Message:   fmt.Sprintf(format, a...),
@@ -1078,31 +1078,31 @@ func NewError(format string, a ...interface{}) *Error {
 }
 
 func NewException(format string, a ...interface{}) *Error {
-	return newErrorWithType("Exception", format, a...)
+	return NewErrorWithType("Exception", format, a...)
 }
 
 func NewValueError(format string, a ...interface{}) *Error {
-	return newErrorWithType("ValueError", format, a...)
+	return NewErrorWithType("ValueError", format, a...)
 }
 
 func NewTypeError(format string, a ...interface{}) *Error {
-	return newErrorWithType("TypeError", format, a...)
+	return NewErrorWithType("TypeError", format, a...)
 }
 
 func NewZeroDivisionError(format string, a ...interface{}) *Error {
-	return newErrorWithType("ZeroDivisionError", format, a...)
+	return NewErrorWithType("ZeroDivisionError", format, a...)
 }
 
 func NewIndexError(format string, a ...interface{}) *Error {
-	return newErrorWithType("IndexError", format, a...)
+	return NewErrorWithType("IndexError", format, a...)
 }
 
 func NewKeyError(format string, a ...interface{}) *Error {
-	return newErrorWithType("KeyError", format, a...)
+	return NewErrorWithType("KeyError", format, a...)
 }
 
 func NewAttributeError(format string, a ...interface{}) *Error {
-	return newErrorWithType("AttributeError", format, a...)
+	return NewErrorWithType("AttributeError", format, a...)
 }
 
 type EnumMember struct {
@@ -1141,19 +1141,19 @@ func (e *Enum) GetAttr(name string) (Object, bool) {
 }
 
 func NewNameError(format string, a ...interface{}) *Error {
-	return newErrorWithType("NameError", format, a...)
+	return NewErrorWithType("NameError", format, a...)
 }
 
 func NewAssertionError(format string, a ...interface{}) *Error {
-	return newErrorWithType("AssertionError", format, a...)
+	return NewErrorWithType("AssertionError", format, a...)
 }
 
 func NewRuntimeError(format string, a ...interface{}) *Error {
-	return newErrorWithType("RuntimeError", format, a...)
+	return NewErrorWithType("RuntimeError", format, a...)
 }
 
 func NewNotImplementedError(format string, a ...interface{}) *Error {
-	return newErrorWithType("NotImplementedError", format, a...)
+	return NewErrorWithType("NotImplementedError", format, a...)
 }
 
 func Equal(a, b Object) bool {
