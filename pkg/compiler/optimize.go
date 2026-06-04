@@ -133,6 +133,43 @@ func EliminateDeadCode(ins Instructions) Instructions {
 				reachable[finallyStartIP] = true
 				queue = append(queue, finallyStartIP)
 			}
+			// Mark all except handler instructions as reachable
+			// (OpExceptHandler and OpExceptStarHandler between handlerIP and finallyStartIP/OpEndTry)
+			if handlerIP > 0 {
+				scanIP := handlerIP
+				for scanIP < len(ins) {
+					scanOp := Opcode(ins[scanIP])
+					if scanOp == OpExceptHandler || scanOp == OpExceptStarHandler {
+						if !reachable[scanIP] {
+							reachable[scanIP] = true
+							queue = append(queue, scanIP)
+						}
+						scanIP += InstructionSize(scanOp)
+						// Also mark the handler body instructions as reachable
+						for scanIP < len(ins) {
+							bodyOp := Opcode(ins[scanIP])
+							if bodyOp == OpExceptHandler || bodyOp == OpExceptStarHandler ||
+								bodyOp == OpFinally || bodyOp == OpEndTry {
+								break
+							}
+							if !reachable[scanIP] {
+								reachable[scanIP] = true
+								queue = append(queue, scanIP)
+							}
+							bodySize := InstructionSize(bodyOp)
+							if bodySize <= 0 {
+								scanIP++
+							} else {
+								scanIP += bodySize
+							}
+						}
+					} else if scanOp == OpFinally || scanOp == OpEndTry {
+						break
+					} else {
+						scanIP++
+					}
+				}
+			}
 
 		case op == OpReturnValue || op == OpReturn || op == OpRaise:
 

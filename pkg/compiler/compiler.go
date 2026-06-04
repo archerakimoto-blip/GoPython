@@ -1037,7 +1037,7 @@ func (c *Compiler) registerBuiltins() {
 						msg = args[0].Inspect()
 					}
 				}
-				return objects.NewErrorWithType(errorType, msg)
+				return objects.NewErrorWithType(errorType, "%s", msg)
 			},
 		}
 		idx := len(c.constants)

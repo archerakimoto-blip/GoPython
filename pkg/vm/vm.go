@@ -615,6 +615,8 @@ func (vm *VM) Run() error {
 							}
 							// Update handler's starUnhandled with remaining
 							vm.exceptionStack[lastIdx].starUnhandled = remaining
+							// Reset handlerIP so OpExceptStarHandler dispatch can update this handler
+							vm.exceptionStack[lastIdx].handlerIP = -1
 							// Push matched EG onto stack
 							vm.sp = handler.stackPtr
 							if err := vm.push(matchedEG); err != nil {
@@ -702,6 +704,8 @@ func (vm *VM) Run() error {
 										return err
 									}
 									vm.currentFrame().ip = scanIP + 5 - 1
+									vm.exceptionStack[i].isStar = true
+									vm.exceptionStack[i].exceptOpcodeIP = scanIP
 									vm.exceptionStack[i].starUnhandled = append(vm.exceptionStack[i].starUnhandled, unmatched...)
 									caught = true
 								}
@@ -717,6 +721,8 @@ func (vm *VM) Run() error {
 										return err
 									}
 									vm.currentFrame().ip = scanIP + 5 - 1
+									vm.exceptionStack[i].isStar = true
+									vm.exceptionStack[i].exceptOpcodeIP = scanIP
 									caught = true
 								}
 								break
@@ -2917,7 +2923,9 @@ func (vm *VM) raiseException(errObj objects.Object) bool {
 								return false
 							}
 							vm.currentFrame().ip = scanIP + 5 - 1
-							// Store unhandled exceptions for re-raise after all except* blocks
+							// Mark this handler as except* and store unhandled exceptions
+							vm.exceptionStack[i].isStar = true
+							vm.exceptionStack[i].exceptOpcodeIP = scanIP
 							vm.exceptionStack[i].starUnhandled = append(vm.exceptionStack[i].starUnhandled, unmatched...)
 							foundHandler = true
 							break
@@ -2936,6 +2944,9 @@ func (vm *VM) raiseException(errObj objects.Object) bool {
 								return false
 							}
 							vm.currentFrame().ip = scanIP + 5 - 1
+							// Mark this handler as except*
+							vm.exceptionStack[i].isStar = true
+							vm.exceptionStack[i].exceptOpcodeIP = scanIP
 							foundHandler = true
 							break
 						}

@@ -317,11 +317,14 @@ _result = ExceptionGroup("eg", [TypeError("a"), ValueError("b")])
 		input := `
 _caught = None
 try:
-    raise ExceptionGroup("eg", [TypeError("err1"), ValueError("err2")])
-except* TypeError as e:
-    _caught = e
+    try:
+        raise ExceptionGroup("eg", [TypeError("err1"), ValueError("err2")])
+    except* TypeError as e:
+        _caught = e
+except:
+    pass
 `
-		result := runTestCode(t, input)
+		result := runTestCodeGetGlobal(t, input, "_caught")
 		if result == nil {
 			t.Fatal("Expected result, got nil")
 		}
