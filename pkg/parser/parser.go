@@ -631,7 +631,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.ASYNC) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -851,6 +851,66 @@ func (p *Parser) parseGroupedExpression() ast.Expression {
 	p.nextToken()
 
 	exp := p.parseExpression(LOWEST)
+
+	// Check if this is a generator expression: (x for x in iter) or (x async for x in iter)
+	if p.curTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) {
+		isAsync := false
+		if p.curTokenIs(lexer.ASYNC) {
+			isAsync = true
+			p.nextToken() // skip ASYNC
+		}
+
+		if p.curTokenIs(lexer.FOR) {
+			p.nextToken() // skip FOR
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected IDENT after FOR in generator expression")
+				return nil
+			}
+			variable := &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+
+			if !p.curTokenIs(lexer.IN) {
+				p.errors = append(p.errors, "expected IN after variable in generator expression")
+				return nil
+			}
+			p.nextToken()
+			iterable := p.parseExpression(LOWEST)
+
+			var filter ast.Expression
+			if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+				if !p.curTokenIs(lexer.IF) {
+					p.nextToken()
+				}
+				p.nextToken() // past IF
+				filter = p.parseExpression(LOWEST)
+			}
+
+			// Consume closing )
+			if p.curTokenIs(lexer.RPAREN) {
+				p.nextToken()
+			} else if p.peekTokenIs(lexer.RPAREN) {
+				p.nextToken()
+			}
+
+			if isAsync {
+				return &ast.AsyncGeneratorExpression{
+					Token:    "(",
+					Element:  exp,
+					Variable: variable,
+					Iterable: iterable,
+					Filter:   filter,
+				}
+			}
+			return &ast.GeneratorExpression{
+				Token:    "(",
+				Element:  exp,
+				Variable: variable,
+				Iterable: iterable,
+				Filter:   filter,
+			}
+		}
+	}
 
 	if !p.expectPeek(lexer.RPAREN) {
 		return nil
@@ -1175,8 +1235,61 @@ func (p *Parser) parseListLiteral() ast.Expression {
 		}
 	}
 
-	// Now check if next token is FOR! That means list comprehension!
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+	// Now check if next token is FOR or ASYNC FOR! That means list comprehension!
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+		// Check if it's an async comprehension
+		isAsync := false
+		if p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+			isAsync = true
+			// Advance to ASYNC if needed
+			if !p.curTokenIs(lexer.ASYNC) {
+				p.nextToken()
+			}
+			// Now curToken should be ASYNC, skip it
+			p.nextToken()
+		}
+
+		if isAsync {
+			comp := &ast.AsyncListComprehension{Token: p.curToken.Literal}
+			comp.Element = firstExpr
+
+			// Handle FOR token
+			if !p.curTokenIs(lexer.FOR) {
+				p.nextToken()
+			}
+			if !p.curTokenIs(lexer.FOR) {
+				p.errors = append(p.errors, "expected FOR in async list comprehension")
+				return nil
+			}
+			p.nextToken()
+
+			// Parse variable
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected IDENT after FOR")
+				return nil
+			}
+			comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+
+			// Parse IN
+			if !p.curTokenIs(lexer.IN) {
+				p.errors = append(p.errors, "expected IN after variable")
+				return nil
+			}
+			p.nextToken()
+			comp.Iterable = p.parseExpression(LOWEST)
+
+			// Consume closing ]
+			if p.curTokenIs(lexer.RBRACKET) {
+				p.nextToken()
+			} else if p.peekTokenIs(lexer.RBRACKET) {
+				p.nextToken()
+			} else {
+				p.errors = append(p.errors, "expected RBRACKET at end of async list comprehension")
+			}
+			return comp
+		}
+
 		comp := &ast.ListComprehension{Token: p.curToken.Literal}
 		comp.Element = firstExpr
 
@@ -1276,7 +1389,63 @@ func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
 		return nil
 	}
 
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+		// Check if it's an async comprehension
+		isAsync := false
+		if p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+			isAsync = true
+			if !p.curTokenIs(lexer.ASYNC) {
+				p.nextToken()
+			}
+			p.nextToken() // skip ASYNC
+		}
+
+		if isAsync {
+			comp := &ast.AsyncSetComprehension{Token: p.curToken.Literal}
+			comp.Element = firstExpr
+
+			if !p.curTokenIs(lexer.FOR) {
+				p.nextToken()
+			}
+			if !p.curTokenIs(lexer.FOR) {
+				p.errors = append(p.errors, "expected FOR in async set comprehension")
+				return nil
+			}
+			p.nextToken()
+
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected IDENT after FOR")
+				return nil
+			}
+			comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+
+			if !p.curTokenIs(lexer.IN) {
+				p.errors = append(p.errors, "expected IN after variable")
+				return nil
+			}
+			p.nextToken()
+			comp.Iterable = p.parseExpression(LOWEST)
+
+			// Parse optional IF condition
+			if p.curTokenIs(lexer.IF) || p.peekTokenIs(lexer.IF) {
+				if !p.curTokenIs(lexer.IF) {
+					p.nextToken()
+				}
+				p.nextToken() // past IF
+				comp.Filter = p.parseExpression(LOWEST)
+			}
+
+			if p.curTokenIs(lexer.RBRACE) {
+				p.nextToken()
+			} else if p.peekTokenIs(lexer.RBRACE) {
+				p.nextToken()
+			} else {
+				p.errors = append(p.errors, "expected RBRACE at end of async set comprehension")
+			}
+			return comp
+		}
+
 		comp := &ast.SetComprehension{Token: p.curToken.Literal}
 		comp.Element = firstExpr
 
@@ -1370,7 +1539,7 @@ func (p *Parser) parseBraceLiteral() ast.Expression {
 		return p.parseDictLiteral()
 	}
 
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
 		return p.parseSetLiteral(firstExpr)
 	}
 
@@ -1496,8 +1665,53 @@ func (p *Parser) parseDictLiteral() ast.Expression {
 		p.errors = p.errors[:oldErrors]
 		return p.parseNormalDictLiteral()
 	}
-	// Now check for 'for'!
-	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) {
+	// Now check for 'for' or 'async for'!
+	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+		// Check if it's an async comprehension
+		isAsync := false
+		if p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+			isAsync = true
+			if !p.curTokenIs(lexer.ASYNC) {
+				p.nextToken()
+			}
+			p.nextToken() // skip ASYNC
+		}
+
+		if isAsync {
+			comp := &ast.AsyncDictComprehension{
+				Token: "{",
+				Key:   key,
+				Value: value,
+			}
+			// Now parse for part
+			if p.curTokenIs(lexer.FOR) {
+				p.nextToken()
+			} else if p.peekTokenIs(lexer.FOR) {
+				p.nextToken()
+				p.nextToken()
+			}
+			// Now variable
+			if !p.curTokenIs(lexer.IDENT) {
+				p.errors = append(p.errors, "expected identifier after 'for' in async dict comprehension")
+				return nil
+			}
+			comp.Variable = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
+			p.nextToken()
+			if !p.curTokenIs(lexer.IN) {
+				p.errors = append(p.errors, "expected 'in' after identifier in async dict comprehension")
+				return nil
+			}
+			p.nextToken()
+			comp.Iterable = p.parseExpression(LOWEST)
+			// Now consume RBRACE if present
+			if !p.curTokenIs(lexer.RBRACE) {
+				p.expectPeek(lexer.RBRACE)
+			} else {
+				p.nextToken()
+			}
+			return comp
+		}
+
 		// Yes! It's dict comprehension!
 		comp := &ast.DictComprehension{
 			Token: "{",

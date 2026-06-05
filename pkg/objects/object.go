@@ -7,6 +7,7 @@ import (
 	"math/cmplx"
 	"math/rand"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -49,6 +50,8 @@ const (
 	DICT_KEYS_OBJ       ObjectType = "DICT_KEYS"
 	DICT_VALUES_OBJ     ObjectType = "DICT_VALUES"
 	DICT_ITEMS_OBJ      ObjectType = "DICT_ITEMS"
+	REGEX_PATTERN_OBJ   ObjectType = "REGEX_PATTERN"
+	REGEX_MATCH_OBJ     ObjectType = "REGEX_MATCH"
 )
 
 type Object interface {
@@ -1211,6 +1214,352 @@ func (z *Zip) ToList() []Object {
 		result = append(result, &Tuple{Elements: tuple})
 	}
 	return result
+}
+
+// RegexPattern represents a compiled regular expression pattern
+type RegexPattern struct {
+	Regexp  *regexp.Regexp
+	Pattern string
+	Flags   int64
+}
+
+func (p *RegexPattern) Type() ObjectType { return REGEX_PATTERN_OBJ }
+func (p *RegexPattern) Inspect() string  { return fmt.Sprintf("re.compile(%q)", p.Pattern) }
+
+func (p *RegexPattern) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "pattern":
+		return &String{Value: p.Pattern}, true
+	case "flags":
+		return &Integer{Value: p.Flags}, true
+	case "search":
+		return &Builtin{
+			Name: "Pattern.search",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("search() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("search() argument must be a string")
+				}
+				return PatternSearch(p, s.Value)
+			},
+		}, true
+	case "match":
+		return &Builtin{
+			Name: "Pattern.match",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("match() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("match() argument must be a string")
+				}
+				return PatternMatch(p, s.Value)
+			},
+		}, true
+	case "fullmatch":
+		return &Builtin{
+			Name: "Pattern.fullmatch",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("fullmatch() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("fullmatch() argument must be a string")
+				}
+				return PatternFullmatch(p, s.Value)
+			},
+		}, true
+	case "findall":
+		return &Builtin{
+			Name: "Pattern.findall",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("findall() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("findall() argument must be a string")
+				}
+				return PatternFindall(p, s.Value)
+			},
+		}, true
+	case "finditer":
+		return &Builtin{
+			Name: "Pattern.finditer",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("finditer() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("finditer() argument must be a string")
+				}
+				return PatternFinditer(p, s.Value)
+			},
+		}, true
+	case "sub":
+		return &Builtin{
+			Name: "Pattern.sub",
+			Fn: func(args ...Object) Object {
+				if len(args) < 2 {
+					return NewTypeError("sub() takes at least 2 arguments")
+				}
+				repl, ok1 := args[0].(*String)
+				s, ok2 := args[1].(*String)
+				if !ok1 || !ok2 {
+					return NewTypeError("sub() arguments must be strings")
+				}
+				result := p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				return &String{Value: result}
+			},
+		}, true
+	case "subn":
+		return &Builtin{
+			Name: "Pattern.subn",
+			Fn: func(args ...Object) Object {
+				if len(args) < 2 {
+					return NewTypeError("subn() takes at least 2 arguments")
+				}
+				repl, ok1 := args[0].(*String)
+				s, ok2 := args[1].(*String)
+				if !ok1 || !ok2 {
+					return NewTypeError("subn() arguments must be strings")
+				}
+				count := p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				matches := p.Regexp.FindAllString(s.Value, -1)
+				n := int64(len(matches))
+				return &Tuple{Elements: []Object{&String{Value: count}, &Integer{Value: n}}}
+			},
+		}, true
+	case "split":
+		return &Builtin{
+			Name: "Pattern.split",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("split() takes at least 1 argument")
+				}
+				s, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("split() argument must be a string")
+				}
+				return PatternSplit(p, s.Value)
+			},
+		}, true
+	}
+	return nil, false
+}
+
+// RegexMatch represents a match result from a regular expression search
+type RegexMatch struct {
+	Groups_  []string
+	GroupIndices []int // start positions for each group
+	GroupEnds    []int // end positions for each group
+	OrigString string
+	Pattern_   *RegexPattern
+}
+
+func (m *RegexMatch) Type() ObjectType { return REGEX_MATCH_OBJ }
+func (m *RegexMatch) Inspect() string  { return "<re.Match object>" }
+
+func (m *RegexMatch) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "string":
+		return &String{Value: m.OrigString}, true
+	case "re":
+		return m.Pattern_, true
+	case "lastindex":
+		if len(m.Groups_) > 1 {
+			return &Integer{Value: int64(len(m.Groups_) - 1)}, true
+		}
+		return None_, true
+	case "group":
+		return &Builtin{
+			Name: "Match.group",
+			Fn: func(args ...Object) Object {
+				idx := int64(0)
+				if len(args) > 0 {
+					if i, ok := args[0].(*Integer); ok {
+						idx = i.Value
+					} else {
+						return NewTypeError("group() argument must be an integer")
+					}
+				}
+				if idx < 0 || int(idx) >= len(m.Groups_) {
+					return NewIndexError("no such group")
+				}
+				return &String{Value: m.Groups_[idx]}
+			},
+		}, true
+	case "start":
+		return &Builtin{
+			Name: "Match.start",
+			Fn: func(args ...Object) Object {
+				idx := int64(0)
+				if len(args) > 0 {
+					if i, ok := args[0].(*Integer); ok {
+						idx = i.Value
+					}
+				}
+				if idx < 0 || int(idx) >= len(m.GroupIndices) {
+					return NewIndexError("no such group")
+				}
+				return &Integer{Value: int64(m.GroupIndices[idx])}
+			},
+		}, true
+	case "end":
+		return &Builtin{
+			Name: "Match.end",
+			Fn: func(args ...Object) Object {
+				idx := int64(0)
+				if len(args) > 0 {
+					if i, ok := args[0].(*Integer); ok {
+						idx = i.Value
+					}
+				}
+				if idx < 0 || int(idx) >= len(m.GroupEnds) {
+					return NewIndexError("no such group")
+				}
+				return &Integer{Value: int64(m.GroupEnds[idx])}
+			},
+		}, true
+	case "span":
+		return &Builtin{
+			Name: "Match.span",
+			Fn: func(args ...Object) Object {
+				idx := int64(0)
+				if len(args) > 0 {
+					if i, ok := args[0].(*Integer); ok {
+						idx = i.Value
+					}
+				}
+				if idx < 0 || int(idx) >= len(m.GroupIndices) {
+					return NewIndexError("no such group")
+				}
+				return &Tuple{Elements: []Object{
+					&Integer{Value: int64(m.GroupIndices[idx])},
+					&Integer{Value: int64(m.GroupEnds[idx])},
+				}}
+			},
+		}, true
+	case "groups":
+		return &Builtin{
+			Name: "Match.groups",
+			Fn: func(args ...Object) Object {
+				elements := make([]Object, 0, len(m.Groups_)-1)
+				for i := 1; i < len(m.Groups_); i++ {
+					elements = append(elements, &String{Value: m.Groups_[i]})
+				}
+				return &Tuple{Elements: elements}
+			},
+		}, true
+	}
+	return nil, false
+}
+
+// Helper functions for Pattern methods that are also used by the re module
+
+func PatternSearch(p *RegexPattern, s string) Object {
+	loc := p.Regexp.FindStringSubmatchIndex(s)
+	if loc == nil {
+		return None_
+	}
+	return newMatchFromLoc(p, s, loc)
+}
+
+func PatternMatch(p *RegexPattern, s string) Object {
+	loc := p.Regexp.FindStringSubmatchIndex(s)
+	if loc == nil || loc[0] != 0 {
+		return None_
+	}
+	return newMatchFromLoc(p, s, loc)
+}
+
+func PatternFullmatch(p *RegexPattern, s string) Object {
+	loc := p.Regexp.FindStringSubmatchIndex(s)
+	if loc == nil || loc[0] != 0 || loc[1] != len(s) {
+		return None_
+	}
+	return newMatchFromLoc(p, s, loc)
+}
+
+func PatternFindall(p *RegexPattern, s string) Object {
+	matches := p.Regexp.FindAllStringSubmatch(s, -1)
+	if matches == nil {
+		return &List{Elements: []Object{}}
+	}
+
+	numGroups := p.Regexp.NumSubexp()
+	result := make([]Object, 0, len(matches))
+
+	if numGroups == 0 {
+		// No groups: return list of matched strings
+		for _, m := range matches {
+			result = append(result, &String{Value: m[0]})
+		}
+	} else if numGroups == 1 {
+		// One group: return list of group values
+		for _, m := range matches {
+			result = append(result, &String{Value: m[1]})
+		}
+	} else {
+		// Multiple groups: return list of tuples
+		for _, m := range matches {
+			elements := make([]Object, numGroups)
+			for i := 0; i < numGroups; i++ {
+				elements[i] = &String{Value: m[i+1]}
+			}
+			result = append(result, &Tuple{Elements: elements})
+		}
+	}
+	return &List{Elements: result}
+}
+
+func PatternFinditer(p *RegexPattern, s string) Object {
+	locs := p.Regexp.FindAllStringSubmatchIndex(s, -1)
+	if locs == nil {
+		return &List{Elements: []Object{}}
+	}
+	result := make([]Object, 0, len(locs))
+	for _, loc := range locs {
+		result = append(result, newMatchFromLoc(p, s, loc))
+	}
+	return &List{Elements: result}
+}
+
+func PatternSplit(p *RegexPattern, s string) Object {
+	result := p.Regexp.Split(s, -1)
+	elements := make([]Object, len(result))
+	for i, part := range result {
+		elements[i] = &String{Value: part}
+	}
+	return &List{Elements: elements}
+}
+
+func newMatchFromLoc(p *RegexPattern, s string, loc []int) *RegexMatch {
+	groups := make([]string, len(loc)/2)
+	groupIndices := make([]int, len(loc)/2)
+	groupEnds := make([]int, len(loc)/2)
+	for i := 0; i < len(loc)/2; i++ {
+		start := loc[i*2]
+		end := loc[i*2+1]
+		groupIndices[i] = start
+		groupEnds[i] = end
+		if start >= 0 && end >= 0 {
+			groups[i] = s[start:end]
+		}
+	}
+	return &RegexMatch{
+		Groups_:      groups,
+		GroupIndices: groupIndices,
+		GroupEnds:    groupEnds,
+		OrigString:   s,
+		Pattern_:     p,
+	}
 }
 
 var modules = make(map[string]*Module)

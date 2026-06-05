@@ -87,6 +87,9 @@ type VM struct {
 	attrCache      map[AttrCacheKey]AttrCacheEntry
 	globalCache    []GlobalCacheEntry
 	globalVersions []uint64
+
+	useRegisterVM bool
+	regVM         *RegisterVM
 }
 
 func New(bytecode *compiler.Bytecode) *VM {
@@ -121,6 +124,16 @@ func New(bytecode *compiler.Bytecode) *VM {
 func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []objects.Object) *VM {
 	vm := New(bytecode)
 	vm.globals = s
+	return vm
+}
+
+// NewRegisterVM creates a VM that uses the register-based execution mode.
+// It translates stack-based bytecode to register-based bytecode at runtime
+// and executes it, providing an optimization over the standard stack-based VM.
+func NewRegisterVM(bytecode *compiler.Bytecode) *VM {
+	vm := New(bytecode)
+	vm.useRegisterVM = true
+	vm.regVM = newRegisterVM(vm)
 	return vm
 }
 
@@ -205,6 +218,11 @@ func (vm *VM) popFrame() *Frame {
 }
 
 func (vm *VM) Run() error {
+	// If register VM mode is enabled, delegate to the register-based execution
+	if vm.useRegisterVM && vm.regVM != nil {
+		return vm.regVM.RunReg()
+	}
+
 	var ip int
 	var ins compiler.Instructions
 	var op compiler.Opcode
@@ -1525,6 +1543,38 @@ func (vm *VM) Run() error {
 						},
 					}
 					err := vm.push(copyFn)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Handle RegexPattern attribute access
+			if regexPattern, ok := obj.(*objects.RegexPattern); ok {
+				if val, found := regexPattern.GetAttr(attrName); found {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Handle RegexMatch attribute access
+			if regexMatch, ok := obj.(*objects.RegexMatch); ok {
+				if val, found := regexMatch.GetAttr(attrName); found {
+					err := vm.push(val)
 					if err != nil {
 						return err
 					}

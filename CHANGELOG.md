@@ -4,6 +4,41 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-05
+
+### 新增特性
+
+- **re 正则表达式模块**：完整支持 Python `re` 模块 API，包括 `re.compile()`、`re.search()`、`re.match()`、`re.fullmatch()`、`re.findall()`、`re.finditer()`、`re.sub()`、`re.subn()`、`re.split()`、`re.escape()`；Pattern 对象支持方法调用和属性访问（`pattern`、`flags`）；Match 对象支持 `group()`、`start()`、`end()`、`span()`、`groups()` 和属性访问（`string`、`re`、`lastindex`）；模块常量 `IGNORECASE`、`MULTILINE`、`DOTALL`、`ASCII`、`UNICODE`
+- **Async comprehensions（异步推导式）**：支持 `[x async for x in iter]`、`{x async for x in iter}`、`{k:v async for x in iter}`、`(x async for x in iter)` 语法，包括带 `if` 过滤条件的异步推导式
+- **分代 GC（Generational GC）**：将简单标记-清除 GC 升级为分代垃圾回收器，包含 Young Generation（256KB 阈值）和 Old Generation（4MB 阈值）；Minor GC 频繁回收年轻代，Major GC 回收全部代；对象经过 3 次 Minor GC 后晋升到老年代；写屏障（Write Barrier）+ 记忆集（Remembered Set）处理跨代引用；新增 `gc.minor_collect()`、`gc.major_collect()` 等 API
+- **寄存器 VM（Register VM）**：新增基于寄存器的虚拟机执行模式，将栈式字节码翻译为寄存器字节码执行，减少内存操作次数；支持常用操作码的翻译和执行；通过 `NewRegisterVM()` 构造器启用；翻译结果缓存避免重复翻译
+
+### 新增对象类型
+
+- `REGEX_PATTERN_OBJ`：RegexPattern 正则表达式编译对象
+- `REGEX_MATCH_OBJ`：RegexMatch 正则匹配结果对象
+
+### 新增 AST 节点
+
+- `AsyncListComprehension`：异步列表推导式
+- `AsyncSetComprehension`：异步集合推导式
+- `AsyncDictComprehension`：异步字典推导式
+- `AsyncGeneratorExpression`：异步生成器表达式
+
+### 变更详情
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/re/module.go` | 新增 `re` 模块，实现 10 个正则表达式函数和 5 个常量 |
+| `pkg/objects/object.go` | 新增 `RegexPattern`/`RegexMatch` 结构体和 `GetAttr()` 方法；新增 `REGEX_PATTERN_OBJ`/`REGEX_MATCH_OBJ` 类型 |
+| `pkg/vm/vm.go` | `OpGetAttribute` 支持 `RegexPattern`/`RegexMatch` 属性访问；新增 `useRegisterVM`/`regVM` 字段；新增 `NewRegisterVM()` 构造器 |
+| `pkg/vm/register_vm.go` | 新增寄存器 VM 实现，包含 40+ 寄存器操作码、翻译器和执行器 |
+| `pkg/compiler/compiler.go` | 注册 `re` 模块；新增异步推导式编译支持 |
+| `pkg/ast/ast.go` | 新增 `AsyncListComprehension`/`AsyncSetComprehension`/`AsyncDictComprehension`/`AsyncGeneratorExpression` 节点 |
+| `pkg/parser/parser.go` | 解析器支持 `async for` 推导式语法 |
+| `pkg/desugar/desugar.go` | 脱糖层支持异步推导式节点 |
+| `pkg/gc/gc.go` | 分代 GC 实现：Young/Old 双代、Minor/Major 收集、晋升机制、写屏障、记忆集 |
+
 ## [0.14.0] - 2026-06-04
 
 ### 新增特性

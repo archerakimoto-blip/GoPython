@@ -926,6 +926,45 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 			ge.Filter = desugarExpression(e.Filter)
 		}
 		return ge
+	case *ast.AsyncListComprehension:
+		return desugarAsyncListComprehension(e)
+	case *ast.AsyncSetComprehension:
+		asc := &ast.AsyncSetComprehension{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			asc.Filter = desugarExpression(e.Filter)
+		}
+		return asc
+	case *ast.AsyncDictComprehension:
+		adc := &ast.AsyncDictComprehension{
+			Token:    e.Token,
+			Key:      desugarExpression(e.Key),
+			Value:    desugarExpression(e.Value),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			adc.Filter = desugarExpression(e.Filter)
+		}
+		return adc
+	case *ast.AsyncGeneratorExpression:
+		age := &ast.AsyncGeneratorExpression{
+			Token:    e.Token,
+			Element:  desugarExpression(e.Element),
+			Variable: e.Variable,
+			Iterable: desugarExpression(e.Iterable),
+			Filter:   e.Filter,
+		}
+		if e.Filter != nil {
+			age.Filter = desugarExpression(e.Filter)
+		}
+		return age
 	case *ast.FStringLiteral:
 		// Keep f-string as-is, the compiler will handle it
 		desugaredParts := make([]ast.Expression, 0, len(e.Parts))
@@ -954,6 +993,16 @@ func desugarListComprehension(lc *ast.ListComprehension) ast.Expression {
 		lc.Filter = desugarExpression(lc.Filter)
 	}
 	return lc
+}
+
+func desugarAsyncListComprehension(alc *ast.AsyncListComprehension) ast.Expression {
+	// 脱糖子表达式，保持AsyncListComprehension节点不变，让编译器处理
+	alc.Element = desugarExpression(alc.Element)
+	alc.Iterable = desugarExpression(alc.Iterable)
+	if alc.Filter != nil {
+		alc.Filter = desugarExpression(alc.Filter)
+	}
+	return alc
 }
 
 var forLoopCounter int

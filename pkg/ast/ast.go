@@ -592,6 +592,113 @@ func (ge *GeneratorExpression) String() string {
 	return out.String()
 }
 
+type AsyncListComprehension struct {
+	Token    string
+	Element  Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (alc *AsyncListComprehension) expressionNode()      {}
+func (alc *AsyncListComprehension) TokenLiteral() string { return alc.Token }
+func (alc *AsyncListComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("[")
+	out.WriteString(alc.Element.String())
+	out.WriteString(" async for ")
+	out.WriteString(alc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(alc.Iterable.String())
+	if alc.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(alc.Filter.String())
+	}
+	out.WriteString("]")
+	return out.String()
+}
+
+type AsyncSetComprehension struct {
+	Token    string
+	Element  Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (asc *AsyncSetComprehension) expressionNode()      {}
+func (asc *AsyncSetComprehension) TokenLiteral() string { return asc.Token }
+func (asc *AsyncSetComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("{")
+	out.WriteString(asc.Element.String())
+	out.WriteString(" async for ")
+	out.WriteString(asc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(asc.Iterable.String())
+	if asc.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(asc.Filter.String())
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
+type AsyncDictComprehension struct {
+	Token    string
+	Key      Expression
+	Value    Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (adc *AsyncDictComprehension) expressionNode()      {}
+func (adc *AsyncDictComprehension) TokenLiteral() string { return adc.Token }
+func (adc *AsyncDictComprehension) String() string {
+	var out bytes.Buffer
+	out.WriteString("{")
+	out.WriteString(adc.Key.String())
+	out.WriteString(": ")
+	out.WriteString(adc.Value.String())
+	out.WriteString(" async for ")
+	out.WriteString(adc.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(adc.Iterable.String())
+	if adc.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(adc.Filter.String())
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
+type AsyncGeneratorExpression struct {
+	Token    string
+	Element  Expression
+	Variable *Identifier
+	Iterable Expression
+	Filter   Expression
+}
+
+func (age *AsyncGeneratorExpression) expressionNode()      {}
+func (age *AsyncGeneratorExpression) TokenLiteral() string { return age.Token }
+func (age *AsyncGeneratorExpression) String() string {
+	var out bytes.Buffer
+	out.WriteString("(")
+	out.WriteString(age.Element.String())
+	out.WriteString(" async for ")
+	out.WriteString(age.Variable.String())
+	out.WriteString(" in ")
+	out.WriteString(age.Iterable.String())
+	if age.Filter != nil {
+		out.WriteString(" if ")
+		out.WriteString(age.Filter.String())
+	}
+	out.WriteString(")")
+	return out.String()
+}
+
 type YieldStatement struct {
 	Token    string
 	Expression Expression

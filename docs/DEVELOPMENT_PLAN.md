@@ -1,6 +1,6 @@
 # GoPy 开发计划
 
-**当前版本**: 0.11.x
+**当前版本**: 0.15.x
 **目标版本**: 1.0.0
 **最后更新**: 2026-06
 
@@ -97,7 +97,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ⚠️ Metaclasses - **未实现** → ✅ Metaclasses - v0.13 实现
 ⚠️ Exception groups - **未实现** → ✅ Exception groups - v0.13 实现
 
-### 3. 并发特性 (完成度: 60%)
+### 3. 并发特性 (完成度: 70%)
 
 ✅ Goroutine 协程
 ✅ Channel 通道
@@ -108,9 +108,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 同步原语 (Mutex, WaitGroup, Once)
 ✅ concurrency 模块
 ⚠️ asyncio 模块 - **部分实现**
-⚠️ async comprehensions - **未实现**
+⚠️ async comprehensions - **未实现** → ✅ async comprehensions - v0.15 实现
 
-### 4. 运行时优化 (完成度: 75%)
+### 4. 运行时优化 (完成度: 85%)
 
 ✅ 内联缓存 (attrCache)
 ✅ 全局变量缓存 (globalCache/globalVersions)
@@ -122,16 +122,16 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 字符串驻留
 ✅ BoundMethod 对象
 ✅ Range/Zip 惰性迭代器
-⚠️ 寄存器 VM - **未实现**
-⚠️ 分代 GC - **未实现**
+⚠️ 寄存器 VM - **未实现** → ✅ 寄存器 VM - v0.15 实现
+⚠️ 分代 GC - **未实现** → ✅ 分代 GC - v0.15 实现
 ⚠️ 直接线程 - **未实现**
 
-### 5. 标准库 (完成度: 70%)
+### 5. 标准库 (完成度: 80%)
 
 ✅ math, sys, os, json, gc
 ✅ random, string, time, datetime
 ✅ concurrency
-⚠️ re (正则表达式) - **未实现**
+⚠️ re (正则表达式) - **未实现** → ✅ re (正则表达式) - v0.15 实现
 ⚠️ io (IO 操作) - **部分实现**
 
 ### 未实现的 Python 特性
@@ -141,8 +141,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 1. **Metaclasses** - 元类 → ✅ v0.13 实现
 2. **Exception groups** - 异常组支持 → ✅ v0.13 实现
 3. **Positional-only arguments (/)** - 仅位置参数 → ✅ v0.13 实现
-4. **正则表达式 (re 模块)** - 完整支持
-5. **Async comprehensions** - 异步推导式
+4. **正则表达式 (re 模块)** - 完整支持 → ✅ v0.15 实现
+5. **Async comprehensions** - 异步推导式 → ✅ v0.15 实现
 
 #### 🟡 部分实现 (5 项)
 
@@ -514,12 +514,26 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 | `pkg/vm/vm.go` | `OpEllipsis` 处理；复数算术运算（`executeBinaryComplexOperation`）；复数比较/取反/真值；Dict 视图对象属性访问和索引 |
 | `pkg/objects/object.go` | `Ellipsis` 单例对象；`Complex` 结构体；`DictKeys`/`DictValues`/`DictItems` 视图对象；`Equal` 支持 Ellipsis/Complex |
 
-### v0.15 — 标准库与运行时 (计划中)
+### v0.15 — 标准库与运行时 ✅
 
-- [ ] re 正则表达式模块
-- [ ] Async comprehensions
-- [ ] 分代 GC
-- [ ] 寄存器 VM
+- [x] re 正则表达式模块
+- [x] Async comprehensions
+- [x] 分代 GC
+- [x] 寄存器 VM
+
+**v0.15 变更详情：**
+
+| 模块 | 变更 |
+|------|------|
+| `pkg/re/module.go` | 新增 `re` 模块，实现 `compile`/`search`/`match`/`fullmatch`/`findall`/`finditer`/`sub`/`subn`/`split`/`escape` 10 个函数和 `IGNORECASE`/`MULTILINE`/`DOTALL`/`ASCII`/`UNICODE` 5 个常量 |
+| `pkg/objects/object.go` | 新增 `REGEX_PATTERN_OBJ`/`REGEX_MATCH_OBJ` 类型；`RegexPattern` 结构体（`Regexp`/`Pattern`/`Flags`）+ `GetAttr()` 支持 `pattern`/`flags`/`search`/`match`/`fullmatch`/`findall`/`finditer`/`sub`/`subn`/`split`；`RegexMatch` 结构体（`Groups_`/`GroupIndices`/`GroupEnds`/`OrigString`/`Pattern_`）+ `GetAttr()` 支持 `group`/`start`/`end`/`span`/`groups`/`string`/`re`/`lastindex` |
+| `pkg/vm/vm.go` | `OpGetAttribute` 支持 `RegexPattern`/`RegexMatch` 属性访问；新增 `useRegisterVM`/`regVM` 字段；新增 `NewRegisterVM()` 构造器 |
+| `pkg/vm/register_vm.go` | 寄存器 VM 实现：`RegisterVM` 结构体 + 40+ 寄存器操作码 + 栈式字节码翻译器 + 寄存器执行器 + 翻译缓存 |
+| `pkg/compiler/compiler.go` | 注册 `re` 模块；新增 `compileAsyncListComprehension`/`compileAsyncSetComprehension`/`compileAsyncDictComprehension`/`compileAsyncGeneratorExpression` |
+| `pkg/ast/ast.go` | 新增 `AsyncListComprehension`/`AsyncSetComprehension`/`AsyncDictComprehension`/`AsyncGeneratorExpression` AST 节点 |
+| `pkg/parser/parser.go` | 解析器支持 `[x async for x in iter]`/`{x async for x in iter}`/`{k:v async for x in iter}`/`(x async for x in iter)` 语法 |
+| `pkg/desugar/desugar.go` | 脱糖层支持异步推导式节点，脱糖子表达式并保留 async 语义 |
+| `pkg/gc/gc.go` | 分代 GC：`YoungGen`/`OldGen` 双代；`MinorCollect()`/`MajorCollect()` 双收集器；`promotionAge=3` 晋升机制；`WriteBarrier()` + `rememberedSet` 写屏障；`youngThreshold=256KB`/`oldThreshold=4MB` 阈值；`minorAfterMajor=10` 自动触发 Major GC |
 
 ### v1.0.0 — Production Ready
 
