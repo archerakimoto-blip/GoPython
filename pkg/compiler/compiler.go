@@ -448,6 +448,53 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, setaddBuiltin)
 	c.symbolTable.DefineBuiltin("setadd", setaddIndex)
 
+	setBuiltin := &objects.Builtin{
+		Fn: func(args ...objects.Object) objects.Object {
+			set := objects.NewSet()
+			if len(args) == 0 {
+				return set
+			}
+			if len(args) == 1 {
+				iter := args[0]
+				switch it := iter.(type) {
+				case *objects.List:
+					for _, elem := range it.Elements {
+						if err := objects.CheckHashable(elem); err != nil {
+							return err.(*objects.Error)
+						}
+						set.Add(elem)
+					}
+				case *objects.Tuple:
+					for _, elem := range it.Elements {
+						if err := objects.CheckHashable(elem); err != nil {
+							return err.(*objects.Error)
+						}
+						set.Add(elem)
+					}
+				case *objects.Set:
+					for _, elem := range it.Elements {
+						set.Add(elem)
+					}
+				case *objects.Dict:
+					for _, elem := range it.KeyOrder {
+						set.Add(it.Keys[elem])
+					}
+				case *objects.String:
+					for _, ch := range it.Value {
+						set.Add(&objects.String{Value: string(ch)})
+					}
+				default:
+					return objects.NewTypeError("argument to set() must be iterable")
+				}
+				return set
+			}
+			return objects.NewTypeError("set() takes at most 1 argument")
+		},
+	}
+	setIndex := len(c.constants)
+	c.constants = append(c.constants, setBuiltin)
+	c.symbolTable.DefineBuiltin("set", setIndex)
+
 	printBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			for i, arg := range args {
@@ -546,6 +593,9 @@ func (c *Compiler) registerBuiltins() {
 
 	intBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				return &objects.Integer{Value: 0}
+			}
 			if len(args) != 1 {
 				return objects.NewTypeError("int() takes exactly 1 argument")
 			}

@@ -956,6 +956,56 @@ func (s *Set) Size() int {
 	return len(s.Elements)
 }
 
+// Union returns a new set with elements from both s and other
+func (s *Set) Union(other *Set) *Set {
+	result := NewSet()
+	for _, elem := range s.Elements {
+		result.Add(elem)
+	}
+	for _, elem := range other.Elements {
+		result.Add(elem)
+	}
+	return result
+}
+
+// Intersection returns a new set with elements common to s and other
+func (s *Set) Intersection(other *Set) *Set {
+	result := NewSet()
+	for _, elem := range s.Elements {
+		if other.Contains(elem) {
+			result.Add(elem)
+		}
+	}
+	return result
+}
+
+// Difference returns a new set with elements in s but not in other
+func (s *Set) Difference(other *Set) *Set {
+	result := NewSet()
+	for _, elem := range s.Elements {
+		if !other.Contains(elem) {
+			result.Add(elem)
+		}
+	}
+	return result
+}
+
+// SymmetricDifference returns a new set with elements in either s or other but not both
+func (s *Set) SymmetricDifference(other *Set) *Set {
+	result := NewSet()
+	for _, elem := range s.Elements {
+		if !other.Contains(elem) {
+			result.Add(elem)
+		}
+	}
+	for _, elem := range other.Elements {
+		if !s.Contains(elem) {
+			result.Add(elem)
+		}
+	}
+	return result
+}
+
 func (s *Set) ToSlice() []Object {
 	slice := make([]Object, 0, len(s.Elements))
 	for _, v := range s.Elements {

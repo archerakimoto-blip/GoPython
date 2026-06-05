@@ -1494,13 +1494,28 @@ func (p *Parser) parseSetLiteral(element ast.Expression) ast.Expression {
 	set := &ast.SetLiteral{Token: p.curToken.Literal}
 	elements := []ast.Expression{firstExpr}
 
-	for p.peekTokenIs(lexer.COMMA) {
-		p.nextToken()
-		p.nextToken()
+	// Parse remaining elements separated by commas
+	// The key is to handle the case where parseExpression advances past the comma
+	for {
+		// Skip comma if current token is comma
+		if p.curTokenIs(lexer.COMMA) {
+			p.nextToken() // skip comma
+		}
+
+		// Parse the next expression
 		exp := p.parseExpression(LOWEST)
 		if exp != nil {
 			elements = append(elements, exp)
 		}
+
+		// After parsing, advance past the last token of this expression
+		// This is needed because parseExpression may not have consumed all tokens
+		// Check if we have a comma ahead - if so, we need to continue
+		if !p.peekTokenIs(lexer.COMMA) {
+			break
+		}
+		// We have more elements - advance one more token to position for next iteration
+		p.nextToken()
 	}
 
 	if !p.curTokenIs(lexer.RBRACE) {
@@ -1540,6 +1555,13 @@ func (p *Parser) parseBraceLiteral() ast.Expression {
 	}
 
 	if p.curTokenIs(lexer.FOR) || p.peekTokenIs(lexer.FOR) || p.curTokenIs(lexer.ASYNC) || p.peekTokenIs(lexer.ASYNC) {
+		return p.parseSetLiteral(firstExpr)
+	}
+
+	// Check for set literal (comma-separated, not key:value)
+	// Need to advance to the next token first to see if it's a comma
+	if p.peekTokenIs(lexer.COMMA) {
+		p.nextToken() // advance past first element
 		return p.parseSetLiteral(firstExpr)
 	}
 

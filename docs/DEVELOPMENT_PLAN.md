@@ -627,23 +627,23 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 
 #### 🔴 严重问题 (4 项)
 
-1. **集合字面量解析失败** — `parseBraceLiteral` 函数将 `{1, 2, 3}` 当作字典解析，导致 "no prefix parse function for , found" 错误
-   - 根因：第1546行直接返回 `parseDictLiteral()`，未检查逗号分隔的集合字面量
+1. **集合字面量解析失败** ✅ 已修复 — `parseBraceLiteral` 函数将 `{1, 2, 3}` 当作字典解析
    - 修复：在 `parseBraceLiteral` 中添加逗号检查，调用 `parseSetLiteral(firstExpr)`
+   - 修改了 `parseSetLiteral` 的循环逻辑，正确处理逗号分隔的元素
 
-2. **`set()` 内置函数缺失** — GoPy 没有实现 `set()` 内置函数，无法通过 `set()` 创建集合对象
+2. **`set()` 内置函数缺失** ✅ 已修复 — GoPy 没有实现 `set()` 内置函数
    - 修复：在 `compiler.go` 的 `registerBuiltins()` 中添加 `setBuiltin`
 
-3. **`int()` 内置函数不支持无参数调用** — `intBuiltin` 要求恰好1个参数，导致 `collections.defaultdict(int)` 失败
+3. **`int()` 内置函数不支持无参数调用** ✅ 已修复 — `intBuiltin` 要求恰好1个参数
    - 修复：修改 `intBuiltin` 支持0个参数调用，返回默认值 0
 
-4. **集合运算符 `|` `&` `-` `^` 作为运算符不可用** — 方法调用可用 `set1.union(set2)`，但 `set1 | set2` 报错
-   - 根因：lexer/parser 将 `|` 识别为按位 OR，未实现集合运算符脱糖
-   - 修复：需要添加集合运算符的脱糖支持
+4. **集合运算符 `|` `&` `-` `^` 作为运算符不可用** ⚠️ 未完成 — 方法调用可用，但运算符语法不可用
+   - 根因：lexer 未定义 `|` `&` `^` token，parser/VM 未实现集合运算符脱糖
+   - 需要：在 lexer 中添加 `|` `&` `^` token，在 VM 的 `executeBinaryOperation` 中添加集合运算符处理
 
 #### 🟡 中等问题 (2 项)
 
-5. **集合推导式 `{x for x in iter}` 解析可能受影响** — `parseSetLiteral` 中的推导式解析逻辑可能与 `parseBraceLiteral` 的调用逻辑有冲突
+5. **集合推导式 `{x for x in iter}` 解析可能受影响** — 需要测试验证
 6. **defaultdict 的 `__getitem__` 调用 factory 时未传递参数** — `defaultdict.__getitem__` 调用 `objects.CallFunction(dd.Factory)` 时未传递参数
 
 ### v1.0.0 — Production Ready
