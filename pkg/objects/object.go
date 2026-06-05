@@ -1310,16 +1310,27 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 				if len(args) < 2 {
 					return NewTypeError("sub() takes at least 2 arguments")
 				}
-				repl, ok1 := args[0].(*String)
 				s, ok2 := args[1].(*String)
-				if !ok1 || !ok2 {
-					return NewTypeError("sub() arguments must be strings")
+				if !ok2 {
+					return NewTypeError("sub() second argument must be a string")
 				}
 				var count int
 				if len(args) >= 3 {
 					if c, ok := args[2].(*Integer); ok {
 						count = int(c.Value)
 					}
+				}
+
+				repl := args[0]
+
+				// If repl is callable, use callable replacement
+				if IsCallable(repl) {
+					return PatternCallableSub(p, repl, s.Value, count)
+				}
+
+				replStr, ok1 := repl.(*String)
+				if !ok1 {
+					return NewTypeError("sub() first argument must be a string or callable")
 				}
 				var result string
 				if count > 0 {
@@ -1331,14 +1342,14 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 						prev := 0
 						for _, loc := range locs {
 							buf.WriteString(s.Value[prev:loc[0]])
-							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], replStr.Value))
 							prev = loc[1]
 						}
 						buf.WriteString(s.Value[prev:])
 						result = buf.String()
 					}
 				} else {
-					result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+					result = p.Regexp.ReplaceAllString(s.Value, replStr.Value)
 				}
 				return &String{Value: result}
 			},
@@ -1350,16 +1361,37 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 				if len(args) < 2 {
 					return NewTypeError("subn() takes at least 2 arguments")
 				}
-				repl, ok1 := args[0].(*String)
 				s, ok2 := args[1].(*String)
-				if !ok1 || !ok2 {
-					return NewTypeError("subn() arguments must be strings")
+				if !ok2 {
+					return NewTypeError("subn() second argument must be a string")
 				}
 				var count int
 				if len(args) >= 3 {
 					if c, ok := args[2].(*Integer); ok {
 						count = int(c.Value)
 					}
+				}
+
+				repl := args[0]
+
+				// If repl is callable, use callable replacement
+				if IsCallable(repl) {
+					result := PatternCallableSub(p, repl, s.Value, count)
+					if result.Type() == ERROR_OBJ {
+						return result
+					}
+					resultStr := result.(*String).Value
+					locs := p.Regexp.FindAllStringIndex(s.Value, count)
+					n := 0
+					if locs != nil {
+						n = len(locs)
+					}
+					return &Tuple{Elements: []Object{&String{Value: resultStr}, &Integer{Value: int64(n)}}}
+				}
+
+				replStr, ok1 := repl.(*String)
+				if !ok1 {
+					return NewTypeError("subn() first argument must be a string or callable")
 				}
 				var result string
 				var n int
@@ -1373,7 +1405,7 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 						prev := 0
 						for _, loc := range locs {
 							buf.WriteString(s.Value[prev:loc[0]])
-							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], replStr.Value))
 							prev = loc[1]
 						}
 						buf.WriteString(s.Value[prev:])
@@ -1381,7 +1413,7 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 						n = len(locs)
 					}
 				} else {
-					result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+					result = p.Regexp.ReplaceAllString(s.Value, replStr.Value)
 					locs := p.Regexp.FindAllStringIndex(s.Value, -1)
 					if locs != nil {
 						n = len(locs)
@@ -1634,6 +1666,51 @@ func PatternSplit(p *RegexPattern, s string) Object {
 	return &List{Elements: result}
 }
 
+// PatternCallableSub performs regex substitution where repl is a callable.
+// For each match, the callable is invoked with a RegexMatch object and
+// its return value is used as the replacement string.
+func PatternCallableSub(p *RegexPattern, repl Object, s string, count int) Object {
+	var locs [][]int
+	if count > 0 {
+		locs = p.Regexp.FindAllStringSubmatchIndex(s, count)
+	} else {
+		locs = p.Regexp.FindAllStringSubmatchIndex(s, -1)
+	}
+
+	if locs == nil {
+		return &String{Value: s}
+	}
+
+	var buf strings.Builder
+	prev := 0
+	for _, loc := range locs {
+		buf.WriteString(s[prev:loc[0]])
+
+		// Create a RegexMatch object for this match
+		match := newMatchFromLoc(p, s, loc)
+
+		// Call the callable with the match object
+		result := CallFunction(repl, match)
+		if result.Type() == ERROR_OBJ {
+			return result
+		}
+
+		// Convert the result to a string
+		var replacement string
+		if strObj, ok := result.(*String); ok {
+			replacement = strObj.Value
+		} else {
+			replacement = result.Inspect()
+		}
+
+		buf.WriteString(replacement)
+		prev = loc[1]
+	}
+	buf.WriteString(s[prev:])
+
+	return &String{Value: buf.String()}
+}
+
 func newMatchFromLoc(p *RegexPattern, s string, loc []int) *RegexMatch {
 	groups := make([]string, len(loc)/2)
 	groupIndices := make([]int, len(loc)/2)
@@ -1657,6 +1734,49 @@ func newMatchFromLoc(p *RegexPattern, s string, loc []int) *RegexMatch {
 }
 
 var modules = make(map[string]*Module)
+
+// callFunctionFn is a callback that allows calling Python callable objects from Go code.
+// The VM registers this at startup. This is needed for features like re.sub(pattern, callable, string).
+var callFunctionFn func(callee Object, args ...Object) Object
+
+// SetCallFunctionCallback registers the callback for calling Python callable objects.
+func SetCallFunctionCallback(fn func(callee Object, args ...Object) Object) {
+	callFunctionFn = fn
+}
+
+// CallFunction calls a Python callable object with the given arguments.
+// Returns the result or an Error if the callable cannot be invoked.
+func CallFunction(callee Object, args ...Object) Object {
+	if callFunctionFn == nil {
+		return NewTypeError("cannot call Python function in this context")
+	}
+	return callFunctionFn(callee, args...)
+}
+
+// IsCallable checks if an object can be called as a Python function.
+func IsCallable(obj Object) bool {
+	switch obj.(type) {
+	case *Builtin:
+		return true
+	case *Closure:
+		return true
+	case *Class:
+		return true
+	case *Instance:
+		// Check if instance has __call__
+		if inst, ok := obj.(*Instance); ok {
+			if _, hasCall := inst.Class.Methods["__call__"]; hasCall {
+				return true
+			}
+			if _, hasCall := inst.Fields["__call__"]; hasCall {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
 
 func RegisterModule(name string, module *Module) {
 	modules[name] = module

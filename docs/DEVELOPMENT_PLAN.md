@@ -593,13 +593,13 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] **re.subn 替换计数不准确** → v0.15.1 修复
 - [x] **re.findall 不处理可选组** → v0.15.1 修复
 - [x] **re.split 不保留分隔符** → v0.15.1 修复
-- [ ] **re 模块不支持 callable 替换**：Python 中 `re.sub(pattern, lambda m: m.group(1).upper(), string)` 支持 callable 作为 repl
+- [x] **re 模块不支持 callable 替换** → v0.15.1 修复：CallFunction 回调 + PatternCallableSub
 - [x] **Dict/Set 允许不可哈希类型作为键** → v0.15.1 修复：CheckHashable
 - [x] **StopIteration 不是异常类型** → v0.15.1 修复
 - [x] **整数负数幂运算错误** → v0.15.1 修复：返回 Float
 - [x] **分代 GC markObject 线性扫描 O(n)** → v0.15.1 修复：objectMap O(1)
 - [x] **分代 GC MinorCollect → MajorCollect 并发安全风险** → v0.15.1 修复：majorCollectLocked
-- [ ] **寄存器 VM 寄存器泄漏**：`regAlloc` 只增不减（已知限制，不影响正确性）
+- [x] **寄存器 VM 寄存器泄漏** → v0.15.1 修复：registerAllocator 空闲列表回收
 
 #### 🟢 缺失功能
 

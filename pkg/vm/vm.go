@@ -101,7 +101,7 @@ func New(bytecode *compiler.Bytecode) *VM {
 	frames := make([]*Frame, MaxFrames)
 	frames[0] = mainFrame
 
-	return &VM{
+	vm := &VM{
 		constants:    bytecode.Constants,
 		instructions: bytecode.Instructions,
 
@@ -119,6 +119,13 @@ func New(bytecode *compiler.Bytecode) *VM {
 		globalCache:    make([]GlobalCacheEntry, GlobalSize),
 		globalVersions: make([]uint64, GlobalSize),
 	}
+
+	// Register callback for calling Python functions from Go code (e.g., re.sub with callable repl)
+	objects.SetCallFunctionCallback(func(callee objects.Object, args ...objects.Object) objects.Object {
+		return vm.CallCallable(callee, args...)
+	})
+
+	return vm
 }
 
 func NewWithGlobalsStore(bytecode *compiler.Bytecode, s []objects.Object) *VM {
@@ -2925,6 +2932,69 @@ func (vm *VM) pop() objects.Object {
 
 func (vm *VM) LastPoppedStackElem() objects.Object {
 	return vm.lastPopped
+}
+
+// CallCallable calls a Python callable object and returns the result.
+// This is used by Go code that needs to invoke Python functions (e.g., re.sub with callable repl).
+// It supports Builtin, Closure, and CompiledFunction callees.
+func (vm *VM) CallCallable(callee objects.Object, args ...objects.Object) objects.Object {
+	// For builtins, just call directly
+	if builtin, ok := callee.(*objects.Builtin); ok {
+		return builtin.Fn(args...)
+	}
+
+	// For closures and compiled functions, set up a call frame and run the VM
+	// until that frame returns.
+	oldFramesIndex := vm.framesIndex
+
+	// Push callee and args onto the stack
+	vm.push(callee)
+	for _, arg := range args {
+		vm.push(arg)
+	}
+
+	// Execute the call setup
+	err := vm.executeCall(len(args))
+	if err != nil {
+		return objects.NewError("callable invocation failed: %s", err.Error())
+	}
+
+	// If the call was to a builtin (which executeCall handles immediately),
+	// the result is already on the stack.
+	if vm.framesIndex == oldFramesIndex {
+		result := vm.pop()
+		return result
+	}
+
+	// For compiled functions/closures, a new frame was pushed.
+	// Run the VM until we return to the original frame depth.
+	for vm.framesIndex > oldFramesIndex {
+		frame := vm.currentFrame()
+		if frame.ip >= len(frame.fn.Instructions)-1 {
+			// Frame is done without explicit return
+			vm.popFrame()
+			vm.sp = frame.basePointer - 1
+			vm.push(objects.None_)
+			break
+		}
+		runErr := vm.Run()
+		if runErr != nil {
+			// Clean up any extra frames
+			for vm.framesIndex > oldFramesIndex {
+				vm.popFrame()
+			}
+			return objects.NewError("callable execution failed: %s", runErr.Error())
+		}
+		break
+	}
+
+	// The result should be on the stack
+	if vm.sp > 0 {
+		result := vm.pop()
+		return result
+	}
+
+	return objects.None_
 }
 
 func (vm *VM) EnableGC(enable bool) {

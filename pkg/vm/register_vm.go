@@ -133,16 +133,34 @@ func bytecodeHash(instructions []byte) uint32 {
 	return h
 }
 
+// registerAllocator tracks register allocation with a free list for reuse.
+type registerAllocator struct {
+	nextReg  int   // next register number if free list is empty
+	freeList []int // reusable register numbers
+}
+
+func (ra *registerAllocator) alloc() int {
+	if len(ra.freeList) > 0 {
+		reg := ra.freeList[len(ra.freeList)-1]
+		ra.freeList = ra.freeList[:len(ra.freeList)-1]
+		return reg
+	}
+	reg := ra.nextReg
+	ra.nextReg++
+	return reg
+}
+
+func (ra *registerAllocator) free(reg int) {
+	ra.freeList = append(ra.freeList, reg)
+}
+
 // translate converts stack-based bytecode to register-based bytecode.
 // It maintains a virtual stack that maps stack positions to registers.
-//
-// Known limitation: regAlloc grows monotonically and registers are never reused.
-// This does not affect correctness, only memory usage. A proper register allocator
-// would track liveness and reuse registers, but for now the simple approach works.
+// Registers are reused via a free list when they are no longer needed.
 func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object) []RegInstruction {
 	var regInstructions []RegInstruction
-	regAlloc := 0                    // next free register
-	stackToReg := make([]int, 1024)  // maps stack position to register
+	ra := registerAllocator{}               // register allocator with free list
+	stackToReg := make([]int, 1024)         // maps stack position to register
 	sp := 0
 
 	// Map from stack bytecode IP to register instruction index.
@@ -161,8 +179,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		switch op {
 		case compiler.OpConstant:
 			idx := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpLoadConst, []int{reg, idx}})
@@ -170,14 +187,14 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpPop:
 			sp--
+			ra.free(stackToReg[sp])
 			// RegOpPop is a no-op in register VM; we just decrement the virtual stack
 			regInstructions = append(regInstructions, RegInstruction{RegOpPop, []int{}})
 			ip += 1
 
 		case compiler.OpDupTop:
 			src := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
 			stackToReg[sp] = dst
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpDupTop, []int{dst, src}})
@@ -186,8 +203,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpAdd:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpAdd, []int{dst, src1, src2}})
@@ -196,8 +214,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpSub:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpSub, []int{dst, src1, src2}})
@@ -206,8 +225,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpMul:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpMul, []int{dst, src1, src2}})
@@ -216,8 +236,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpDiv:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpDiv, []int{dst, src1, src2}})
@@ -226,8 +247,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpMod:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpMod, []int{dst, src1, src2}})
@@ -236,8 +258,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpFloorDiv:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpFloorDiv, []int{dst, src1, src2}})
@@ -246,40 +269,37 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpPower:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpPower, []int{dst, src1, src2}})
 			ip += 1
 
 		case compiler.OpTrue:
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpTrue, []int{reg}})
 			ip += 1
 
 		case compiler.OpFalse:
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpFalse, []int{reg}})
 			ip += 1
 
 		case compiler.OpNull:
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpNull, []int{reg}})
 			ip += 1
 
 		case compiler.OpEllipsis:
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpEllipsis, []int{reg}})
@@ -288,8 +308,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpEqual:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpCompare, []int{dst, src1, src2, int(compiler.OpEqual)}})
@@ -298,8 +319,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpNotEqual:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpCompare, []int{dst, src1, src2, int(compiler.OpNotEqual)}})
@@ -308,8 +330,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpGreaterThan:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpCompare, []int{dst, src1, src2, int(compiler.OpGreaterThan)}})
@@ -318,8 +341,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpLessThan:
 			src1 := stackToReg[sp-2]
 			src2 := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src1)
+			ra.free(src2)
 			stackToReg[sp-2] = dst
 			sp--
 			regInstructions = append(regInstructions, RegInstruction{RegOpCompare, []int{dst, src1, src2, int(compiler.OpLessThan)}})
@@ -334,21 +358,22 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			pos := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
 			condReg := stackToReg[sp-1]
 			sp--
+			ra.free(condReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpJumpIfFalse, []int{condReg, pos}})
 			ip += 3
 
 		case compiler.OpMinus:
 			src := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpNegate, []int{dst, src}})
 			ip += 1
 
 		case compiler.OpBang:
 			src := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(src)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpNot, []int{dst, src}})
 			ip += 1
@@ -357,13 +382,13 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			globalIndex := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
 			valReg := stackToReg[sp-1]
 			sp--
+			ra.free(valReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpSetGlobal, []int{globalIndex, valReg}})
 			ip += 3
 
 		case compiler.OpGetGlobal:
 			globalIndex := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpGetGlobal, []int{reg, globalIndex}})
@@ -373,13 +398,13 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			localIndex := int(instructions[ip+1])
 			valReg := stackToReg[sp-1]
 			sp--
+			ra.free(valReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpSetLocal, []int{localIndex, valReg}})
 			ip += 2
 
 		case compiler.OpGetLocal:
 			localIndex := int(instructions[ip+1])
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpGetLocal, []int{reg, localIndex}})
@@ -387,8 +412,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpGetFree:
 			freeIndex := int(instructions[ip+1])
-			reg := regAlloc
-			regAlloc++
+			reg := ra.alloc()
 			stackToReg[sp] = reg
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpGetFree, []int{reg, freeIndex}})
@@ -402,9 +426,12 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			for i := 0; i < numArgs; i++ {
 				argRegs[i] = stackToReg[sp-numArgs+i]
 			}
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
 			// After call, the func and args are consumed, result is pushed
+			ra.free(funcReg)
+			for i := 0; i < numArgs; i++ {
+				ra.free(argRegs[i])
+			}
 			sp = sp - numArgs - 1
 			stackToReg[sp] = dst
 			sp++
@@ -415,6 +442,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpReturnValue:
 			valReg := stackToReg[sp-1]
+			ra.free(valReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpReturn, []int{valReg}})
 			ip += 1
 
@@ -430,8 +458,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				freeRegs[i] = stackToReg[sp-numFree+i]
 			}
 			sp -= numFree
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < numFree; i++ {
+				ra.free(freeRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, constIndex, numFree}
@@ -446,8 +476,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				elementRegs[i] = stackToReg[sp-numElements+i]
 			}
 			sp -= numElements
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < numElements; i++ {
+				ra.free(elementRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, numElements}
@@ -462,8 +494,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				elementRegs[i] = stackToReg[sp-numElements+i]
 			}
 			sp -= numElements
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < numElements; i++ {
+				ra.free(elementRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, numElements}
@@ -478,8 +512,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				elementRegs[i] = stackToReg[sp-numElements+i]
 			}
 			sp -= numElements
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < numElements; i++ {
+				ra.free(elementRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, numElements}
@@ -490,8 +526,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpIndex:
 			indexReg := stackToReg[sp-1]
 			leftReg := stackToReg[sp-2]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(leftReg)
+			ra.free(indexReg)
 			sp -= 2
 			stackToReg[sp] = dst
 			sp++
@@ -503,8 +540,11 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			endReg := stackToReg[sp-2]
 			startReg := stackToReg[sp-3]
 			leftReg := stackToReg[sp-4]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(leftReg)
+			ra.free(startReg)
+			ra.free(endReg)
+			ra.free(stepReg)
 			sp -= 4
 			stackToReg[sp] = dst
 			sp++
@@ -513,6 +553,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpListUnpack:
 			listReg := stackToReg[sp-1]
+			ra.free(listReg)
 			// We don't know how many elements will be unpacked at translation time,
 			// so we emit a special instruction
 			regInstructions = append(regInstructions, RegInstruction{RegOpListUnpack, []int{listReg}})
@@ -525,8 +566,8 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpGetAttribute:
 			idx := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
 			objReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(objReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpGetAttr, []int{dst, objReg, idx}})
 			ip += 3
@@ -536,6 +577,8 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			valReg := stackToReg[sp-1]
 			objReg := stackToReg[sp-2]
 			sp -= 2
+			ra.free(valReg)
+			ra.free(objReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpSetAttr, []int{objReg, valReg, idx}})
 			ip += 3
 
@@ -543,6 +586,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			idx := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
 			objReg := stackToReg[sp-1]
 			sp--
+			ra.free(objReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpDelAttribute, []int{objReg, idx}})
 			ip += 3
 
@@ -551,6 +595,8 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			valReg := stackToReg[sp-1]
 			classReg := stackToReg[sp-2]
 			sp -= 2
+			ra.free(valReg)
+			ra.free(classReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpSetClassField, []int{classReg, valReg, idx}})
 			ip += 3
 
@@ -558,8 +604,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			metaclassReg := stackToReg[sp-1]
 			classReg := stackToReg[sp-2]
 			sp -= 2
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(metaclassReg)
+			ra.free(classReg)
 			stackToReg[sp] = dst
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpSetMetaclass, []int{dst, classReg, metaclassReg}})
@@ -567,16 +614,15 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpCallMetaclassInit:
 			classReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(classReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpCallMetaclassInit, []int{dst, classReg}})
 			ip += 1
 
 		case compiler.OpCreateClass:
 			idx := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
 			stackToReg[sp] = dst
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpCreateClass, []int{dst, idx}})
@@ -585,8 +631,8 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpCreateClassWithSuper:
 			idx := int(uint16(instructions[ip+1])<<8 | uint16(instructions[ip+2]))
 			superReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(superReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpCreateClassWithSuper, []int{dst, idx, superReg}})
 			ip += 3
@@ -599,8 +645,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				parentRegs[i] = stackToReg[sp-numParents+i]
 			}
 			sp -= numParents
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < numParents; i++ {
+				ra.free(parentRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, idx, numParents}
@@ -615,8 +663,10 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 				partRegs[i] = stackToReg[sp-partsCount+i]
 			}
 			sp -= partsCount
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			for i := 0; i < partsCount; i++ {
+				ra.free(partRegs[i])
+			}
 			stackToReg[sp] = dst
 			sp++
 			operands := []int{dst, partsCount}
@@ -626,24 +676,24 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 
 		case compiler.OpMakeGenerator:
 			fnReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(fnReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpMakeGenerator, []int{dst, fnReg}})
 			ip += 1
 
 		case compiler.OpMakeAsync:
 			fnReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(fnReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpMakeAsync, []int{dst, fnReg}})
 			ip += 1
 
 		case compiler.OpAwait:
 			valReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(valReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpAwait, []int{dst, valReg}})
 			ip += 1
@@ -651,13 +701,14 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpYieldValue:
 			valReg := stackToReg[sp-1]
 			sp--
+			ra.free(valReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpYieldValue, []int{valReg}})
 			ip += 1
 
 		case compiler.OpEnterContext:
 			ctxReg := stackToReg[sp-1]
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(ctxReg)
 			stackToReg[sp-1] = dst
 			regInstructions = append(regInstructions, RegInstruction{RegOpEnterContext, []int{dst, ctxReg}})
 			ip += 1
@@ -666,8 +717,9 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 			excReg := stackToReg[sp-1]
 			ctxReg := stackToReg[sp-2]
 			sp -= 2
-			dst := regAlloc
-			regAlloc++
+			dst := ra.alloc()
+			ra.free(ctxReg)
+			ra.free(excReg)
 			stackToReg[sp] = dst
 			sp++
 			regInstructions = append(regInstructions, RegInstruction{RegOpExitContext, []int{dst, ctxReg, excReg}})
@@ -688,6 +740,7 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		case compiler.OpRaise:
 			errReg := stackToReg[sp-1]
 			sp--
+			ra.free(errReg)
 			regInstructions = append(regInstructions, RegInstruction{RegOpRaise, []int{errReg}})
 			ip += 1
 

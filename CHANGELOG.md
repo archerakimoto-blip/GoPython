@@ -22,6 +22,7 @@
 - **Dict/Set 不可哈希类型拒绝**：`{[]: 1}` 现在正确抛出 `TypeError: unhashable type`
 - **异步推导式编译器修复**：生成正确的 for 循环 + 列表构建字节码，filter 跳转正确回填
 - **寄存器 VM 跳转映射修复**：使用 `stackIPToRegIP` 映射表正确转换跳转目标
+- **寄存器 VM 寄存器泄漏修复**：使用 `registerAllocator` 空闲列表回收不再使用的寄存器
 
 ### re 模块修复
 
@@ -29,6 +30,7 @@
 - **re.subn 替换计数准确**：返回实际替换次数而非重新搜索计数
 - **re.findall 处理可选组**：可选组未匹配时返回空字符串
 - **re.split 保留捕获组分隔符**：`re.split(r'(\W+)', ...)` 现在正确保留分隔符
+- **re 模块支持 callable 替换**：`re.sub(pattern, lambda m: m.group(1).upper(), string)` 现在支持 callable 作为 repl
 - **re 模块 flags 使用命名常量**：替代魔术数字
 
 ### GC 修复

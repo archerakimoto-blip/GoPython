@@ -78,6 +78,76 @@ func getStringArg(args []objects.Object, index int) (string, objects.Object) {
 	return s.Value, nil
 }
 
+// callableSub performs regex substitution where repl is a callable.
+// For each match, the callable is invoked with a RegexMatch object and
+// its return value is used as the replacement string.
+func callableSub(p *objects.RegexPattern, repl objects.Object, s string, count int) objects.Object {
+	var locs [][]int
+	if count > 0 {
+		locs = p.Regexp.FindAllStringSubmatchIndex(s, count)
+	} else {
+		locs = p.Regexp.FindAllStringSubmatchIndex(s, -1)
+	}
+
+	if locs == nil {
+		return &objects.String{Value: s}
+	}
+
+	var buf strings.Builder
+	prev := 0
+	for _, loc := range locs {
+		buf.WriteString(s[prev:loc[0]])
+
+		// Create a RegexMatch object for this match
+		match := newMatchFromLoc(p, s, loc)
+
+		// Call the callable with the match object
+		result := objects.CallFunction(repl, match)
+		if result.Type() == objects.ERROR_OBJ {
+			return result
+		}
+
+		// Convert the result to a string
+		var replacement string
+		if strObj, ok := result.(*objects.String); ok {
+			replacement = strObj.Value
+		} else {
+			replacement = result.Inspect()
+		}
+
+		buf.WriteString(replacement)
+		prev = loc[1]
+	}
+	buf.WriteString(s[prev:])
+
+	return &objects.String{Value: buf.String()}
+}
+
+// newMatchFromLoc creates a RegexMatch from submatch indices.
+// This is a package-level version of the same function in objects,
+// needed here to create match objects for callable repl support.
+func newMatchFromLoc(p *objects.RegexPattern, s string, loc []int) *objects.RegexMatch {
+	groups := make([]string, len(loc)/2)
+	groupIndices := make([]int, len(loc)/2)
+	groupEnds := make([]int, len(loc)/2)
+	for i := 0; i < len(loc)/2; i++ {
+		start := loc[i*2]
+		end := loc[i*2+1]
+		groupIndices[i] = start
+		groupEnds[i] = end
+		if start >= 0 && end >= 0 {
+			groups[i] = s[start:end]
+		}
+	}
+	return &objects.RegexMatch{
+		Groups_:      groups,
+		GroupIndices: groupIndices,
+		GroupEnds:    groupEnds,
+		OrigString:   s,
+		Pattern_:     p,
+	}
+}
+
 func CreateReModule() *objects.Module {
 	module := &objects.Module{
 		Name:   "re",
@@ -222,10 +292,6 @@ func CreateReModule() *objects.Module {
 			if errObj != nil {
 				return errObj
 			}
-			repl, ok := args[1].(*objects.String)
-			if !ok {
-				return objects.NewTypeError("sub() replacement must be a string")
-			}
 			s, ok := args[2].(*objects.String)
 			if !ok {
 				return objects.NewTypeError("sub() third argument must be a string")
@@ -235,6 +301,19 @@ func CreateReModule() *objects.Module {
 				if c, ok := args[3].(*objects.Integer); ok {
 					count = int(c.Value)
 				}
+			}
+
+			repl := args[1]
+
+			// If repl is callable, use callable replacement
+			if objects.IsCallable(repl) {
+				return callableSub(p, repl, s.Value, count)
+			}
+
+			// String replacement
+			replStr, ok := repl.(*objects.String)
+			if !ok {
+				return objects.NewTypeError("sub() replacement must be a string or callable")
 			}
 			var result string
 			if count > 0 {
@@ -246,14 +325,14 @@ func CreateReModule() *objects.Module {
 					prev := 0
 					for _, loc := range locs {
 						buf.WriteString(s.Value[prev:loc[0]])
-						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], replStr.Value))
 						prev = loc[1]
 					}
 					buf.WriteString(s.Value[prev:])
 					result = buf.String()
 				}
 			} else {
-				result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				result = p.Regexp.ReplaceAllString(s.Value, replStr.Value)
 			}
 			return &objects.String{Value: result}
 		},
@@ -270,10 +349,6 @@ func CreateReModule() *objects.Module {
 			if errObj != nil {
 				return errObj
 			}
-			repl, ok := args[1].(*objects.String)
-			if !ok {
-				return objects.NewTypeError("subn() replacement must be a string")
-			}
 			s, ok := args[2].(*objects.String)
 			if !ok {
 				return objects.NewTypeError("subn() third argument must be a string")
@@ -283,6 +358,30 @@ func CreateReModule() *objects.Module {
 				if c, ok := args[3].(*objects.Integer); ok {
 					count = int(c.Value)
 				}
+			}
+
+			repl := args[1]
+
+			// If repl is callable, use callable replacement
+			if objects.IsCallable(repl) {
+				result := callableSub(p, repl, s.Value, count)
+				if result.Type() == objects.ERROR_OBJ {
+					return result
+				}
+				resultStr := result.(*objects.String).Value
+				// Count the number of substitutions
+				locs := p.Regexp.FindAllStringIndex(s.Value, count)
+				n := 0
+				if locs != nil {
+					n = len(locs)
+				}
+				return &objects.Tuple{Elements: []objects.Object{&objects.String{Value: resultStr}, &objects.Integer{Value: int64(n)}}}
+			}
+
+			// String replacement
+			replStr, ok := repl.(*objects.String)
+			if !ok {
+				return objects.NewTypeError("subn() replacement must be a string or callable")
 			}
 			var result string
 			var n int
@@ -296,7 +395,7 @@ func CreateReModule() *objects.Module {
 					prev := 0
 					for _, loc := range locs {
 						buf.WriteString(s.Value[prev:loc[0]])
-						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], replStr.Value))
 						prev = loc[1]
 					}
 					buf.WriteString(s.Value[prev:])
@@ -304,7 +403,7 @@ func CreateReModule() *objects.Module {
 					n = len(locs)
 				}
 			} else {
-				result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				result = p.Regexp.ReplaceAllString(s.Value, replStr.Value)
 				locs := p.Regexp.FindAllStringIndex(s.Value, -1)
 				if locs != nil {
 					n = len(locs)
