@@ -9,6 +9,7 @@ import (
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/objects"
+	"github.com/go-py/go-python/pkg/regex"
 )
 
 const StackSize = 2048
@@ -1537,6 +1538,256 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			// Handle RegexPattern attribute access
+			if rp, ok := obj.(*objects.RegexPattern); ok {
+				switch attrName {
+				case "pattern":
+					err := vm.push(&objects.String{Value: rp.Pattern})
+					if err != nil {
+						return err
+					}
+					continue
+				case "flags":
+					err := vm.push(&objects.Integer{Value: int64(rp.Flags)})
+					if err != nil {
+						return err
+					}
+					continue
+				case "match":
+					fn := &objects.Builtin{
+						Name: "pattern.match",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("match() takes at least 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("match() argument must be a string")
+							}
+							return regex.PatternMatch(rp, s.Value, false)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "search":
+					fn := &objects.Builtin{
+						Name: "pattern.search",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("search() takes at least 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("search() argument must be a string")
+							}
+							return regex.PatternMatch(rp, s.Value, true)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "findall":
+					fn := &objects.Builtin{
+						Name: "pattern.findall",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("findall() takes at least 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("findall() argument must be a string")
+							}
+							return regex.PatternFindall(rp, s.Value)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "sub":
+					fn := &objects.Builtin{
+						Name: "pattern.sub",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 2 {
+								return objects.NewTypeError("sub() takes at least 2 arguments")
+							}
+							replacement, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("sub() first argument must be a string")
+							}
+							s, ok := args[1].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("sub() second argument must be a string")
+							}
+							count := 0
+							if len(args) >= 3 {
+								if c, ok := args[2].(*objects.Integer); ok {
+									count = int(c.Value)
+								}
+							}
+							return regex.PatternSub(rp, replacement.Value, s.Value, count)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "split":
+					fn := &objects.Builtin{
+						Name: "pattern.split",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("split() takes at least 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("split() argument must be a string")
+							}
+							maxsplit := 0
+							if len(args) >= 2 {
+								if m, ok := args[1].(*objects.Integer); ok {
+									maxsplit = int(m.Value)
+								}
+							}
+							return regex.PatternSplit(rp, s.Value, maxsplit)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "fullmatch":
+					fn := &objects.Builtin{
+						Name: "pattern.fullmatch",
+						Fn: func(args ...objects.Object) objects.Object {
+							if len(args) < 1 {
+								return objects.NewTypeError("fullmatch() takes at least 1 argument")
+							}
+							s, ok := args[0].(*objects.String)
+							if !ok {
+								return objects.NewTypeError("fullmatch() argument must be a string")
+							}
+							return regex.PatternFullmatch(rp, s.Value)
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Handle RegexMatch attribute access
+			if rm, ok := obj.(*objects.RegexMatch); ok {
+				switch attrName {
+				case "string":
+					err := vm.push(&objects.String{Value: rm.MatchString})
+					if err != nil {
+						return err
+					}
+					continue
+				case "group":
+					fn := &objects.Builtin{
+						Name: "match.group",
+						Fn: func(args ...objects.Object) objects.Object {
+							index := int64(0)
+							if len(args) >= 1 {
+								if i, ok := args[0].(*objects.Integer); ok {
+									index = i.Value
+								}
+							}
+							if index < 0 || int(index) >= len(rm.Groups) {
+								return objects.NewIndexError("no such group")
+							}
+							return &objects.String{Value: rm.Groups[index]}
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "start":
+					fn := &objects.Builtin{
+						Name: "match.start",
+						Fn: func(args ...objects.Object) objects.Object {
+							return &objects.Integer{Value: int64(rm.StartPos)}
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "end":
+					fn := &objects.Builtin{
+						Name: "match.end",
+						Fn: func(args ...objects.Object) objects.Object {
+							return &objects.Integer{Value: int64(rm.EndPos)}
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "span":
+					fn := &objects.Builtin{
+						Name: "match.span",
+						Fn: func(args ...objects.Object) objects.Object {
+							return &objects.Tuple{Elements: []objects.Object{
+								&objects.Integer{Value: int64(rm.StartPos)},
+								&objects.Integer{Value: int64(rm.EndPos)},
+							}}
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				case "groups":
+					fn := &objects.Builtin{
+						Name: "match.groups",
+						Fn: func(args ...objects.Object) objects.Object {
+							// Return tuple of all captured groups (excluding group 0)
+							if len(rm.Groups) <= 1 {
+								return &objects.Tuple{Elements: []objects.Object{}}
+							}
+							elements := make([]objects.Object, len(rm.Groups)-1)
+							for i := 1; i < len(rm.Groups); i++ {
+								elements[i-1] = &objects.String{Value: rm.Groups[i]}
+							}
+							return &objects.Tuple{Elements: elements}
+						},
+					}
+					err := vm.push(fn)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 
 		case compiler.OpSetAttribute:
@@ -1600,6 +1851,9 @@ func (vm *VM) Run() error {
 					continue
 				}
 				instance.SetAttr(attrName, value)
+				if vm.gcEnabled {
+					gc.WriteBarrier(instance, value)
+				}
 				err := vm.push(value)
 				if err != nil {
 					return err
@@ -1609,6 +1863,9 @@ func (vm *VM) Run() error {
 			
 			if classObj, ok := obj.(*objects.Class); ok {
 				classObj.Fields[attrName] = value
+				if vm.gcEnabled {
+					gc.WriteBarrier(classObj, value)
+				}
 				if attrName == "__slots__" {
 					if listObj, ok := value.(*objects.List); ok {
 						slots := make([]string, 0, len(listObj.Elements))

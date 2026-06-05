@@ -12,6 +12,7 @@ import (
 	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/interop"
 	"github.com/go-py/go-python/pkg/objects"
+	"github.com/go-py/go-python/pkg/regex"
 )
 
 type Opcode byte
@@ -303,6 +304,13 @@ func (c *Compiler) registerBuiltins() {
 	datetimeIndex := len(c.constants)
 	c.constants = append(c.constants, datetimeModule)
 	c.symbolTable.DefineBuiltin("datetime", datetimeIndex)
+
+	// 注册 re 模块
+	reModule := regex.CreateReModule()
+	objects.RegisterModule("re", reModule)
+	reIndex := len(c.constants)
+	c.constants = append(c.constants, reModule)
+	c.symbolTable.DefineBuiltin("re", reIndex)
 
 	// 注册 cpython 互操作模块
 	cpythonModule := interop.CreateCPythonModule()

@@ -49,6 +49,8 @@ const (
 	DICT_KEYS_OBJ       ObjectType = "DICT_KEYS"
 	DICT_VALUES_OBJ     ObjectType = "DICT_VALUES"
 	DICT_ITEMS_OBJ      ObjectType = "DICT_ITEMS"
+	REGEX_PATTERN_OBJ   ObjectType = "REGEX_PATTERN"
+	REGEX_MATCH_OBJ     ObjectType = "REGEX_MATCH"
 )
 
 type Object interface {
@@ -1082,6 +1084,36 @@ func (m *Module) GetAttr(name string) (Object, bool) {
 		return val, true
 	}
 	return nil, false
+}
+
+type RegexPattern struct {
+	Pattern string
+	Flags   int
+	regex   interface{} // compiled Go regex, stored as interface{} to avoid import
+}
+
+func NewRegexPattern(pattern string, flags int, compiledRegex interface{}) *RegexPattern {
+	return &RegexPattern{Pattern: pattern, Flags: flags, regex: compiledRegex}
+}
+
+func (rp *RegexPattern) GetRegex() interface{} { return rp.regex }
+
+func (rp *RegexPattern) Type() ObjectType { return REGEX_PATTERN_OBJ }
+func (rp *RegexPattern) Inspect() string  { return fmt.Sprintf("<re.Pattern '%s'>", rp.Pattern) }
+
+type RegexMatch struct {
+	MatchString string
+	Groups      []string
+	StartPos    int
+	EndPos      int
+}
+
+func (rm *RegexMatch) Type() ObjectType { return REGEX_MATCH_OBJ }
+func (rm *RegexMatch) Inspect() string {
+	if len(rm.Groups) > 0 {
+		return fmt.Sprintf("<re.Match object; span=(%d, %d), match='%s'>", rm.StartPos, rm.EndPos, rm.Groups[0])
+	}
+	return "<re.Match object>"
 }
 
 type Range struct {
