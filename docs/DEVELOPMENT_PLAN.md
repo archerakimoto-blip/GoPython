@@ -535,6 +535,40 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 | `pkg/desugar/desugar.go` | 脱糖层支持异步推导式节点，脱糖子表达式并保留 async 语义 |
 | `pkg/gc/gc.go` | 分代 GC：`YoungGen`/`OldGen` 双代；`MinorCollect()`/`MajorCollect()` 双收集器；`promotionAge=3` 晋升机制；`WriteBarrier()` + `rememberedSet` 写屏障；`youngThreshold=256KB`/`oldThreshold=4MB` 阈值；`minorAfterMajor=10` 自动触发 Major GC |
 
+**v0.15 Code Review 已知问题：**
+
+#### 🔴 严重问题 (3 项)
+
+1. **异步推导式编译器缺少循环结构**：`compileAsyncListComprehension` 等函数只编译了 iterable、element、filter，但没有生成 `for` 循环和列表构建的字节码。当前实现只是编译子表达式然后 `OpReturnValue`，不会产生正确的列表结果。需要生成类似 `result = []; for x in iter: if filter: result.append(element); return result` 的字节码
+2. **异步推导式 filter 跳转未回填**：`jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)` 使用了占位符 `9999` 但从未回填目标地址，导致 filter 为 false 时跳转到错误位置
+3. **寄存器 VM 翻译器跳转目标不一致**：翻译器使用栈式字节码的 IP 作为 `RegOpJump`/`RegOpJumpIfFalse` 的目标，但寄存器指令的 IP 与栈式指令的 IP 不对应（寄存器指令数量 ≠ 栈式指令数量），导致跳转目标错误
+
+#### 🟡 中等问题 (5 项)
+
+4. **re.sub 不支持 count 参数**：`re.sub(pattern, repl, string, count=0)` 的 `count` 参数被忽略，始终替换所有匹配
+5. **re.subn 替换计数不准确**：`subn` 通过 `FindAllString` 重新搜索来计算替换次数，而非统计实际替换次数。如果 `repl` 包含 `$` 引用，替换结果和计数可能不一致
+6. **分代 GC markObject 线性扫描**：`markObject`/`markObjectMinor` 通过遍历 `youngObjects`/`oldObjects` 切片查找对象，时间复杂度 O(n)。应使用 `map[objects.Object]*GCObject` 索引加速
+7. **分代 GC 并发安全风险**：`MinorCollect` 中 `gc.mu.Unlock()` 后调用 `MajorCollect()`，但 `MajorCollect` 又获取 `gc.mu.Lock()`。在解锁和重新加锁之间可能有其他 goroutine 修改 GC 状态
+8. **寄存器 VM 寄存器泄漏**：翻译器中 `regAlloc` 只增不减，对于循环体内的指令，每次迭代都会分配新寄存器，导致寄存器数量无限增长。需要寄存器分配器回收不再使用的寄存器
+
+#### 🟢 低优先级问题 (4 项)
+
+9. **RegexMatch.Groups_ 命名不规范**：`Groups_`/`GroupIndices`/`GroupEnds`/`OrigString`/`Pattern_` 使用下划线后缀/前缀不一致，应统一为 Go 惯用命名（如 `Groups`/`StartPositions`/`EndPositions`/`OriginalString`/`Pattern`）
+10. **re 模块 flags 处理使用魔术数字**：`flagsToGoFlags` 中 `flags&2`/`flags&8`/`flags&16` 应使用常量名 `IGNORECASE`/`MULTILINE`/`DOTALL`
+11. **寄存器 VM 翻译缓存哈希冲突**：`bytecodeHash` 使用简单哈希函数，不同字节码可能产生相同哈希导致缓存命中错误结果
+12. **分代 GC markReferences 不追踪 SlotValues**：`markReferences`/`markReferencesMinor` 中 `Instance` 只遍历 `Fields`，不遍历 `SlotValues`，导致 slotted instance 的属性引用可能被错误回收
+
+### v0.16 — Bug 修复与优化 (计划中)
+
+- [ ] 修复异步推导式编译器：生成正确的 for 循环 + 列表构建字节码
+- [ ] 修复异步推导式 filter 跳转回填
+- [ ] 修复寄存器 VM 翻译器跳转目标映射
+- [ ] re.sub/re.subn 支持 count 参数
+- [ ] 分代 GC markObject 使用 map 索引加速
+- [ ] 分代 GC MinorCollect → MajorCollect 并发安全修复
+- [ ] 寄存器 VM 寄存器分配器（回收不再使用的寄存器）
+- [ ] 分代 GC markReferences 追踪 SlotValues
+
 ### v1.0.0 — Production Ready
 
 - [ ] 完整的 asyncio 模块
