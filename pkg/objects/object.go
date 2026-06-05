@@ -613,6 +613,7 @@ type Error struct {
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
 func (e *Error) Inspect() string { return e.ErrorType + ": " + e.Message }
+func (e *Error) Error() string   { return e.ErrorType + ": " + e.Message }
 
 type ExceptionGroup struct {
 	Message    string
@@ -1314,7 +1315,31 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 				if !ok1 || !ok2 {
 					return NewTypeError("sub() arguments must be strings")
 				}
-				result := p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				var count int
+				if len(args) >= 3 {
+					if c, ok := args[2].(*Integer); ok {
+						count = int(c.Value)
+					}
+				}
+				var result string
+				if count > 0 {
+					locs := p.Regexp.FindAllStringIndex(s.Value, count)
+					if locs == nil {
+						result = s.Value
+					} else {
+						var buf strings.Builder
+						prev := 0
+						for _, loc := range locs {
+							buf.WriteString(s.Value[prev:loc[0]])
+							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+							prev = loc[1]
+						}
+						buf.WriteString(s.Value[prev:])
+						result = buf.String()
+					}
+				} else {
+					result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				}
 				return &String{Value: result}
 			},
 		}, true
@@ -1330,10 +1355,39 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 				if !ok1 || !ok2 {
 					return NewTypeError("subn() arguments must be strings")
 				}
-				count := p.Regexp.ReplaceAllString(s.Value, repl.Value)
-				matches := p.Regexp.FindAllString(s.Value, -1)
-				n := int64(len(matches))
-				return &Tuple{Elements: []Object{&String{Value: count}, &Integer{Value: n}}}
+				var count int
+				if len(args) >= 3 {
+					if c, ok := args[2].(*Integer); ok {
+						count = int(c.Value)
+					}
+				}
+				var result string
+				var n int
+				if count > 0 {
+					locs := p.Regexp.FindAllStringIndex(s.Value, count)
+					if locs == nil {
+						result = s.Value
+						n = 0
+					} else {
+						var buf strings.Builder
+						prev := 0
+						for _, loc := range locs {
+							buf.WriteString(s.Value[prev:loc[0]])
+							buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+							prev = loc[1]
+						}
+						buf.WriteString(s.Value[prev:])
+						result = buf.String()
+						n = len(locs)
+					}
+				} else {
+					result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+					locs := p.Regexp.FindAllStringIndex(s.Value, -1)
+					if locs != nil {
+						n = len(locs)
+					}
+				}
+				return &Tuple{Elements: []Object{&String{Value: result}, &Integer{Value: int64(n)}}}
 			},
 		}, true
 	case "split":
@@ -1504,14 +1558,22 @@ func PatternFindall(p *RegexPattern, s string) Object {
 	} else if numGroups == 1 {
 		// One group: return list of group values
 		for _, m := range matches {
-			result = append(result, &String{Value: m[1]})
+			if len(m) > 1 && m[1] != "" {
+				result = append(result, &String{Value: m[1]})
+			} else {
+				result = append(result, &String{Value: ""})
+			}
 		}
 	} else {
 		// Multiple groups: return list of tuples
 		for _, m := range matches {
 			elements := make([]Object, numGroups)
 			for i := 0; i < numGroups; i++ {
-				elements[i] = &String{Value: m[i+1]}
+				if i+1 < len(m) {
+					elements[i] = &String{Value: m[i+1]}
+				} else {
+					elements[i] = &String{Value: ""}
+				}
 			}
 			result = append(result, &Tuple{Elements: elements})
 		}
@@ -1532,12 +1594,44 @@ func PatternFinditer(p *RegexPattern, s string) Object {
 }
 
 func PatternSplit(p *RegexPattern, s string) Object {
-	result := p.Regexp.Split(s, -1)
-	elements := make([]Object, len(result))
-	for i, part := range result {
-		elements[i] = &String{Value: part}
+	numGroups := p.Regexp.NumSubexp()
+	if numGroups == 0 {
+		// No capturing groups: simple split
+		result := p.Regexp.Split(s, -1)
+		elements := make([]Object, len(result))
+		for i, part := range result {
+			elements[i] = &String{Value: part}
+		}
+		return &List{Elements: elements}
 	}
-	return &List{Elements: elements}
+
+	// With capturing groups: include captured text in result
+	locs := p.Regexp.FindAllStringSubmatchIndex(s, -1)
+	if locs == nil {
+		return &List{Elements: []Object{&String{Value: s}}}
+	}
+
+	result := make([]Object, 0)
+	prev := 0
+	for _, loc := range locs {
+		// Add text before match
+		result = append(result, &String{Value: s[prev:loc[0]]})
+		// Add captured groups
+		for i := 0; i < numGroups; i++ {
+			start := loc[2*(i+1)]
+			end := loc[2*(i+1)+1]
+			if start >= 0 && end >= 0 {
+				result = append(result, &String{Value: s[start:end]})
+			} else {
+				result = append(result, None_)
+			}
+		}
+		prev = loc[1]
+	}
+	// Add remaining text
+	result = append(result, &String{Value: s[prev:]})
+
+	return &List{Elements: result}
 }
 
 func newMatchFromLoc(p *RegexPattern, s string, loc []int) *RegexMatch {
@@ -1578,6 +1672,23 @@ var (
 	None_           = &None{}
 	EllipsisSingleton = &Ellipsis{}
 )
+
+// CheckHashable returns an error if the object type cannot be used as a dict/set key
+func CheckHashable(obj Object) error {
+	switch o := obj.(type) {
+	case *Integer, *Float, *Boolean, *String:
+		return nil
+	case *Tuple:
+		for _, elem := range o.Elements {
+			if err := CheckHashable(elem); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return NewTypeError("unhashable type: '%s'", obj.Type())
+	}
+}
 
 func NewErrorWithType(errorType, format string, a ...interface{}) *Error {
 	return &Error{

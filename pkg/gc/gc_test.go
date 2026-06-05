@@ -10,6 +10,7 @@ func TestGenerationalGCAllocate(t *testing.T) {
 	gc := &GarbageCollector{
 		youngObjects:    make([]*GCObject, 0),
 		oldObjects:      make([]*GCObject, 0),
+		objectMap:       make(map[objects.Object]*GCObject),
 		marked:          make(map[*GCObject]bool),
 		enabled:         true,
 		youngThreshold:  1024 * 256,
@@ -37,6 +38,7 @@ func TestGenerationalGCMinorCollect(t *testing.T) {
 	gc := &GarbageCollector{
 		youngObjects:    make([]*GCObject, 0),
 		oldObjects:      make([]*GCObject, 0),
+		objectMap:       make(map[objects.Object]*GCObject),
 		marked:          make(map[*GCObject]bool),
 		enabled:         true,
 		youngThreshold:  1024 * 256,
@@ -71,6 +73,7 @@ func TestGenerationalGCPromotion(t *testing.T) {
 	gc := &GarbageCollector{
 		youngObjects:    make([]*GCObject, 0),
 		oldObjects:      make([]*GCObject, 0),
+		objectMap:       make(map[objects.Object]*GCObject),
 		marked:          make(map[*GCObject]bool),
 		enabled:         true,
 		youngThreshold:  1024 * 256,
@@ -104,6 +107,7 @@ func TestGenerationalGCMajorCollect(t *testing.T) {
 	gc := &GarbageCollector{
 		youngObjects:    make([]*GCObject, 0),
 		oldObjects:      make([]*GCObject, 0),
+		objectMap:       make(map[objects.Object]*GCObject),
 		marked:          make(map[*GCObject]bool),
 		enabled:         true,
 		youngThreshold:  1024 * 256,
@@ -138,6 +142,7 @@ func TestGenerationalGCStats(t *testing.T) {
 	gc := &GarbageCollector{
 		youngObjects:    make([]*GCObject, 0),
 		oldObjects:      make([]*GCObject, 0),
+		objectMap:       make(map[objects.Object]*GCObject),
 		marked:          make(map[*GCObject]bool),
 		enabled:         true,
 		youngThreshold:  1024 * 256,

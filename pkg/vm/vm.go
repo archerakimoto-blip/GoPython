@@ -401,6 +401,14 @@ func (vm *VM) Run() error {
 
 			hash, err := vm.buildHash(vm.sp-numElements, vm.sp)
 			if err != nil {
+				if errObj, ok := err.(*objects.Error); ok {
+					vm.sp = vm.sp - numElements
+					caught := vm.raiseException(errObj)
+					if !caught {
+						return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+					}
+					continue
+				}
 				return err
 			}
 			vm.sp = vm.sp - numElements
@@ -416,6 +424,14 @@ func (vm *VM) Run() error {
 
 			set := vm.buildSet(vm.sp-numElements, vm.sp)
 			vm.sp = vm.sp - numElements
+
+			if set.Type() == objects.ERROR_OBJ {
+				caught := vm.raiseException(set)
+				if !caught {
+					return fmt.Errorf("unhandled exception: %s", set.Inspect())
+				}
+				continue
+			}
 
 			err := vm.push(set)
 			if err != nil {
@@ -1479,6 +1495,9 @@ func (vm *VM) Run() error {
 							if len(args) < 1 || len(args) > 2 {
 								return objects.NewTypeError("dict.setdefault() takes at most 2 arguments")
 							}
+							if err := objects.CheckHashable(args[0]); err != nil {
+								return err.(*objects.Error)
+							}
 							val, ok := dictObj.Get(args[0])
 							if ok {
 								return val
@@ -2039,7 +2058,7 @@ func (vm *VM) executeCall(numArgs int) error {
 	if gen, ok := calleeObj.(*objects.Generator); ok {
 			if gen.Done {
 				vm.sp = vm.sp - numArgs - 1
-				return vm.push(objects.NewError("StopIteration: generator is exhausted"))
+				return vm.push(objects.NewErrorWithType("StopIteration", "generator is exhausted"))
 			}
 		// 保存生成器对象引用，用于后续在栈上找到它
 		// 先移除生成器对象，后面在恢复栈后再放回去
@@ -2613,6 +2632,20 @@ func nativeBoolToBooleanObject(input bool) *objects.Boolean {
 	return objects.False
 }
 
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func boolToFloat(b bool) float64 {
+	if b {
+		return 1.0
+	}
+	return 0.0
+}
+
 func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 	right := vm.pop()
 	left := vm.pop()
@@ -2622,6 +2655,29 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 
 	if leftType == objects.INTEGER_OBJ && rightType == objects.INTEGER_OBJ {
 		return vm.executeBinaryIntegerOperation(op, left, right)
+	}
+
+	// Boolean arithmetic: treat True as 1, False as 0
+	if leftType == objects.BOOLEAN_OBJ && rightType == objects.BOOLEAN_OBJ {
+		leftInt := &objects.Integer{Value: boolToInt(left.(*objects.Boolean).Value)}
+		rightInt := &objects.Integer{Value: boolToInt(right.(*objects.Boolean).Value)}
+		return vm.executeBinaryIntegerOperation(op, leftInt, rightInt)
+	}
+	if leftType == objects.BOOLEAN_OBJ && rightType == objects.INTEGER_OBJ {
+		leftInt := &objects.Integer{Value: boolToInt(left.(*objects.Boolean).Value)}
+		return vm.executeBinaryIntegerOperation(op, leftInt, right)
+	}
+	if leftType == objects.INTEGER_OBJ && rightType == objects.BOOLEAN_OBJ {
+		rightInt := &objects.Integer{Value: boolToInt(right.(*objects.Boolean).Value)}
+		return vm.executeBinaryIntegerOperation(op, left, rightInt)
+	}
+	if leftType == objects.BOOLEAN_OBJ && rightType == objects.FLOAT_OBJ {
+		leftFloat := &objects.Float{Value: boolToFloat(left.(*objects.Boolean).Value)}
+		return vm.executeBinaryFloatOperation(op, leftFloat, right)
+	}
+	if leftType == objects.FLOAT_OBJ && rightType == objects.BOOLEAN_OBJ {
+		rightFloat := &objects.Float{Value: boolToFloat(right.(*objects.Boolean).Value)}
+		return vm.executeBinaryFloatOperation(op, left, rightFloat)
 	}
 
 	if leftType == objects.FLOAT_OBJ && rightType == objects.FLOAT_OBJ {
@@ -2653,10 +2709,43 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 		return vm.executeBinaryComplexOperation(op, objects.NewComplex(float64(left.(*objects.Integer).Value), 0), right)
 	}
 
+	// String repetition: "abc" * 3 or 3 * "abc"
+	if op == compiler.OpMul {
+		if leftType == objects.STRING_OBJ && rightType == objects.INTEGER_OBJ {
+			s := left.(*objects.String).Value
+			n := right.(*objects.Integer).Value
+			if n <= 0 {
+				return vm.push(&objects.String{Value: ""})
+			}
+			result := strings.Repeat(s, int(n))
+			return vm.push(&objects.String{Value: result})
+		}
+		if leftType == objects.INTEGER_OBJ && rightType == objects.STRING_OBJ {
+			n := left.(*objects.Integer).Value
+			s := right.(*objects.String).Value
+			if n <= 0 {
+				return vm.push(&objects.String{Value: ""})
+			}
+			result := strings.Repeat(s, int(n))
+			return vm.push(&objects.String{Value: result})
+		}
+	}
+
+	// List concatenation: [1] + [2]
 	if op == compiler.OpAdd {
-		leftStr := toString(left)
-		rightStr := toString(right)
-		return vm.push(&objects.String{Value: leftStr + rightStr})
+		if leftType == objects.LIST_OBJ && rightType == objects.LIST_OBJ {
+			leftList := left.(*objects.List)
+			rightList := right.(*objects.List)
+			result := make([]objects.Object, 0, len(leftList.Elements)+len(rightList.Elements))
+			result = append(result, leftList.Elements...)
+			result = append(result, rightList.Elements...)
+			return vm.push(&objects.List{Elements: result})
+		}
+		// String concatenation: "a" + "b"
+		if leftType == objects.STRING_OBJ && rightType == objects.STRING_OBJ {
+			return vm.push(&objects.String{Value: left.(*objects.String).Value + right.(*objects.String).Value})
+		}
+		return vm.push(objects.NewTypeError("unsupported operand type(s) for +: '%s' and '%s'", leftType, rightType))
 	}
 
 	return fmt.Errorf("unsupported types for binary operation: %s %s", leftType, rightType)
@@ -2708,25 +2797,29 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		if rightValue == 0 {
 			return vm.push(objects.NewZeroDivisionError("division by zero"))
 		}
-		result = leftValue / rightValue
+		return vm.push(&objects.Float{Value: float64(leftValue) / float64(rightValue)})
 	case compiler.OpMod:
 		if rightValue == 0 {
 			return vm.push(objects.NewZeroDivisionError("modulo by zero"))
 		}
 		result = leftValue % rightValue
+		if result != 0 && ((result < 0) != (rightValue < 0)) {
+			result += rightValue
+		}
 	case compiler.OpFloorDiv:
 		if rightValue == 0 {
 			return vm.push(objects.NewZeroDivisionError("floor division by zero"))
 		}
 		result = leftValue / rightValue
-		if leftValue < 0 && leftValue%rightValue != 0 {
+		// Python floor division: floor(a/b), adjust if signs differ and there's a remainder
+		if (leftValue < 0) != (rightValue < 0) && leftValue%rightValue != 0 {
 			result -= 1
 		}
 	case compiler.OpPower:
 		if rightValue < 0 {
-			return fmt.Errorf("negative exponent not supported for integers")
+			return vm.push(&objects.Float{Value: math.Pow(float64(leftValue), float64(rightValue))})
 		}
-		result = 1
+		result = int64(1)
 		for i := int64(0); i < rightValue; i++ {
 			result *= leftValue
 		}
@@ -2933,6 +3026,9 @@ func (vm *VM) buildHash(startIndex, endIndex int) (objects.Object, error) {
 	for i := startIndex; i < endIndex; i += 2 {
 		key := vm.stack[i]
 		value := vm.stack[i+1]
+		if err := objects.CheckHashable(key); err != nil {
+			return nil, err
+		}
 		dict.Set(key, value)
 	}
 
@@ -2944,6 +3040,9 @@ func (vm *VM) buildSet(startIndex, endIndex int) objects.Object {
 
 	for i := startIndex; i < endIndex; i++ {
 		element := vm.stack[i]
+		if err := objects.CheckHashable(element); err != nil {
+			return err.(*objects.Error)
+		}
 		set.Add(element)
 	}
 
@@ -2978,10 +3077,13 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 	arrayObject := array.(*objects.List)
 	idx := index.(*objects.Integer).Value
-	max := int64(len(arrayObject.Elements) - 1)
+	length := int64(len(arrayObject.Elements))
 
-	if idx < 0 || idx > max {
-		return vm.push(objects.None_)
+	if idx < 0 {
+		idx = length + idx
+	}
+	if idx < 0 || idx >= length {
+		return vm.push(objects.NewIndexError("list index out of range"))
 	}
 
 	return vm.push(arrayObject.Elements[idx])
@@ -2990,13 +3092,13 @@ func (vm *VM) executeArrayIndex(array, index objects.Object) error {
 func (vm *VM) executeTupleIndex(tuple, index objects.Object) error {
 	tupleObject := tuple.(*objects.Tuple)
 	idx := index.(*objects.Integer).Value
-	max := int64(len(tupleObject.Elements) - 1)
+	length := int64(len(tupleObject.Elements))
 
 	if idx < 0 {
-		idx = int64(len(tupleObject.Elements)) + idx
+		idx = length + idx
 	}
-	if idx < 0 || idx > max {
-		return vm.push(objects.None_)
+	if idx < 0 || idx >= length {
+		return vm.push(objects.NewIndexError("tuple index out of range"))
 	}
 
 	return vm.push(tupleObject.Elements[idx])
@@ -3007,7 +3109,7 @@ func (vm *VM) executeRangeIndex(left, index objects.Object) error {
 	idx := index.(*objects.Integer).Value
 	val, ok := rangeObj.GetItem(idx)
 	if !ok {
-		return vm.push(objects.None_)
+		return vm.push(objects.NewIndexError("range object index out of range"))
 	}
 	return vm.push(val)
 }
@@ -3020,7 +3122,7 @@ func (vm *VM) executeStringIndex(left, index objects.Object) error {
 		idx = length + idx
 	}
 	if idx < 0 || idx >= length {
-		return vm.push(objects.None_)
+		return vm.push(objects.NewIndexError("string index out of range"))
 	}
 	return vm.push(&objects.String{Value: string(str.Value[idx])})
 }

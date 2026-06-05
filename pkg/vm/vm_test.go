@@ -16,6 +16,8 @@ func TestSimpleArithmetic(t *testing.T) {
 		name     string
 		input    string
 		expected int64
+		floatVal float64
+		isFloat  bool
 	}{
 		{
 			name:     "addition",
@@ -35,7 +37,8 @@ func TestSimpleArithmetic(t *testing.T) {
 		{
 			name:     "division",
 			input:    "_result = 20 / 4",
-			expected: 5,
+			floatVal: 5.0,
+			isFloat:  true,
 		},
 	}
 
@@ -77,13 +80,23 @@ func TestSimpleArithmetic(t *testing.T) {
 				t.Fatal("Expected result, got nil")
 			}
 
-			if result.Type() != objects.INTEGER_OBJ {
-				t.Fatalf("Expected integer, got %s", result.Type())
-			}
+			if tt.isFloat {
+				if result.Type() != objects.FLOAT_OBJ {
+					t.Fatalf("Expected float, got %s", result.Type())
+				}
+				got := result.(*objects.Float).Value
+				if got != tt.floatVal {
+					t.Errorf("Expected %f, got %f", tt.floatVal, got)
+				}
+			} else {
+				if result.Type() != objects.INTEGER_OBJ {
+					t.Fatalf("Expected integer, got %s", result.Type())
+				}
 
-			got := result.(*objects.Integer).Value
-			if got != tt.expected {
-				t.Errorf("Expected %d, got %d", tt.expected, got)
+				got := result.(*objects.Integer).Value
+				if got != tt.expected {
+					t.Errorf("Expected %d, got %d", tt.expected, got)
+				}
 			}
 		})
 	}

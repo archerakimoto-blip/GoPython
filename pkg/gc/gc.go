@@ -40,6 +40,9 @@ type GarbageCollector struct {
 	oldAllocated int64
 	oldThreshold int64 // default: 4MB
 
+	// Index for fast lookup by object pointer
+	objectMap map[objects.Object]*GCObject
+
 	// Shared
 	marked          map[*GCObject]bool
 	allocatedBytes  int64
@@ -70,6 +73,7 @@ func GetGC() *GarbageCollector {
 		singleton = &GarbageCollector{
 			youngObjects:    make([]*GCObject, 0),
 			oldObjects:      make([]*GCObject, 0),
+			objectMap:       make(map[objects.Object]*GCObject),
 			marked:          make(map[*GCObject]bool),
 			enabled:         true,
 			verbose:         false,
@@ -136,6 +140,7 @@ func (gc *GarbageCollector) Allocate(obj objects.Object) *GCObject {
 	}
 
 	gc.youngObjects = append(gc.youngObjects, gcObj)
+	gc.objectMap[obj] = gcObj
 	gc.youngAllocated += gcObj.Size
 	gc.allocatedBytes += gcObj.Size
 
@@ -196,12 +201,42 @@ func (gc *GarbageCollector) MinorCollect() {
 
 	// Check if we should trigger a major GC
 	if gc.oldAllocated >= gc.oldThreshold || gc.minorSinceMajor >= gc.majorAfterMinor {
-		gc.mu.Unlock()
-		gc.MajorCollect()
-		return
+		gc.majorCollectLocked()
 	}
 
 	gc.mu.Unlock()
+}
+
+// majorCollectLocked performs a full collection while holding the lock.
+// This is called from MinorCollect to avoid unlocking between minor and major GC.
+func (gc *GarbageCollector) majorCollectLocked() {
+	start := time.Now()
+
+	if gc.verbose {
+		log.Println("GC: Starting major collection (full, from minor)")
+	}
+
+	gc.marked = make(map[*GCObject]bool)
+
+	// Mark from roots (scan ALL objects)
+	gc.markRoots()
+
+	// Sweep both generations
+	freedYoung := gc.sweepYoung()
+	freedOld := gc.sweepOld()
+
+	gc.collectionCount++
+	gc.majorCount++
+	gc.minorSinceMajor = 0
+	gc.pauseTime += time.Since(start)
+
+	// Clear remembered set on major GC since all objects were scanned
+	gc.rememberedSet = gc.rememberedSet[:0]
+
+	if gc.verbose {
+		log.Printf("GC: Major collection completed, freed %d young + %d old objects in %v",
+			freedYoung, freedOld, time.Since(start))
+	}
 }
 
 // MajorCollect performs a full collection of both generations.
@@ -267,13 +302,12 @@ func (gc *GarbageCollector) markObjectMinor(obj objects.Object) {
 		return
 	}
 
-	for _, gcObj := range gc.youngObjects {
-		if gcObj.Object == obj && !gc.marked[gcObj] {
-			gc.marked[gcObj] = true
-			gc.markReferencesMinor(gcObj.Object)
-			break
-		}
+	gcObj, ok := gc.objectMap[obj]
+	if !ok || gc.marked[gcObj] || gcObj.Generation != YoungGen {
+		return
 	}
+	gc.marked[gcObj] = true
+	gc.markReferencesMinor(gcObj.Object)
 }
 
 // markReferencesMinor follows references from a container, only marking young gen objects.
@@ -345,23 +379,12 @@ func (gc *GarbageCollector) markObject(obj objects.Object) {
 		return
 	}
 
-	// Check young gen
-	for _, gcObj := range gc.youngObjects {
-		if gcObj.Object == obj && !gc.marked[gcObj] {
-			gc.marked[gcObj] = true
-			gc.markReferences(gcObj.Object)
-			return
-		}
+	gcObj, ok := gc.objectMap[obj]
+	if !ok || gc.marked[gcObj] {
+		return
 	}
-
-	// Check old gen
-	for _, gcObj := range gc.oldObjects {
-		if gcObj.Object == obj && !gc.marked[gcObj] {
-			gc.marked[gcObj] = true
-			gc.markReferences(gcObj.Object)
-			return
-		}
-	}
+	gc.marked[gcObj] = true
+	gc.markReferences(gcObj.Object)
 }
 
 // markReferences follows references from a container, marking objects in both generations.
@@ -428,6 +451,7 @@ func (gc *GarbageCollector) sweepYoung() int {
 			gc.freedBytes += gcObj.Size
 			gc.youngAllocated -= gcObj.Size
 			gc.allocatedBytes -= gcObj.Size
+			delete(gc.objectMap, gcObj.Object)
 			freed++
 			if gc.verbose {
 				log.Printf("GC: Freed young %T (%d bytes)", gcObj.Object, gcObj.Size)
@@ -455,6 +479,7 @@ func (gc *GarbageCollector) sweepOld() int {
 			gc.freedBytes += gcObj.Size
 			gc.oldAllocated -= gcObj.Size
 			gc.allocatedBytes -= gcObj.Size
+			delete(gc.objectMap, gcObj.Object)
 			freed++
 			if gc.verbose {
 				log.Printf("GC: Freed old %T (%d bytes)", gcObj.Object, gcObj.Size)
@@ -530,20 +555,8 @@ func (gc *GarbageCollector) AddFinalizer(obj objects.Object, finalizer func(obje
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
 
-	// Check young gen
-	for _, gcObj := range gc.youngObjects {
-		if gcObj.Object == obj {
-			gcObj.Finalizer = finalizer
-			return
-		}
-	}
-
-	// Check old gen
-	for _, gcObj := range gc.oldObjects {
-		if gcObj.Object == obj {
-			gcObj.Finalizer = finalizer
-			return
-		}
+	if gcObj, ok := gc.objectMap[obj]; ok {
+		gcObj.Finalizer = finalizer
 	}
 }
 

@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-06-05
+
+### Bug 修复 — Python 语义对齐
+
+- **整数除法返回 Float**：`6/3` 现在正确返回 `2.0`（float），`//` 才是整除
+- **取模运算符号修正**：`-7 % 3` 现在正确返回 `2`（与除数同号），而非 `-1`（Go 语义）
+- **整除运算修正**：`-7 // 3` 现在正确返回 `-3`（floor 语义），修复了符号判断逻辑
+- **整数负数幂返回 Float**：`2 ** -1` 现在正确返回 `0.5`，而非报错
+- **List 负索引支持**：`lst[-1]` 现在正确返回最后一个元素
+- **越界索引抛出 IndexError**：`lst[100]` 现在抛出 `IndexError`，而非返回 `None`（影响 List/Tuple/String/Range）
+- **Boolean 参与算术运算**：`True + 1 = 2`，`False * 3 = 0` 等现在正确工作
+- **字符串乘法支持**：`"abc" * 3` 和 `3 * "abc"` 现在正确返回 `"abcabcabc"`
+- **列表拼接支持**：`[1] + [2]` 现在正确返回 `[1, 2]`
+- **OpAdd 类型检查**：`1 + "a"` 现在正确抛出 `TypeError`，而非隐式拼接为 `"1a"`
+- **StopIteration 异常类型**：生成器耗尽时抛出 `StopIteration` 异常，可被 `except StopIteration` 捕获
+- **Dict/Set 不可哈希类型拒绝**：`{[]: 1}` 现在正确抛出 `TypeError: unhashable type`
+- **异步推导式编译器修复**：生成正确的 for 循环 + 列表构建字节码，filter 跳转正确回填
+- **寄存器 VM 跳转映射修复**：使用 `stackIPToRegIP` 映射表正确转换跳转目标
+
+### re 模块修复
+
+- **re.sub/re.subn 支持 count 参数**：`re.sub(pattern, repl, string, count=n)` 限制替换次数
+- **re.subn 替换计数准确**：返回实际替换次数而非重新搜索计数
+- **re.findall 处理可选组**：可选组未匹配时返回空字符串
+- **re.split 保留捕获组分隔符**：`re.split(r'(\W+)', ...)` 现在正确保留分隔符
+- **re 模块 flags 使用命名常量**：替代魔术数字
+
+### GC 修复
+
+- **分代 GC markObject O(1) 查找**：使用 `objectMap` 替代线性扫描
+- **分代 GC 并发安全修复**：`MinorCollect` 不再解锁后调用 `MajorCollect`
+
 ## [0.15.0] - 2026-06-05
 
 ### 新增特性

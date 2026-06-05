@@ -2,6 +2,7 @@ package re
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/go-py/go-python/pkg/objects"
 )
@@ -19,15 +20,23 @@ func compilePattern(pattern string, flags int64) (*objects.RegexPattern, error) 
 	}, nil
 }
 
+const (
+	ReIGNORECASE = 2
+	ReMULTILINE  = 8
+	ReDOTALL     = 16
+	ReASCII      = 256
+	ReUNICODE    = 32
+)
+
 func flagsToGoFlags(flags int64) string {
 	prefix := ""
-	if flags&2 != 0 { // IGNORECASE
+	if flags&ReIGNORECASE != 0 {
 		prefix += "(?i)"
 	}
-	if flags&8 != 0 { // MULTILINE
+	if flags&ReMULTILINE != 0 {
 		prefix += "(?m)"
 	}
-	if flags&16 != 0 { // DOTALL
+	if flags&ReDOTALL != 0 {
 		prefix += "(?s)"
 	}
 	return prefix
@@ -76,11 +85,11 @@ func CreateReModule() *objects.Module {
 	}
 
 	// Constants
-	module.Fields["IGNORECASE"] = &objects.Integer{Value: 2}
-	module.Fields["MULTILINE"] = &objects.Integer{Value: 8}
-	module.Fields["DOTALL"] = &objects.Integer{Value: 16}
-	module.Fields["ASCII"] = &objects.Integer{Value: 256}
-	module.Fields["UNICODE"] = &objects.Integer{Value: 32}
+	module.Fields["IGNORECASE"] = &objects.Integer{Value: ReIGNORECASE}
+	module.Fields["MULTILINE"] = &objects.Integer{Value: ReMULTILINE}
+	module.Fields["DOTALL"] = &objects.Integer{Value: ReDOTALL}
+	module.Fields["ASCII"] = &objects.Integer{Value: ReASCII}
+	module.Fields["UNICODE"] = &objects.Integer{Value: ReUNICODE}
 
 	// re.compile(pattern, flags=0)
 	module.Fields["compile"] = &objects.Builtin{
@@ -221,7 +230,31 @@ func CreateReModule() *objects.Module {
 			if !ok {
 				return objects.NewTypeError("sub() third argument must be a string")
 			}
-			result := p.Regexp.ReplaceAllString(s.Value, repl.Value)
+			var count int
+			if len(args) >= 4 {
+				if c, ok := args[3].(*objects.Integer); ok {
+					count = int(c.Value)
+				}
+			}
+			var result string
+			if count > 0 {
+				locs := p.Regexp.FindAllStringIndex(s.Value, count)
+				if locs == nil {
+					result = s.Value
+				} else {
+					var buf strings.Builder
+					prev := 0
+					for _, loc := range locs {
+						buf.WriteString(s.Value[prev:loc[0]])
+						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+						prev = loc[1]
+					}
+					buf.WriteString(s.Value[prev:])
+					result = buf.String()
+				}
+			} else {
+				result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+			}
 			return &objects.String{Value: result}
 		},
 	}
@@ -245,10 +278,39 @@ func CreateReModule() *objects.Module {
 			if !ok {
 				return objects.NewTypeError("subn() third argument must be a string")
 			}
-			result := p.Regexp.ReplaceAllString(s.Value, repl.Value)
-			matches := p.Regexp.FindAllString(s.Value, -1)
-			n := int64(len(matches))
-			return &objects.Tuple{Elements: []objects.Object{&objects.String{Value: result}, &objects.Integer{Value: n}}}
+			var count int
+			if len(args) >= 4 {
+				if c, ok := args[3].(*objects.Integer); ok {
+					count = int(c.Value)
+				}
+			}
+			var result string
+			var n int
+			if count > 0 {
+				locs := p.Regexp.FindAllStringIndex(s.Value, count)
+				if locs == nil {
+					result = s.Value
+					n = 0
+				} else {
+					var buf strings.Builder
+					prev := 0
+					for _, loc := range locs {
+						buf.WriteString(s.Value[prev:loc[0]])
+						buf.WriteString(p.Regexp.ReplaceAllString(s.Value[loc[0]:loc[1]], repl.Value))
+						prev = loc[1]
+					}
+					buf.WriteString(s.Value[prev:])
+					result = buf.String()
+					n = len(locs)
+				}
+			} else {
+				result = p.Regexp.ReplaceAllString(s.Value, repl.Value)
+				locs := p.Regexp.FindAllStringIndex(s.Value, -1)
+				if locs != nil {
+					n = len(locs)
+				}
+			}
+			return &objects.Tuple{Elements: []objects.Object{&objects.String{Value: result}, &objects.Integer{Value: int64(n)}}}
 		},
 	}
 

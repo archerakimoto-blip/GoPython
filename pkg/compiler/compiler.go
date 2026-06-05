@@ -398,6 +398,9 @@ func (c *Compiler) registerBuiltins() {
 			if !ok {
 				return objects.NewError("first argument to setitem() must be a dict")
 			}
+			if err := objects.CheckHashable(args[1]); err != nil {
+				return err.(*objects.Error)
+			}
 			dict.Set(args[1], args[2])
 			return objects.None_
 		},
@@ -414,6 +417,9 @@ func (c *Compiler) registerBuiltins() {
 			set, ok := args[0].(*objects.Set)
 			if !ok {
 				return objects.NewError("first argument to setadd() must be a set")
+			}
+			if err := objects.CheckHashable(args[1]); err != nil {
+				return err.(*objects.Error)
 			}
 			set.Add(args[1])
 			return objects.None_
@@ -2377,7 +2383,7 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 }
 
 func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehension) error {
-	// Compile async list comprehension as an async function that builds a list
+	// Same pattern as compileListComprehension but with IsAsync: true
 	outerInstructions := c.instructions
 	c.instructions = make(Instructions, 0)
 	c.lastInstruction = EmittedInstruction{}
@@ -2385,37 +2391,40 @@ func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehensio
 
 	c.enterScope()
 
-	// Compile the iterable
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
 
-	// Define the loop variable
-	c.symbolTable.Define(node.Variable.Value)
+	loopStart := len(c.instructions)
 
-	// Compile the element expression
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+
+	c.changeOperand(endPos, len(c.instructions))
+
+	c.exitScope()
+
+	c.enterScope()
+
 	if err := c.Compile(node.Element); err != nil {
 		return err
 	}
 
-	// Compile the filter if present
 	if node.Filter != nil {
 		if err := c.Compile(node.Filter); err != nil {
 			return err
 		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-		// TODO: skip this iteration - for now just jump past the yield
-		_ = jumpNotTruthyPos
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
 	}
 
-	c.emit(OpReturnValue)
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
 
-	if c.lastInstructionIs(OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(OpReturnValue) {
-		c.emit(OpReturn)
-	}
+	c.exitScope()
 
 	fnInstructions := c.instructions
 	numLocals := c.symbolTable.numDefinitions
@@ -2423,7 +2432,7 @@ func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehensio
 	freeSymbols := c.symbolTable.FreeSymbols
 	nestedFreeSymbols := c.symbolTable.NestedFreeSymbols
 
-	c.exitScope()
+	c.instructions = outerInstructions
 
 	allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
 	allFreeVars = append(allFreeVars, freeVars...)
@@ -2438,12 +2447,10 @@ func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehensio
 	compiledFn := &CompiledFunction{
 		Instructions:  fnInstructions,
 		NumLocals:     numLocals,
-		NumParameters: 1,
+		NumParameters: 0,
 		IsAsync:       true,
 		Free:          allFreeVars,
 	}
-
-	c.instructions = outerInstructions
 
 	needsClosure := len(freeVars) > 0 || len(nestedFreeSymbols) > 0
 	if needsClosure {
@@ -2475,99 +2482,18 @@ func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehensio
 }
 
 func (c *Compiler) compileAsyncSetComprehension(node *ast.AsyncSetComprehension) error {
-	// Similar to async list comprehension but produces a set
-	outerInstructions := c.instructions
-	c.instructions = make(Instructions, 0)
-	c.lastInstruction = EmittedInstruction{}
-	c.previousInstruction = EmittedInstruction{}
-
-	c.enterScope()
-
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
-
-	c.symbolTable.Define(node.Variable.Value)
-
-	if err := c.Compile(node.Element); err != nil {
-		return err
-	}
-
-	if node.Filter != nil {
-		if err := c.Compile(node.Filter); err != nil {
-			return err
-		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-		_ = jumpNotTruthyPos
-	}
-
-	c.emit(OpReturnValue)
-
-	if c.lastInstructionIs(OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(OpReturnValue) {
-		c.emit(OpReturn)
-	}
-
-	fnInstructions := c.instructions
-	numLocals := c.symbolTable.numDefinitions
-	freeVars := c.symbolTable.Free
-	freeSymbols := c.symbolTable.FreeSymbols
-	nestedFreeSymbols := c.symbolTable.NestedFreeSymbols
-
-	c.exitScope()
-
-	allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
-	allFreeVars = append(allFreeVars, freeVars...)
-	for _, nfs := range nestedFreeSymbols {
-		allFreeVars = append(allFreeVars, Symbol{
-			Name:  nfs.Name,
-			Scope: FreeScope,
-			Index: len(allFreeVars),
-		})
-	}
-
-	compiledFn := &CompiledFunction{
-		Instructions:  fnInstructions,
-		NumLocals:     numLocals,
-		NumParameters: 1,
-		IsAsync:       true,
-		Free:          allFreeVars,
-	}
-
-	c.instructions = outerInstructions
-
-	needsClosure := len(freeVars) > 0 || len(nestedFreeSymbols) > 0
-	if needsClosure {
-		for _, freeSym := range freeSymbols {
-			if freeSym.Scope == GlobalScope {
-				c.emit(OpGetGlobal, freeSym.Index)
-			} else if freeSym.Scope == FreeScope {
-				c.emit1(OpGetFree, freeSym.Index)
-			} else {
-				c.emit1(OpGetLocal, freeSym.Index)
-			}
-		}
-		for _, nestedFree := range nestedFreeSymbols {
-			if nestedFree.Scope == FreeScope {
-				c.emit1(OpGetFree, nestedFree.Index)
-			} else {
-				c.emit1(OpGetLocal, nestedFree.Index)
-			}
-		}
-		totalFree := len(freeVars) + len(nestedFreeSymbols)
-		c.emitClosure(c.addConstant(compiledFn), totalFree)
-	} else {
-		c.emit(OpConstant, c.addConstant(compiledFn))
-	}
-
-	c.emit(OpMakeAsync)
-
-	return nil
+	// Same pattern as compileSetComprehension (which delegates to compileListComprehension) but with IsAsync: true
+	return c.compileAsyncListComprehension(&ast.AsyncListComprehension{
+		Token:    node.Token,
+		Element:  node.Element,
+		Variable: node.Variable,
+		Iterable: node.Iterable,
+		Filter:   node.Filter,
+	})
 }
 
 func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehension) error {
+	// Same pattern as compileDictComprehension but with IsAsync: true
 	outerInstructions := c.instructions
 	c.instructions = make(Instructions, 0)
 	c.lastInstruction = EmittedInstruction{}
@@ -2575,11 +2501,21 @@ func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehensio
 
 	c.enterScope()
 
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
 
-	c.symbolTable.Define(node.Variable.Value)
+	loopStart := len(c.instructions)
+
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+	c.changeOperand(endPos, len(c.instructions))
+	c.exitScope()
+
+	c.enterScope()
 
 	if err := c.Compile(node.Key); err != nil {
 		return err
@@ -2593,18 +2529,14 @@ func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehensio
 		if err := c.Compile(node.Filter); err != nil {
 			return err
 		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-		_ = jumpNotTruthyPos
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
 	}
 
-	c.emit(OpReturnValue)
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
 
-	if c.lastInstructionIs(OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(OpReturnValue) {
-		c.emit(OpReturn)
-	}
+	c.exitScope()
 
 	fnInstructions := c.instructions
 	numLocals := c.symbolTable.numDefinitions
@@ -2612,7 +2544,7 @@ func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehensio
 	freeSymbols := c.symbolTable.FreeSymbols
 	nestedFreeSymbols := c.symbolTable.NestedFreeSymbols
 
-	c.exitScope()
+	c.instructions = outerInstructions
 
 	allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
 	allFreeVars = append(allFreeVars, freeVars...)
@@ -2627,12 +2559,10 @@ func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehensio
 	compiledFn := &CompiledFunction{
 		Instructions:  fnInstructions,
 		NumLocals:     numLocals,
-		NumParameters: 1,
+		NumParameters: 0,
 		IsAsync:       true,
 		Free:          allFreeVars,
 	}
-
-	c.instructions = outerInstructions
 
 	needsClosure := len(freeVars) > 0 || len(nestedFreeSymbols) > 0
 	if needsClosure {
@@ -2664,6 +2594,7 @@ func (c *Compiler) compileAsyncDictComprehension(node *ast.AsyncDictComprehensio
 }
 
 func (c *Compiler) compileAsyncGeneratorExpression(node *ast.AsyncGeneratorExpression) error {
+	// Same pattern as compileListComprehension but with IsAsync: true
 	outerInstructions := c.instructions
 	c.instructions = make(Instructions, 0)
 	c.lastInstruction = EmittedInstruction{}
@@ -2671,11 +2602,23 @@ func (c *Compiler) compileAsyncGeneratorExpression(node *ast.AsyncGeneratorExpre
 
 	c.enterScope()
 
-	if err := c.Compile(node.Iterable); err != nil {
-		return err
-	}
+	iterSymbol := c.symbolTable.Define("__iter__")
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
 
-	c.symbolTable.Define(node.Variable.Value)
+	loopStart := len(c.instructions)
+
+	c.emit(OpGetGlobal, iterSymbol.Index)
+	c.emit1(OpCall, 0)
+	c.emit(OpMakeGenerator)
+
+	endPos := c.emit(OpJump, 0)
+
+	c.changeOperand(endPos, len(c.instructions))
+
+	c.exitScope()
+
+	c.enterScope()
 
 	if err := c.Compile(node.Element); err != nil {
 		return err
@@ -2685,18 +2628,14 @@ func (c *Compiler) compileAsyncGeneratorExpression(node *ast.AsyncGeneratorExpre
 		if err := c.Compile(node.Filter); err != nil {
 			return err
 		}
-		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
-		_ = jumpNotTruthyPos
+		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 0)
+		c.changeOperand(jumpNotTruthyPos, loopStart)
 	}
 
-	c.emit(OpReturnValue)
+	c.emit(OpYieldValue)
+	c.emit(OpPop)
 
-	if c.lastInstructionIs(OpPop) {
-		c.replaceLastPopWithReturn()
-	}
-	if !c.lastInstructionIs(OpReturnValue) {
-		c.emit(OpReturn)
-	}
+	c.exitScope()
 
 	fnInstructions := c.instructions
 	numLocals := c.symbolTable.numDefinitions
@@ -2704,7 +2643,7 @@ func (c *Compiler) compileAsyncGeneratorExpression(node *ast.AsyncGeneratorExpre
 	freeSymbols := c.symbolTable.FreeSymbols
 	nestedFreeSymbols := c.symbolTable.NestedFreeSymbols
 
-	c.exitScope()
+	c.instructions = outerInstructions
 
 	allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
 	allFreeVars = append(allFreeVars, freeVars...)
@@ -2719,12 +2658,10 @@ func (c *Compiler) compileAsyncGeneratorExpression(node *ast.AsyncGeneratorExpre
 	compiledFn := &CompiledFunction{
 		Instructions:  fnInstructions,
 		NumLocals:     numLocals,
-		NumParameters: 1,
+		NumParameters: 0,
 		IsAsync:       true,
 		Free:          allFreeVars,
 	}
-
-	c.instructions = outerInstructions
 
 	needsClosure := len(freeVars) > 0 || len(nestedFreeSymbols) > 0
 	if needsClosure {

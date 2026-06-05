@@ -135,14 +135,27 @@ func bytecodeHash(instructions []byte) uint32 {
 
 // translate converts stack-based bytecode to register-based bytecode.
 // It maintains a virtual stack that maps stack positions to registers.
+//
+// Known limitation: regAlloc grows monotonically and registers are never reused.
+// This does not affect correctness, only memory usage. A proper register allocator
+// would track liveness and reuse registers, but for now the simple approach works.
 func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object) []RegInstruction {
 	var regInstructions []RegInstruction
 	regAlloc := 0                    // next free register
 	stackToReg := make([]int, 1024)  // maps stack position to register
 	sp := 0
 
+	// Map from stack bytecode IP to register instruction index.
+	// Since register instructions have different lengths and counts than
+	// stack bytecode instructions, we must translate jump targets through
+	// this mapping to get correct register instruction indices.
+	stackIPToRegIP := make(map[int]int)
+
 	ip := 0
 	for ip < len(instructions) {
+		// Record the mapping before processing this instruction.
+		stackIPToRegIP[ip] = len(regInstructions)
+
 		op := compiler.Opcode(instructions[ip])
 
 		switch op {
@@ -705,6 +718,41 @@ func (rvm *RegisterVM) translate(instructions []byte, constants []objects.Object
 		}
 	}
 
+	// Second pass: fix up jump targets from stack bytecode IPs to register instruction indices.
+	// During the first pass, jump/branch instructions stored the original stack bytecode IP
+	// as their target operand. We now translate those through stackIPToRegIP.
+	for i, instr := range regInstructions {
+		switch instr.Opcode {
+		case RegOpJump:
+			// Operand[0] is the stack IP target
+			if targetRegIP, ok := stackIPToRegIP[instr.Operands[0]]; ok {
+				instr.Operands[0] = targetRegIP
+				regInstructions[i] = instr
+			}
+		case RegOpJumpIfFalse:
+			// Operand[1] is the stack IP target (Operand[0] is the condition register)
+			if targetRegIP, ok := stackIPToRegIP[instr.Operands[1]]; ok {
+				instr.Operands[1] = targetRegIP
+				regInstructions[i] = instr
+			}
+		case RegOpBeginTry:
+			// Operands[2] = handlerIP (stack IP), Operands[3] = finallyStartIP (stack IP)
+			if targetRegIP, ok := stackIPToRegIP[instr.Operands[2]]; ok {
+				instr.Operands[2] = targetRegIP
+			}
+			if targetRegIP, ok := stackIPToRegIP[instr.Operands[3]]; ok {
+				instr.Operands[3] = targetRegIP
+			}
+			regInstructions[i] = instr
+		case RegOpFinally:
+			// Operand[0] = finallyEndIP (stack IP)
+			if targetRegIP, ok := stackIPToRegIP[instr.Operands[0]]; ok {
+				instr.Operands[0] = targetRegIP
+				regInstructions[i] = instr
+			}
+		}
+	}
+
 	return regInstructions
 }
 
@@ -1121,6 +1169,9 @@ func (rvm *RegisterVM) RunReg() error {
 			for i := 0; i < numElements; i += 2 {
 				key := rvm.regGet(inst.Operands[2+i])
 				val := rvm.regGet(inst.Operands[2+i+1])
+				if err := objects.CheckHashable(key); err != nil {
+					return err
+				}
 				dict.Set(key, val)
 			}
 			rvm.regSet(dst, dict)
@@ -1130,7 +1181,11 @@ func (rvm *RegisterVM) RunReg() error {
 			numElements := inst.Operands[1]
 			set := objects.NewSet()
 			for i := 0; i < numElements; i++ {
-				set.Add(rvm.regGet(inst.Operands[2+i]))
+				elem := rvm.regGet(inst.Operands[2+i])
+				if err := objects.CheckHashable(elem); err != nil {
+					return err
+				}
+				set.Add(elem)
 			}
 			rvm.regSet(dst, set)
 
