@@ -613,14 +613,38 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] **RegexMatch 字段命名规范化** → v0.16 修复：Groups_→Groups, Pattern_→Pattern, OrigString→OriginalString, GroupIndices→GroupStarts
 - [x] **re 模块 flags 使用常量名替代魔术数字** → v0.15.1 修复
 
-### v0.17 — 标准库补全 (完成)
+### v0.17 — 标准库补全 (部分完成)
 
 - [x] 补全剩余字符串方法（maketrans, translate, format_map）
 - [x] 补全列表方法（__iadd__ 原地扩展）
-- [x] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^= 作为运算符重载）
+- [x] 补全集合方法（union, intersection, difference, symmetric_difference 等）
 - [x] 补全字典方法（__ior__ 运算符重载）
 - [x] io 模块完善（StringIO, BytesIO）
 - [x] collections 模块（defaultdict, Counter, OrderedDict, deque）
+- ⚠️ 集合运算符（|, &, -, ^, |=, &=, -=, ^=）方法调用可用，运算符语法不可用
+
+### v0.17.x — 标准库补全（续）
+
+#### 🔴 严重问题 (4 项)
+
+1. **集合字面量解析失败** — `parseBraceLiteral` 函数将 `{1, 2, 3}` 当作字典解析，导致 "no prefix parse function for , found" 错误
+   - 根因：第1546行直接返回 `parseDictLiteral()`，未检查逗号分隔的集合字面量
+   - 修复：在 `parseBraceLiteral` 中添加逗号检查，调用 `parseSetLiteral(firstExpr)`
+
+2. **`set()` 内置函数缺失** — GoPy 没有实现 `set()` 内置函数，无法通过 `set()` 创建集合对象
+   - 修复：在 `compiler.go` 的 `registerBuiltins()` 中添加 `setBuiltin`
+
+3. **`int()` 内置函数不支持无参数调用** — `intBuiltin` 要求恰好1个参数，导致 `collections.defaultdict(int)` 失败
+   - 修复：修改 `intBuiltin` 支持0个参数调用，返回默认值 0
+
+4. **集合运算符 `|` `&` `-` `^` 作为运算符不可用** — 方法调用可用 `set1.union(set2)`，但 `set1 | set2` 报错
+   - 根因：lexer/parser 将 `|` 识别为按位 OR，未实现集合运算符脱糖
+   - 修复：需要添加集合运算符的脱糖支持
+
+#### 🟡 中等问题 (2 项)
+
+5. **集合推导式 `{x for x in iter}` 解析可能受影响** — `parseSetLiteral` 中的推导式解析逻辑可能与 `parseBraceLiteral` 的调用逻辑有冲突
+6. **defaultdict 的 `__getitem__` 调用 factory 时未传递参数** — `defaultdict.__getitem__` 调用 `objects.CallFunction(dd.Factory)` 时未传递参数
 
 ### v1.0.0 — Production Ready
 
