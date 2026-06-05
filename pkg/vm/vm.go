@@ -1669,6 +1669,17 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			// Fallback: check if object implements GetAttr method (for custom objects like io.StringIO)
+			if getter, ok := obj.(interface{ GetAttr(string) (objects.Object, bool) }); ok {
+				if val, found := getter.GetAttr(attrName); found {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+			}
+
 			return fmt.Errorf("cannot get attribute on non-instance: %s", obj.Type())
 
 		case compiler.OpSetAttribute:

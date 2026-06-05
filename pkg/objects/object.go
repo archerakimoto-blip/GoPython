@@ -585,6 +585,74 @@ func (s *String) GetAttr(name string) (Object, bool) {
 			}
 			return &String{Value: strings.ReplaceAll(s.Value, "\t", strings.Repeat(" ", tabSize))}
 		}}, true
+	case "translate":
+		return &Builtin{Name: "str.translate", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("translate() takes at least 1 argument")
+			}
+			table, ok := args[0].(*Dict)
+			if !ok {
+				return NewTypeError("translate() argument must be a dict or None")
+			}
+			result := make([]byte, 0, len(s.Value))
+			for _, r := range s.Value {
+				if repl, ok := table.Get(&Integer{Value: int64(r)}); ok {
+					// Check for delete flag
+					if repl == nil {
+						continue
+					}
+					if replStr, ok := repl.(*String); ok {
+						result = append(result, replStr.Value...)
+					} else if replInt, ok := repl.(*Integer); ok {
+						result = append(result, byte(replInt.Value))
+					}
+				} else {
+					result = append(result, byte(r))
+				}
+			}
+			return &String{Value: string(result)}
+		}}, true
+	case "format_map":
+		return &Builtin{Name: "str.format_map", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("format_map() takes at least 1 argument")
+			}
+			mapping, ok := args[0].(Object)
+			if !ok {
+				return NewTypeError("format_map() argument must be a mapping")
+			}
+			// Simple format_map implementation - replace {} with values from mapping
+			result := s.Value
+			for {
+				openIdx := strings.Index(result, "{")
+				if openIdx == -1 {
+					break
+				}
+				closeIdx := strings.Index(result[openIdx:], "}")
+				if closeIdx == -1 {
+					break
+				}
+				closeIdx += openIdx
+				key := result[openIdx+1 : closeIdx]
+				var value string
+				// Try to get from mapping
+				if m, ok := mapping.(*Dict); ok {
+					if v, ok := m.Get(&String{Value: key}); ok {
+						value = v.Inspect()
+					} else {
+						value = ""
+					}
+				} else if m, ok := mapping.(*Instance); ok {
+					if v, ok := m.GetAttr(key); ok {
+						value = v.Inspect()
+					} else {
+						value = ""
+					}
+				}
+				result = result[:openIdx] + value + result[closeIdx+1:]
+			}
+			return &String{Value: result}
+		}}, true
 	}
 	return nil, false
 }
@@ -3718,7 +3786,44 @@ func CreateStringModule() *Module {
 			return &String{Value: capitalized}
 		},
 	}
-	
+
+	// string.maketrans - 创建字符映射表用于 str.translate()
+	// maketrans(from, to) 或 maketrans(dict)
+	stringModule.Fields["maketrans"] = &Builtin{
+		Name: "string.maketrans",
+		Fn: func(args ...Object) Object {
+			if len(args) == 0 {
+				return NewTypeError("maketrans() takes at least 1 argument")
+			}
+
+			// maketrans(dict) 形式
+			if len(args) == 1 {
+				dictArg, ok := args[0].(*Dict)
+				if !ok {
+					return NewTypeError("maketrans() argument must be a dict")
+				}
+				return dictArg
+			}
+
+			// maketrans(from, to) 形式
+			fromStr, ok1 := args[0].(*String)
+			toStr, ok2 := args[1].(*String)
+			if !ok1 || !ok2 {
+				return NewTypeError("maketrans() both arguments must be strings")
+			}
+
+			if len(fromStr.Value) != len(toStr.Value) {
+				return NewTypeError("maketrans() arguments must have same length")
+			}
+
+			result := NewDict()
+			for i, r := range fromStr.Value {
+				result.Set(&Integer{Value: int64(r)}, &String{Value: string(toStr.Value[i])})
+			}
+			return result
+		},
+	}
+
 	return stringModule
 }
 

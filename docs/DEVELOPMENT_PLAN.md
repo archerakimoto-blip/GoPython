@@ -613,14 +613,14 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] **RegexMatch 字段命名规范化** → v0.16 修复：Groups_→Groups, Pattern_→Pattern, OrigString→OriginalString, GroupIndices→GroupStarts
 - [x] **re 模块 flags 使用常量名替代魔术数字** → v0.15.1 修复
 
-### v0.17 — 标准库补全 (计划中)
+### v0.17 — 标准库补全 (完成)
 
-- [ ] 补全剩余字符串方法（maketrans, translate, format_map）
-- [ ] 补全列表方法（__iadd__ 原地扩展）
-- [ ] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^= 作为运算符重载）
-- [ ] 补全字典方法（__ior__ 运算符重载）
-- [ ] io 模块完善（StringIO, BytesIO）
-- [ ] collections 模块（defaultdict, Counter, OrderedDict, deque）
+- [x] 补全剩余字符串方法（maketrans, translate, format_map）
+- [x] 补全列表方法（__iadd__ 原地扩展）
+- [x] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^= 作为运算符重载）
+- [x] 补全字典方法（__ior__ 运算符重载）
+- [x] io 模块完善（StringIO, BytesIO）
+- [x] collections 模块（defaultdict, Counter, OrderedDict, deque）
 
 ### v1.0.0 — Production Ready
 

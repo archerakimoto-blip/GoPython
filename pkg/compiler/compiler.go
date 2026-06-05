@@ -11,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/go-py/go-python/pkg/ast"
+	"github.com/go-py/go-python/pkg/collections"
 	"github.com/go-py/go-python/pkg/concurrency"
 	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/interop"
+	"github.com/go-py/go-python/pkg/io"
 	"github.com/go-py/go-python/pkg/objects"
 	re "github.com/go-py/go-python/pkg/re"
 )
@@ -328,6 +330,20 @@ func (c *Compiler) registerBuiltins() {
 	reIndex := len(c.constants)
 	c.constants = append(c.constants, reModule)
 	c.symbolTable.DefineBuiltin("re", reIndex)
+
+	// 注册 io 模块
+	ioModule := io.CreateIOModule()
+	objects.RegisterModule("io", ioModule)
+	ioIndex := len(c.constants)
+	c.constants = append(c.constants, ioModule)
+	c.symbolTable.DefineBuiltin("io", ioIndex)
+
+	// 注册 collections 模块
+	collectionsModule := collections.CreateCollectionsModule()
+	objects.RegisterModule("collections", collectionsModule)
+	collectionsIndex := len(c.constants)
+	c.constants = append(c.constants, collectionsModule)
+	c.symbolTable.DefineBuiltin("collections", collectionsIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
