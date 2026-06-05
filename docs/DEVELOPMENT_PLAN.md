@@ -34,7 +34,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ## 当前实现状态
 
-### 1. 基础语法 (完成度: 98%)
+### 1. 基础语法 (完成度: 100%)
 
 ✅ 整数、浮点数、布尔值、字符串
 ✅ 数组、字典、集合
@@ -71,7 +71,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ match/case 模式匹配 - Python 3.10+
 ⚠️ 仅位置参数 (/) - **未实现** → ✅ 仅位置参数 (/) - v0.13 实现
 
-### 2. 高级特性 (完成度: 90%)
+### 2. 高级特性 (完成度: 95%)
 
 ✅ 异常处理 (try/except/finally) + 跨帧异常捕获 + 异常链 (raise E from e)
 ✅ 上下文管理器 (with)
@@ -97,7 +97,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ⚠️ Metaclasses - **未实现** → ✅ Metaclasses - v0.13 实现
 ⚠️ Exception groups - **未实现** → ✅ Exception groups - v0.13 实现
 
-### 3. 并发特性 (完成度: 70%)
+### 3. 并发特性 (完成度: 75%)
 
 ✅ Goroutine 协程
 ✅ Channel 通道
@@ -110,7 +110,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ⚠️ asyncio 模块 - **部分实现**
 ⚠️ async comprehensions - **未实现** → ✅ async comprehensions - v0.15 实现
 
-### 4. 运行时优化 (完成度: 85%)
+### 4. 运行时优化 (完成度: 90%)
 
 ✅ 内联缓存 (attrCache)
 ✅ 全局变量缓存 (globalCache/globalVersions)
@@ -126,7 +126,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ⚠️ 分代 GC - **未实现** → ✅ 分代 GC - v0.15 实现
 ⚠️ 直接线程 - **未实现**
 
-### 5. 标准库 (完成度: 80%)
+### 5. 标准库 (完成度: 85%)
 
 ✅ math, sys, os, json, gc
 ✅ random, string, time, datetime
@@ -157,6 +157,19 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 1. **try-only-finally 异常穿透** — 已修复：`OpEndTry` 改用 `raiseException()` 传播异常
 2. **描述符保留 VM 原生实现** — 这是正确的架构选择（性能关键路径不应迁移到脱糖层）
 3. **range 迭代器死循环** — 已修复：`desugarForToWhile` 改用 `AssignStatement` + 嵌套循环唯一索引变量名
+
+#### 🐍 Python 语义偏差 (v0.15 Code Review 新发现)
+
+1. **整数除法语义**：`6/3` 应返回 `2.0`（float），当前返回 `2`（int）
+2. **取模运算符号**：`-7 % 3` 应返回 `2`（与除数同号），当前返回 `-1`（与被除数同号）
+3. **List 负索引**：`lst[-1]` 不支持，`executeArrayIndex` 缺少负索引转换
+4. **越界索引**：`lst[100]` 应抛出 `IndexError`，当前返回 `None`
+5. **Boolean 算术**：`True + 1` 应等于 `2`，当前不支持
+6. **字符串乘法**：`"abc" * 3` 不支持
+7. **列表拼接**：`[1] + [2]` 不支持
+8. **OpAdd 隐式拼接**：`1 + "a"` 应抛出 `TypeError`，当前返回 `"1a"`
+9. **不可哈希类型作键**：`{[]: 1}` 应抛出 `TypeError`，当前使用指针地址
+10. **整数负数幂**：`2 ** -1` 应返回 `0.5`，当前报错
 
 ---
 
@@ -558,16 +571,57 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 11. **寄存器 VM 翻译缓存哈希冲突**：`bytecodeHash` 使用简单哈希函数，不同字节码可能产生相同哈希导致缓存命中错误结果
 12. **分代 GC markReferences 不追踪 SlotValues**：`markReferences`/`markReferencesMinor` 中 `Instance` 只遍历 `Fields`，不遍历 `SlotValues`，导致 slotted instance 的属性引用可能被错误回收
 
-### v0.16 — Bug 修复与优化 (计划中)
+### v0.16 — Bug 修复与 Python 语义对齐 (计划中)
 
-- [ ] 修复异步推导式编译器：生成正确的 for 循环 + 列表构建字节码
-- [ ] 修复异步推导式 filter 跳转回填
-- [ ] 修复寄存器 VM 翻译器跳转目标映射
-- [ ] re.sub/re.subn 支持 count 参数
-- [ ] 分代 GC markObject 使用 map 索引加速
-- [ ] 分代 GC MinorCollect → MajorCollect 并发安全修复
-- [ ] 寄存器 VM 寄存器分配器（回收不再使用的寄存器）
-- [ ] 分代 GC markReferences 追踪 SlotValues
+#### 🔴 严重语义错误 (必须修复)
+
+- [ ] **整数除法返回类型错误**：`6/3` 返回整数 `2` 而非浮点数 `2.0`。Python 的 `/` 运算符始终返回 float，`//` 才是整除。`executeBinaryIntegerOperation` 中 `OpDiv` 应返回 `Float` 对象
+- [ ] **整数取模符号不符合 Python 语义**：Go 的 `%` 运算符结果与被除数同号，Python 的 `%` 结果与除数同号。例如 `-7 % 3`：Go 返回 `-1`，Python 返回 `2`。需要实现 Python 风格取模：`((a % b) + b) % b`
+- [ ] **List 负索引不支持**：`executeArrayIndex` 中 `idx < 0` 直接返回 `None`，而 Python 中 `lst[-1]` 应返回最后一个元素。`executeTupleIndex` 已支持负索引但 `executeArrayIndex` 不支持
+- [ ] **越界索引返回 None 而非 IndexError**：`lst[100]` 在 Python 中应抛出 `IndexError`，当前返回 `None`。同样影响 Tuple、Range、String 索引
+- [ ] **异步推导式编译器缺少循环结构**：`compileAsyncListComprehension` 等函数只编译了子表达式然后 `OpReturnValue`，没有生成 for 循环和列表构建字节码
+- [ ] **异步推导式 filter 跳转未回填**：`c.emit(OpJumpNotTruthy, 9999)` 占位符从未回填
+- [ ] **寄存器 VM 翻译器跳转目标不一致**：栈式字节码 IP 与寄存器指令 IP 不对应，跳转目标映射错误
+
+#### 🟡 中等语义偏差
+
+- [ ] **Boolean 不参与算术运算**：Python 中 `True + 1 = 2`，`False + 1 = 1`，`True * 3 = 3`。当前 `executeBinaryOperation` 不处理 `BOOLEAN_OBJ`，布尔值无法参与 `+`、`-`、`*` 等运算
+- [ ] **字符串乘法不支持**：`"abc" * 3` 和 `3 * "abc"` 在 Python 中返回 `"abcabcabc"`，当前 `executeBinaryOperation` 对 `STRING_OBJ * INTEGER_OBJ` 和 `INTEGER_OBJ * STRING_OBJ` 不处理
+- [ ] **列表拼接不支持**：`[1] + [2]` 在 Python 中返回 `[1, 2]`，当前 `executeBinaryOperation` 对 `LIST_OBJ + LIST_OBJ` 不处理
+- [ ] **OpAdd 对非字符串类型错误拼接**：当左右操作数都不是数值/复数类型时，`OpAdd` 会调用 `toString()` 将任意类型拼接为字符串（如 `1 + "a"` 返回 `"1a"`），而 Python 应抛出 `TypeError`
+- [ ] **re.sub/re.subn 不支持 count 参数**：`re.sub(pattern, repl, string, count=0)` 的 `count` 参数被忽略
+- [ ] **re.subn 替换计数不准确**：通过 `FindAllString` 重新搜索计数而非统计实际替换次数
+- [ ] **re.findall 不处理可选组**：Python 中 `re.findall(r'(\d+)(?:-(\d+))?', '1-2 3')` 返回 `[('1', '2'), ('3', '')]`，当前实现不处理可选组未匹配的情况
+- [ ] **re.split 不保留分隔符**：Python 中 `re.split(r'(\W+)', 'Words, words.')` 返回 `['Words', ', ', 'words', '.', '']`（捕获组分隔符保留），当前实现丢弃所有分隔符
+- [ ] **re 模块不支持 callable 替换**：Python 中 `re.sub(pattern, lambda m: m.group(1).upper(), string)` 支持 callable 作为 repl，当前只支持字符串
+- [ ] **Dict/Set 允许不可哈希类型作为键**：`HashKey` 对 `List`/`Dict`/`Set` 等不可哈希类型使用指针地址作为 key，Python 应抛出 `TypeError: unhashable type`
+- [ ] **StopIteration 不是异常类型**：生成器耗尽时返回 `NewError("StopIteration: ...")` 而非 `StopIteration` 异常，无法被 `except StopIteration` 捕获
+- [ ] **整数负数幂运算错误**：`2 ** -1` 在 Python 中返回 `0.5`（float），当前返回 `fmt.Errorf("negative exponent not supported for integers")`
+- [ ] **分代 GC markObject 线性扫描 O(n)**：应使用 map 索引加速
+- [ ] **分代 GC MinorCollect → MajorCollect 并发安全风险**
+- [ ] **寄存器 VM 寄存器泄漏**：`regAlloc` 只增不减
+
+#### 🟢 缺失功能
+
+- [ ] **缺失内置函数**：`isinstance()`、`issubclass()`、`hasattr()`、`getattr()`、`setattr()`、`dir()`、`id()`、`hash()`、`callable()`、`enumerate()`、`map()`、`filter()`、`sorted()`、`reversed()`、`repr()`、`iter()`、`any()`、`all()`、`chr()`、`ord()`、`hex()`、`oct()`、`bin()`、`format()`
+- [ ] **缺失异常类型**：`StopIteration`、`OverflowError`、`FileNotFoundError`、`ImportError`、`SyntaxError`、`IndentationError`、`UnboundLocalError`、`RecursionError`、`MemoryError`
+- [ ] **缺失字符串方法**：`str.rfind()`、`str.rindex()`、`str.count()`、`str.isdigit()`、`str.isalpha()`、`str.isalnum()`、`str.isspace()`、`str.isupper()`、`str.islower()`、`str.istitle()`、`str.capitalize()`、`str.title()`、`str.swapcase()`、`str.center()`、`str.ljust()`、`str.rjust()`、`str.zfill()`、`str.partition()`、`str.rpartition()`、`str.encode()`、`str.format_map()`、`str.expandtabs()`、`str.isdecimal()`、`str.isnumeric()`、`str.isidentifier()`、`str.isprintable()`、`str.maketrans()`、`str.translate()`
+- [ ] **缺失列表方法**：`list.sort()`（带 key 和 reverse 参数）、`list.__iadd__`（`lst += [4]` 原地扩展）
+- [ ] **缺失字典方法**：`dict.fromkeys()`、`dict.__ior__`（`dict |= other`）
+- [ ] **缺失集合运算符**：`set | set`、`set & set`、`set - set`、`set ^ set`、`set |= set`、`set &= set` 等
+- [ ] **分代 GC markReferences 追踪 SlotValues**
+- [ ] **RegexMatch 字段命名规范化**（`Groups_` → `Groups`，`Pattern_` → `Pattern`）
+- [ ] **re 模块 flags 使用常量名替代魔术数字**
+
+### v0.17 — 标准库补全 (计划中)
+
+- [ ] 补全缺失内置函数（isinstance, getattr, setattr, dir, id, hash, callable, enumerate, map, filter, sorted, reversed, repr, iter, any, all, chr, ord, hex, oct, bin, format）
+- [ ] 补全字符串方法（rfind, rindex, count, isdigit, isalpha, isalnum, isspace, capitalize, title, swapcase, center, ljust, rjust, zfill, partition, encode 等）
+- [ ] 补全列表方法（sort with key/reverse, __iadd__）
+- [ ] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^=）
+- [ ] 补全异常类型（StopIteration, FileNotFoundError, ImportError, SyntaxError 等）
+- [ ] io 模块完善（StringIO, BytesIO）
+- [ ] collections 模块（defaultdict, Counter, OrderedDict, deque）
 
 ### v1.0.0 — Production Ready
 
