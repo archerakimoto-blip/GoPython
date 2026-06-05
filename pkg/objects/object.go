@@ -9,8 +9,10 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type ObjectType string
@@ -152,6 +154,441 @@ type String struct {
 func (s *String) Type() ObjectType { return STRING_OBJ }
 func (s *String) Inspect() string  { return s.Value }
 
+func (s *String) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "rfind":
+		return &Builtin{
+			Name: "str.rfind",
+			Fn: func(args ...Object) Object {
+				sub, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("rfind() argument must be a string")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start >= end {
+					return &Integer{Value: -1}
+				}
+				idx := strings.LastIndex(s.Value[start:end], sub.Value)
+				if idx == -1 {
+					return &Integer{Value: -1}
+				}
+				return &Integer{Value: int64(start + idx)}
+			},
+		}, true
+	case "rindex":
+		return &Builtin{
+			Name: "str.rindex",
+			Fn: func(args ...Object) Object {
+				sub, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("rindex() argument must be a string")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start >= end {
+					return NewValueError("substring not found")
+				}
+				idx := strings.LastIndex(s.Value[start:end], sub.Value)
+				if idx == -1 {
+					return NewValueError("substring not found")
+				}
+				return &Integer{Value: int64(start + idx)}
+			},
+		}, true
+	case "count":
+		return &Builtin{
+			Name: "str.count",
+			Fn: func(args ...Object) Object {
+				sub, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("count() argument must be a string")
+				}
+				return &Integer{Value: int64(strings.Count(s.Value, sub.Value))}
+			},
+		}, true
+	case "isdigit":
+		return &Builtin{Name: "str.isdigit", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsDigit(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isalpha":
+		return &Builtin{Name: "str.isalpha", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsLetter(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isalnum":
+		return &Builtin{Name: "str.isalnum", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isspace":
+		return &Builtin{Name: "str.isspace", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsSpace(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isupper":
+		return &Builtin{Name: "str.isupper", Fn: func(args ...Object) Object {
+			hasLetter := false
+			for _, r := range s.Value {
+				if unicode.IsLetter(r) {
+					hasLetter = true
+					if !unicode.IsUpper(r) {
+						return False
+					}
+				}
+			}
+			if hasLetter {
+				return True
+			}
+			return False
+		}}, true
+	case "islower":
+		return &Builtin{Name: "str.islower", Fn: func(args ...Object) Object {
+			hasLetter := false
+			for _, r := range s.Value {
+				if unicode.IsLetter(r) {
+					hasLetter = true
+					if !unicode.IsLower(r) {
+						return False
+					}
+				}
+			}
+			if hasLetter {
+				return True
+			}
+			return False
+		}}, true
+	case "istitle":
+		return &Builtin{Name: "str.istitle", Fn: func(args ...Object) Object {
+			words := strings.Fields(s.Value)
+			if len(words) == 0 {
+				return False
+			}
+			for _, w := range words {
+				runes := []rune(w)
+				if len(runes) == 0 {
+					continue
+				}
+				if !unicode.IsUpper(runes[0]) {
+					return False
+				}
+				for _, r := range runes[1:] {
+					if unicode.IsLetter(r) && !unicode.IsLower(r) {
+						return False
+					}
+				}
+			}
+			return True
+		}}, true
+	case "capitalize":
+		return &Builtin{Name: "str.capitalize", Fn: func(args ...Object) Object {
+			if len(s.Value) == 0 {
+				return s
+			}
+			runes := []rune(s.Value)
+			runes[0] = unicode.ToUpper(runes[0])
+			for i := 1; i < len(runes); i++ {
+				runes[i] = unicode.ToLower(runes[i])
+			}
+			return &String{Value: string(runes)}
+		}}, true
+	case "title":
+		return &Builtin{Name: "str.title", Fn: func(args ...Object) Object {
+			runes := []rune(s.Value)
+			nextUpper := true
+			for i, r := range runes {
+				if unicode.IsLetter(r) {
+					if nextUpper {
+						runes[i] = unicode.ToUpper(r)
+					} else {
+						runes[i] = unicode.ToLower(r)
+					}
+					nextUpper = false
+				} else {
+					nextUpper = true
+				}
+			}
+			return &String{Value: string(runes)}
+		}}, true
+	case "swapcase":
+		return &Builtin{Name: "str.swapcase", Fn: func(args ...Object) Object {
+			runes := []rune(s.Value)
+			for i, r := range runes {
+				if unicode.IsUpper(r) {
+					runes[i] = unicode.ToLower(r)
+				} else if unicode.IsLower(r) {
+					runes[i] = unicode.ToUpper(r)
+				}
+			}
+			return &String{Value: string(runes)}
+		}}, true
+	case "center":
+		return &Builtin{Name: "str.center", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("center() takes at least 1 argument")
+			}
+			width, ok := args[0].(*Integer)
+			if !ok {
+				return NewTypeError("center() argument must be an integer")
+			}
+			fillChar := " "
+			if len(args) >= 2 {
+				if fc, ok := args[1].(*String); ok {
+					fillChar = fc.Value
+				}
+			}
+			strLen := len(s.Value)
+			w := int(width.Value)
+			if w <= strLen {
+				return s
+			}
+			totalPad := w - strLen
+			leftPad := totalPad / 2
+			rightPad := totalPad - leftPad
+			return &String{Value: strings.Repeat(fillChar, leftPad) + s.Value + strings.Repeat(fillChar, rightPad)}
+		}}, true
+	case "ljust":
+		return &Builtin{Name: "str.ljust", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("ljust() takes at least 1 argument")
+			}
+			width, ok := args[0].(*Integer)
+			if !ok {
+				return NewTypeError("ljust() argument must be an integer")
+			}
+			fillChar := " "
+			if len(args) >= 2 {
+				if fc, ok := args[1].(*String); ok {
+					fillChar = fc.Value
+				}
+			}
+			w := int(width.Value)
+			if w <= len(s.Value) {
+				return s
+			}
+			return &String{Value: s.Value + strings.Repeat(fillChar, w-len(s.Value))}
+		}}, true
+	case "rjust":
+		return &Builtin{Name: "str.rjust", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("rjust() takes at least 1 argument")
+			}
+			width, ok := args[0].(*Integer)
+			if !ok {
+				return NewTypeError("rjust() argument must be an integer")
+			}
+			fillChar := " "
+			if len(args) >= 2 {
+				if fc, ok := args[1].(*String); ok {
+					fillChar = fc.Value
+				}
+			}
+			w := int(width.Value)
+			if w <= len(s.Value) {
+				return s
+			}
+			return &String{Value: strings.Repeat(fillChar, w-len(s.Value)) + s.Value}
+		}}, true
+	case "zfill":
+		return &Builtin{Name: "str.zfill", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("zfill() takes at least 1 argument")
+			}
+			width, ok := args[0].(*Integer)
+			if !ok {
+				return NewTypeError("zfill() argument must be an integer")
+			}
+			w := int(width.Value)
+			if w <= len(s.Value) {
+				return s
+			}
+			sign := ""
+			val := s.Value
+			if len(val) > 0 && (val[0] == '+' || val[0] == '-') {
+				sign = string(val[0])
+				val = val[1:]
+			}
+			return &String{Value: sign + strings.Repeat("0", w-len(s.Value)) + val}
+		}}, true
+	case "partition":
+		return &Builtin{Name: "str.partition", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("partition() takes at least 1 argument")
+			}
+			sep, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("partition() argument must be a string")
+			}
+			idx := strings.Index(s.Value, sep.Value)
+			if idx == -1 {
+				return &Tuple{Elements: []Object{s, &String{Value: ""}, &String{Value: ""}}}
+			}
+			return &Tuple{Elements: []Object{
+				&String{Value: s.Value[:idx]},
+				&String{Value: sep.Value},
+				&String{Value: s.Value[idx+len(sep.Value):]},
+			}}
+		}}, true
+	case "rpartition":
+		return &Builtin{Name: "str.rpartition", Fn: func(args ...Object) Object {
+			if len(args) < 1 {
+				return NewTypeError("rpartition() takes at least 1 argument")
+			}
+			sep, ok := args[0].(*String)
+			if !ok {
+				return NewTypeError("rpartition() argument must be a string")
+			}
+			idx := strings.LastIndex(s.Value, sep.Value)
+			if idx == -1 {
+				return &Tuple{Elements: []Object{&String{Value: ""}, &String{Value: ""}, s}}
+			}
+			return &Tuple{Elements: []Object{
+				&String{Value: s.Value[:idx]},
+				&String{Value: sep.Value},
+				&String{Value: s.Value[idx+len(sep.Value):]},
+			}}
+		}}, true
+	case "encode":
+		return &Builtin{Name: "str.encode", Fn: func(args ...Object) Object {
+			encoding := "utf-8"
+			if len(args) >= 1 {
+				if e, ok := args[0].(*String); ok {
+					encoding = e.Value
+				}
+			}
+			switch encoding {
+			case "utf-8", "utf8":
+				return &Bytes{Value: []byte(s.Value)}
+			case "ascii":
+				return &Bytes{Value: []byte(s.Value)}
+			default:
+				return &Bytes{Value: []byte(s.Value)}
+			}
+		}}, true
+	case "isdecimal":
+		return &Builtin{Name: "str.isdecimal", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsDigit(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isnumeric":
+		return &Builtin{Name: "str.isnumeric", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsNumber(r) {
+					return False
+				}
+			}
+			if len(s.Value) > 0 {
+				return True
+			}
+			return False
+		}}, true
+	case "isidentifier":
+		return &Builtin{Name: "str.isidentifier", Fn: func(args ...Object) Object {
+			if len(s.Value) == 0 {
+				return False
+			}
+			runes := []rune(s.Value)
+			if !unicode.IsLetter(runes[0]) && runes[0] != '_' {
+				return False
+			}
+			for _, r := range runes[1:] {
+				if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+					return False
+				}
+			}
+			return True
+		}}, true
+	case "isprintable":
+		return &Builtin{Name: "str.isprintable", Fn: func(args ...Object) Object {
+			for _, r := range s.Value {
+				if !unicode.IsPrint(r) {
+					return False
+				}
+			}
+			return True
+		}}, true
+	case "expandtabs":
+		return &Builtin{Name: "str.expandtabs", Fn: func(args ...Object) Object {
+			tabSize := 8
+			if len(args) >= 1 {
+				if i, ok := args[0].(*Integer); ok {
+					tabSize = int(i.Value)
+				}
+			}
+			return &String{Value: strings.ReplaceAll(s.Value, "\t", strings.Repeat(" ", tabSize))}
+		}}, true
+	}
+	return nil, false
+}
+
 type Bytes struct {
 	Value []byte
 }
@@ -291,6 +728,102 @@ func (l *List) Clear() {
 	l.Elements = []Object{}
 }
 
+func (l *List) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "sort":
+		return &Builtin{
+			Name: "list.sort",
+			Fn: func(args ...Object) Object {
+				var keyFn Object
+				reverse := false
+				if len(args) >= 1 {
+					if b, ok := args[0].(*Boolean); ok {
+						reverse = b.Value
+					} else if _, ok := args[0].(*None); !ok {
+						keyFn = args[0]
+					}
+				}
+				if len(args) >= 2 {
+					if b, ok := args[1].(*Boolean); ok {
+						reverse = b.Value
+					}
+				}
+				sort.SliceStable(l.Elements, func(i, j int) bool {
+					var aVal, bVal Object
+					if keyFn != nil {
+						aVal = CallFunction(keyFn, l.Elements[i])
+						bVal = CallFunction(keyFn, l.Elements[j])
+					} else {
+						aVal = l.Elements[i]
+						bVal = l.Elements[j]
+					}
+					cmp := compareObjectsForSort(aVal, bVal)
+					if reverse {
+						return cmp > 0
+					}
+					return cmp < 0
+				})
+				return None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
+func compareObjectsForSort(a, b Object) int {
+	switch a := a.(type) {
+	case *Integer:
+		if bInt, ok := b.(*Integer); ok {
+			if a.Value < bInt.Value {
+				return -1
+			}
+			if a.Value > bInt.Value {
+				return 1
+			}
+			return 0
+		}
+	case *Float:
+		if bFloat, ok := b.(*Float); ok {
+			if a.Value < bFloat.Value {
+				return -1
+			}
+			if a.Value > bFloat.Value {
+				return 1
+			}
+			return 0
+		}
+	case *String:
+		if bStr, ok := b.(*String); ok {
+			if a.Value < bStr.Value {
+				return -1
+			}
+			if a.Value > bStr.Value {
+				return 1
+			}
+			return 0
+		}
+	case *Boolean:
+		aInt := int64(0)
+		if a.Value {
+			aInt = 1
+		}
+		if bBool, ok := b.(*Boolean); ok {
+			bInt := int64(0)
+			if bBool.Value {
+				bInt = 1
+			}
+			if aInt < bInt {
+				return -1
+			}
+			if aInt > bInt {
+				return 1
+			}
+			return 0
+		}
+	}
+	return 0
+}
+
 type Set struct {
 	Elements map[string]Object
 	Keys     map[string]Object
@@ -361,6 +894,168 @@ func (s *Set) ToSlice() []Object {
 		slice = append(slice, v)
 	}
 	return slice
+}
+
+func (s *Set) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "union":
+		return &Builtin{
+			Name: "set.union",
+			Fn: func(args ...Object) Object {
+				result := NewSet()
+				for k, v := range s.Elements {
+					result.Elements[k] = v
+					result.Keys[k] = v
+				}
+				for _, arg := range args {
+					switch other := arg.(type) {
+					case *Set:
+						for k, v := range other.Elements {
+							result.Elements[k] = v
+							result.Keys[k] = v
+						}
+					case *List:
+						for _, elem := range other.Elements {
+							result.Add(elem)
+						}
+					case *Tuple:
+						for _, elem := range other.Elements {
+							result.Add(elem)
+						}
+					}
+				}
+				return result
+			},
+		}, true
+	case "intersection":
+		return &Builtin{
+			Name: "set.intersection",
+			Fn: func(args ...Object) Object {
+				result := NewSet()
+				if len(args) == 0 {
+					return result
+				}
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("intersection() argument must be a set")
+				}
+				for k, v := range s.Elements {
+					if _, ok := other.Elements[k]; ok {
+						result.Elements[k] = v
+						result.Keys[k] = v
+					}
+				}
+				return result
+			},
+		}, true
+	case "difference":
+		return &Builtin{
+			Name: "set.difference",
+			Fn: func(args ...Object) Object {
+				result := NewSet()
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("difference() argument must be a set")
+				}
+				for k, v := range s.Elements {
+					if _, ok := other.Elements[k]; !ok {
+						result.Elements[k] = v
+						result.Keys[k] = v
+					}
+				}
+				return result
+			},
+		}, true
+	case "symmetric_difference":
+		return &Builtin{
+			Name: "set.symmetric_difference",
+			Fn: func(args ...Object) Object {
+				result := NewSet()
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("symmetric_difference() argument must be a set")
+				}
+				for k, v := range s.Elements {
+					if _, ok := other.Elements[k]; !ok {
+						result.Elements[k] = v
+						result.Keys[k] = v
+					}
+				}
+				for k, v := range other.Elements {
+					if _, ok := s.Elements[k]; !ok {
+						result.Elements[k] = v
+						result.Keys[k] = v
+					}
+				}
+				return result
+			},
+		}, true
+	case "issubset":
+		return &Builtin{
+			Name: "set.issubset",
+			Fn: func(args ...Object) Object {
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("issubset() argument must be a set")
+				}
+				for k := range s.Elements {
+					if _, ok := other.Elements[k]; !ok {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "issuperset":
+		return &Builtin{
+			Name: "set.issuperset",
+			Fn: func(args ...Object) Object {
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("issuperset() argument must be a set")
+				}
+				for k := range other.Elements {
+					if _, ok := s.Elements[k]; !ok {
+						return False
+					}
+				}
+				return True
+			},
+		}, true
+	case "update":
+		return &Builtin{
+			Name: "set.update",
+			Fn: func(args ...Object) Object {
+				for _, arg := range args {
+					switch other := arg.(type) {
+					case *Set:
+						for k, v := range other.Elements {
+							s.Elements[k] = v
+							s.Keys[k] = v
+						}
+					case *List:
+						for _, elem := range other.Elements {
+							s.Add(elem)
+						}
+					}
+				}
+				return None_
+			},
+		}, true
+	case "copy":
+		return &Builtin{
+			Name: "set.copy",
+			Fn: func(args ...Object) Object {
+				result := NewSet()
+				for k, v := range s.Elements {
+					result.Elements[k] = v
+					result.Keys[k] = v
+				}
+				return result
+			},
+		}, true
+	}
+	return nil, false
 }
 
 type Dict struct {
@@ -470,6 +1165,41 @@ func (d *Dict) ValuesSlice() []Object {
 		values = append(values, d.Pairs[key])
 	}
 	return values
+}
+
+func (d *Dict) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "fromkeys":
+		return &Builtin{
+			Name: "dict.fromkeys",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("fromkeys() takes at least 1 argument")
+				}
+				var keys []Object
+				switch iter := args[0].(type) {
+				case *List:
+					keys = iter.Elements
+				case *Tuple:
+					keys = iter.Elements
+				case *Set:
+					keys = iter.ToSlice()
+				default:
+					return NewTypeError("'%s' object is not iterable", args[0].Type())
+				}
+				defaultValue := Object(None_)
+				if len(args) >= 2 {
+					defaultValue = args[1]
+				}
+				result := NewDict()
+				for _, key := range keys {
+					result.Set(key, defaultValue)
+				}
+				return result
+			},
+		}, true
+	}
+	return nil, false
 }
 
 // DictKeys is a view object for dict.keys()
@@ -983,6 +1713,71 @@ func (sm *StaticMethod) DescSet(obj Object, value Object) error {
 }
 func (sm *StaticMethod) IsDataDesc() bool { return false }
 
+type BoundMethod struct {
+	Self   *Instance
+	Method Object
+}
+
+func (bm *BoundMethod) Type() ObjectType { return FUNCTION_OBJ }
+func (bm *BoundMethod) Inspect() string  { return "<bound method>" }
+
+// IsInstanceOf checks if obj is an instance of the given class
+func IsInstanceOf(obj Object, class *Class) bool {
+	switch o := obj.(type) {
+	case *Instance:
+		if o.Class == class {
+			return true
+		}
+		// Check class hierarchy
+		return isSubclassOf(o.Class, class)
+	case *Integer:
+		return class.Name == "int" || class.Name == "object"
+	case *Float:
+		return class.Name == "float" || class.Name == "object"
+	case *String:
+		return class.Name == "str" || class.Name == "object"
+	case *Boolean:
+		return class.Name == "bool" || class.Name == "int" || class.Name == "object"
+	case *List:
+		return class.Name == "list" || class.Name == "object"
+	case *Dict:
+		return class.Name == "dict" || class.Name == "object"
+	case *Tuple:
+		return class.Name == "tuple" || class.Name == "object"
+	case *Set:
+		return class.Name == "set" || class.Name == "object"
+	case *None:
+		return class.Name == "NoneType" || class.Name == "object"
+	case *Builtin:
+		return class.Name == "function" || class.Name == "object"
+	case *Closure:
+		return class.Name == "function" || class.Name == "object"
+	case *Class:
+		return class.Name == "type" || class.Name == "object"
+	}
+	return class.Name == "object"
+}
+
+// IsSubclassOf checks if cls is a subclass of parent
+func IsSubclassOf(cls, parent *Class) bool {
+	return isSubclassOf(cls, parent)
+}
+
+func isSubclassOf(cls, parent *Class) bool {
+	if cls == parent {
+		return true
+	}
+	for _, base := range cls.SuperClasses {
+		if isSubclassOf(base, parent) {
+			return true
+		}
+	}
+	if cls.SuperClass != nil {
+		return isSubclassOf(cls.SuperClass, parent)
+	}
+	return false
+}
+
 func (c *Class) ComputeMRO() []*Class {
 	if len(c.SuperClasses) == 0 {
 		if c.SuperClass != nil {
@@ -1442,11 +2237,11 @@ func (p *RegexPattern) GetAttr(name string) (Object, bool) {
 
 // RegexMatch represents a match result from a regular expression search
 type RegexMatch struct {
-	Groups_  []string
-	GroupIndices []int // start positions for each group
-	GroupEnds    []int // end positions for each group
-	OrigString string
-	Pattern_   *RegexPattern
+	Groups         []string
+	GroupStarts    []int // start positions for each group
+	GroupEnds      []int // end positions for each group
+	OriginalString string
+	Pattern        *RegexPattern
 }
 
 func (m *RegexMatch) Type() ObjectType { return REGEX_MATCH_OBJ }
@@ -1455,12 +2250,12 @@ func (m *RegexMatch) Inspect() string  { return "<re.Match object>" }
 func (m *RegexMatch) GetAttr(name string) (Object, bool) {
 	switch name {
 	case "string":
-		return &String{Value: m.OrigString}, true
+		return &String{Value: m.OriginalString}, true
 	case "re":
-		return m.Pattern_, true
+		return m.Pattern, true
 	case "lastindex":
-		if len(m.Groups_) > 1 {
-			return &Integer{Value: int64(len(m.Groups_) - 1)}, true
+		if len(m.Groups) > 1 {
+			return &Integer{Value: int64(len(m.Groups) - 1)}, true
 		}
 		return None_, true
 	case "group":
@@ -1475,10 +2270,10 @@ func (m *RegexMatch) GetAttr(name string) (Object, bool) {
 						return NewTypeError("group() argument must be an integer")
 					}
 				}
-				if idx < 0 || int(idx) >= len(m.Groups_) {
+				if idx < 0 || int(idx) >= len(m.Groups) {
 					return NewIndexError("no such group")
 				}
-				return &String{Value: m.Groups_[idx]}
+				return &String{Value: m.Groups[idx]}
 			},
 		}, true
 	case "start":
@@ -1491,10 +2286,10 @@ func (m *RegexMatch) GetAttr(name string) (Object, bool) {
 						idx = i.Value
 					}
 				}
-				if idx < 0 || int(idx) >= len(m.GroupIndices) {
+				if idx < 0 || int(idx) >= len(m.GroupStarts) {
 					return NewIndexError("no such group")
 				}
-				return &Integer{Value: int64(m.GroupIndices[idx])}
+				return &Integer{Value: int64(m.GroupStarts[idx])}
 			},
 		}, true
 	case "end":
@@ -1523,11 +2318,11 @@ func (m *RegexMatch) GetAttr(name string) (Object, bool) {
 						idx = i.Value
 					}
 				}
-				if idx < 0 || int(idx) >= len(m.GroupIndices) {
+				if idx < 0 || int(idx) >= len(m.GroupStarts) {
 					return NewIndexError("no such group")
 				}
 				return &Tuple{Elements: []Object{
-					&Integer{Value: int64(m.GroupIndices[idx])},
+					&Integer{Value: int64(m.GroupStarts[idx])},
 					&Integer{Value: int64(m.GroupEnds[idx])},
 				}}
 			},
@@ -1536,9 +2331,9 @@ func (m *RegexMatch) GetAttr(name string) (Object, bool) {
 		return &Builtin{
 			Name: "Match.groups",
 			Fn: func(args ...Object) Object {
-				elements := make([]Object, 0, len(m.Groups_)-1)
-				for i := 1; i < len(m.Groups_); i++ {
-					elements = append(elements, &String{Value: m.Groups_[i]})
+				elements := make([]Object, 0, len(m.Groups)-1)
+				for i := 1; i < len(m.Groups); i++ {
+					elements = append(elements, &String{Value: m.Groups[i]})
 				}
 				return &Tuple{Elements: elements}
 			},
@@ -1713,23 +2508,23 @@ func PatternCallableSub(p *RegexPattern, repl Object, s string, count int) Objec
 
 func newMatchFromLoc(p *RegexPattern, s string, loc []int) *RegexMatch {
 	groups := make([]string, len(loc)/2)
-	groupIndices := make([]int, len(loc)/2)
+	groupStarts := make([]int, len(loc)/2)
 	groupEnds := make([]int, len(loc)/2)
 	for i := 0; i < len(loc)/2; i++ {
 		start := loc[i*2]
 		end := loc[i*2+1]
-		groupIndices[i] = start
+		groupStarts[i] = start
 		groupEnds[i] = end
 		if start >= 0 && end >= 0 {
 			groups[i] = s[start:end]
 		}
 	}
 	return &RegexMatch{
-		Groups_:      groups,
-		GroupIndices: groupIndices,
-		GroupEnds:    groupEnds,
-		OrigString:   s,
-		Pattern_:     p,
+		Groups:         groups,
+		GroupStarts:    groupStarts,
+		GroupEnds:      groupEnds,
+		OriginalString: s,
+		Pattern:        p,
 	}
 }
 
@@ -1901,6 +2696,42 @@ func NewRuntimeError(format string, a ...interface{}) *Error {
 
 func NewNotImplementedError(format string, a ...interface{}) *Error {
 	return NewErrorWithType("NotImplementedError", format, a...)
+}
+
+func NewStopIteration(format string, a ...interface{}) *Error {
+	return NewErrorWithType("StopIteration", format, a...)
+}
+
+func NewOverflowError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("OverflowError", format, a...)
+}
+
+func NewFileNotFoundError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("FileNotFoundError", format, a...)
+}
+
+func NewImportError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("ImportError", format, a...)
+}
+
+func NewSyntaxError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("SyntaxError", format, a...)
+}
+
+func NewIndentationError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("IndentationError", format, a...)
+}
+
+func NewUnboundLocalError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("UnboundLocalError", format, a...)
+}
+
+func NewRecursionError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("RecursionError", format, a...)
+}
+
+func NewMemoryError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("MemoryError", format, a...)
 }
 
 func Equal(a, b Object) bool {

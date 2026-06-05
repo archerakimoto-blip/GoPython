@@ -128,23 +128,23 @@ func callableSub(p *objects.RegexPattern, repl objects.Object, s string, count i
 // needed here to create match objects for callable repl support.
 func newMatchFromLoc(p *objects.RegexPattern, s string, loc []int) *objects.RegexMatch {
 	groups := make([]string, len(loc)/2)
-	groupIndices := make([]int, len(loc)/2)
+	groupStarts := make([]int, len(loc)/2)
 	groupEnds := make([]int, len(loc)/2)
 	for i := 0; i < len(loc)/2; i++ {
 		start := loc[i*2]
 		end := loc[i*2+1]
-		groupIndices[i] = start
+		groupStarts[i] = start
 		groupEnds[i] = end
 		if start >= 0 && end >= 0 {
 			groups[i] = s[start:end]
 		}
 	}
 	return &objects.RegexMatch{
-		Groups_:      groups,
-		GroupIndices: groupIndices,
-		GroupEnds:    groupEnds,
-		OrigString:   s,
-		Pattern_:     p,
+		Groups:         groups,
+		GroupStarts:    groupStarts,
+		GroupEnds:      groupEnds,
+		OriginalString: s,
+		Pattern:        p,
 	}
 }
 

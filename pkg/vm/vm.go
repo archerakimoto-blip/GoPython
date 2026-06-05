@@ -1428,6 +1428,54 @@ func (vm *VM) Run() error {
 				continue
 			}
 
+			// Handle String attribute access
+			if strObj, ok := obj.(*objects.String); ok {
+				if val, found := strObj.GetAttr(attrName); found {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Handle List attribute access
+			if listObj, ok := obj.(*objects.List); ok {
+				if val, found := listObj.GetAttr(attrName); found {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
+			// Handle Set attribute access
+			if setObj, ok := obj.(*objects.Set); ok {
+				if val, found := setObj.GetAttr(attrName); found {
+					err := vm.push(val)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				err := vm.push(objects.None_)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+
 			// Handle Dict attribute access (keys, values, items, etc.)
 			if dictObj, ok := obj.(*objects.Dict); ok {
 				switch attrName {
@@ -1569,6 +1617,14 @@ func (vm *VM) Run() error {
 						},
 					}
 					err := vm.push(copyFn)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+				// Fallback to Dict's GetAttr method (e.g., fromkeys)
+				if val, found := dictObj.GetAttr(attrName); found {
+					err := vm.push(val)
 					if err != nil {
 						return err
 					}

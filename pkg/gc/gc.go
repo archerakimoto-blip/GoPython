@@ -336,6 +336,11 @@ func (gc *GarbageCollector) markReferencesMinor(obj objects.Object) {
 		for _, field := range o.Fields {
 			gc.markObjectMinor(field)
 		}
+		for _, val := range o.SlotValues {
+			if val != nil {
+				gc.markObjectMinor(val)
+			}
+		}
 	case *objects.Class:
 		if o.SuperClass != nil {
 			gc.markObjectMinor(o.SuperClass)
@@ -412,6 +417,11 @@ func (gc *GarbageCollector) markReferences(obj objects.Object) {
 	case *objects.Instance:
 		for _, field := range o.Fields {
 			gc.markObject(field)
+		}
+		for _, val := range o.SlotValues {
+			if val != nil {
+				gc.markObject(val)
+			}
 		}
 	case *objects.Class:
 		if o.SuperClass != nil {

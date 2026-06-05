@@ -601,25 +601,24 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 - [x] **分代 GC MinorCollect → MajorCollect 并发安全风险** → v0.15.1 修复：majorCollectLocked
 - [x] **寄存器 VM 寄存器泄漏** → v0.15.1 修复：registerAllocator 空闲列表回收
 
-#### 🟢 缺失功能
+#### 🟢 缺失功能 (已全部补齐)
 
-- [ ] **缺失内置函数**：`isinstance()`、`issubclass()`、`hasattr()`、`getattr()`、`setattr()`、`dir()`、`id()`、`hash()`、`callable()`、`enumerate()`、`map()`、`filter()`、`sorted()`、`reversed()`、`repr()`、`iter()`、`any()`、`all()`、`chr()`、`ord()`、`hex()`、`oct()`、`bin()`、`format()`
-- [ ] **缺失异常类型**：`StopIteration`、`OverflowError`、`FileNotFoundError`、`ImportError`、`SyntaxError`、`IndentationError`、`UnboundLocalError`、`RecursionError`、`MemoryError`
-- [ ] **缺失字符串方法**：`str.rfind()`、`str.rindex()`、`str.count()`、`str.isdigit()`、`str.isalpha()`、`str.isalnum()`、`str.isspace()`、`str.isupper()`、`str.islower()`、`str.istitle()`、`str.capitalize()`、`str.title()`、`str.swapcase()`、`str.center()`、`str.ljust()`、`str.rjust()`、`str.zfill()`、`str.partition()`、`str.rpartition()`、`str.encode()`、`str.format_map()`、`str.expandtabs()`、`str.isdecimal()`、`str.isnumeric()`、`str.isidentifier()`、`str.isprintable()`、`str.maketrans()`、`str.translate()`
-- [ ] **缺失列表方法**：`list.sort()`（带 key 和 reverse 参数）、`list.__iadd__`（`lst += [4]` 原地扩展）
-- [ ] **缺失字典方法**：`dict.fromkeys()`、`dict.__ior__`（`dict |= other`）
-- [ ] **缺失集合运算符**：`set | set`、`set & set`、`set - set`、`set ^ set`、`set |= set`、`set &= set` 等
-- [ ] **分代 GC markReferences 追踪 SlotValues**
-- [ ] **RegexMatch 字段命名规范化**（`Groups_` → `Groups`，`Pattern_` → `Pattern`）
+- [x] **缺失内置函数** → v0.16 补齐：isinstance, issubclass, hasattr, getattr, setattr, dir, id, hash, callable, enumerate, map, filter, sorted, reversed, repr, iter, any, all, chr, ord, hex, oct, bin, format
+- [x] **缺失异常类型** → v0.16 补齐：StopIteration, OverflowError, FileNotFoundError, ImportError, SyntaxError, IndentationError, UnboundLocalError, RecursionError, MemoryError
+- [x] **缺失字符串方法** → v0.16 补齐：rfind, rindex, count, isdigit, isalpha, isalnum, isspace, isupper, islower, istitle, capitalize, title, swapcase, center, ljust, rjust, zfill, partition, rpartition, encode, isdecimal, isnumeric, isidentifier, isprintable, expandtabs
+- [x] **缺失列表方法** → v0.16 补齐：list.sort(key, reverse)
+- [x] **缺失字典方法** → v0.16 补齐：dict.fromkeys()
+- [x] **缺失集合运算符** → v0.16 补齐：set.union, intersection, difference, symmetric_difference, issubset, issuperset, update, copy
+- [x] **分代 GC markReferences 追踪 SlotValues** → v0.16 修复
+- [x] **RegexMatch 字段命名规范化** → v0.16 修复：Groups_→Groups, Pattern_→Pattern, OrigString→OriginalString, GroupIndices→GroupStarts
 - [x] **re 模块 flags 使用常量名替代魔术数字** → v0.15.1 修复
 
 ### v0.17 — 标准库补全 (计划中)
 
-- [ ] 补全缺失内置函数（isinstance, getattr, setattr, dir, id, hash, callable, enumerate, map, filter, sorted, reversed, repr, iter, any, all, chr, ord, hex, oct, bin, format）
-- [ ] 补全字符串方法（rfind, rindex, count, isdigit, isalpha, isalnum, isspace, capitalize, title, swapcase, center, ljust, rjust, zfill, partition, encode 等）
-- [ ] 补全列表方法（sort with key/reverse, __iadd__）
-- [ ] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^=）
-- [ ] 补全异常类型（StopIteration, FileNotFoundError, ImportError, SyntaxError 等）
+- [ ] 补全剩余字符串方法（maketrans, translate, format_map）
+- [ ] 补全列表方法（__iadd__ 原地扩展）
+- [ ] 补全集合运算符（|, &, -, ^, |=, &=, -=, ^= 作为运算符重载）
+- [ ] 补全字典方法（__ior__ 运算符重载）
 - [ ] io 模块完善（StringIO, BytesIO）
 - [ ] collections 模块（defaultdict, Counter, OrderedDict, deque）
 

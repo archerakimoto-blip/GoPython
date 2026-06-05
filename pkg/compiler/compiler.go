@@ -2,8 +2,11 @@ package compiler
 
 import (
 	"fmt"
+	"math"
 	"math/cmplx"
 	"os"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -1162,6 +1165,708 @@ func (c *Compiler) registerBuiltins() {
 		c.constants = append(c.constants, builtin)
 		c.symbolTable.DefineBuiltin(et.name, idx)
 	}
+
+	// --- Additional Python builtin functions ---
+
+	// 1. isinstance(obj, cls)
+	isinstanceBuiltin := &objects.Builtin{
+		Name: "isinstance",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("isinstance() takes exactly 2 arguments")
+			}
+			obj := args[0]
+			cls := args[1]
+
+			// Handle tuple of classes
+			if clsTuple, ok := cls.(*objects.Tuple); ok {
+				for _, c := range clsTuple.Elements {
+					if classObj, ok := c.(*objects.Class); ok {
+						if objects.IsInstanceOf(obj, classObj) {
+							return objects.True
+						}
+					}
+				}
+				return objects.False
+			}
+
+			classObj, ok := cls.(*objects.Class)
+			if !ok {
+				return objects.NewTypeError("isinstance() arg 2 must be a class or tuple of classes")
+			}
+			if objects.IsInstanceOf(obj, classObj) {
+				return objects.True
+			}
+			return objects.False
+		},
+	}
+	isinstanceIndex := len(c.constants)
+	c.constants = append(c.constants, isinstanceBuiltin)
+	c.symbolTable.DefineBuiltin("isinstance", isinstanceIndex)
+
+	// 2. issubclass(cls, parent)
+	issubclassBuiltin := &objects.Builtin{
+		Name: "issubclass",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("issubclass() takes exactly 2 arguments")
+			}
+			cls, ok := args[0].(*objects.Class)
+			if !ok {
+				return objects.NewTypeError("issubclass() arg 1 must be a class")
+			}
+			parent := args[1]
+
+			if parentTuple, ok := parent.(*objects.Tuple); ok {
+				for _, p := range parentTuple.Elements {
+					if parentCls, ok := p.(*objects.Class); ok {
+						if objects.IsSubclassOf(cls, parentCls) {
+							return objects.True
+						}
+					}
+				}
+				return objects.False
+			}
+
+			parentCls, ok := parent.(*objects.Class)
+			if !ok {
+				return objects.NewTypeError("issubclass() arg 2 must be a class or tuple of classes")
+			}
+			if objects.IsSubclassOf(cls, parentCls) {
+				return objects.True
+			}
+			return objects.False
+		},
+	}
+	issubclassIndex := len(c.constants)
+	c.constants = append(c.constants, issubclassBuiltin)
+	c.symbolTable.DefineBuiltin("issubclass", issubclassIndex)
+
+	// 3. hasattr(obj, name)
+	hasattrBuiltin := &objects.Builtin{
+		Name: "hasattr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("hasattr() takes exactly 2 arguments")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("hasattr(): attribute name must be a string")
+			}
+			switch obj := args[0].(type) {
+			case *objects.Instance:
+				if _, ok := obj.Fields[name.Value]; ok {
+					return objects.True
+				}
+				if _, ok := obj.Class.Methods[name.Value]; ok {
+					return objects.True
+				}
+			case *objects.Module:
+				if _, ok := obj.Fields[name.Value]; ok {
+					return objects.True
+				}
+			case *objects.Class:
+				if _, ok := obj.Methods[name.Value]; ok {
+					return objects.True
+				}
+			}
+			return objects.False
+		},
+	}
+	hasattrIndex := len(c.constants)
+	c.constants = append(c.constants, hasattrBuiltin)
+	c.symbolTable.DefineBuiltin("hasattr", hasattrIndex)
+
+	// 4. getattr(obj, name[, default])
+	getattrBuiltin := &objects.Builtin{
+		Name: "getattr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 2 {
+				return objects.NewTypeError("getattr() takes at least 2 arguments")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("getattr(): attribute name must be a string")
+			}
+			switch obj := args[0].(type) {
+			case *objects.Instance:
+				if val, ok := obj.Fields[name.Value]; ok {
+					return val
+				}
+				if method, ok := obj.Class.Methods[name.Value]; ok {
+					return &objects.BoundMethod{Self: obj, Method: method}
+				}
+			case *objects.Module:
+				if val, ok := obj.Fields[name.Value]; ok {
+					return val
+				}
+			case *objects.Class:
+				if val, ok := obj.Methods[name.Value]; ok {
+					return val
+				}
+			case *objects.RegexPattern:
+				if val, ok := obj.GetAttr(name.Value); ok {
+					return val
+				}
+			case *objects.RegexMatch:
+				if val, ok := obj.GetAttr(name.Value); ok {
+					return val
+				}
+			}
+			if len(args) >= 3 {
+				return args[2] // default value
+			}
+			return objects.NewAttributeError("'%s' object has no attribute '%s'", args[0].Type(), name.Value)
+		},
+	}
+	getattrIndex := len(c.constants)
+	c.constants = append(c.constants, getattrBuiltin)
+	c.symbolTable.DefineBuiltin("getattr", getattrIndex)
+
+	// 5. setattr(obj, name, value)
+	setattrBuiltin := &objects.Builtin{
+		Name: "setattr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 3 {
+				return objects.NewTypeError("setattr() takes exactly 3 arguments")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("setattr(): attribute name must be a string")
+			}
+			switch obj := args[0].(type) {
+			case *objects.Instance:
+				obj.Fields[name.Value] = args[2]
+			case *objects.Module:
+				obj.Fields[name.Value] = args[2]
+			default:
+				return objects.NewAttributeError("cannot set attribute '%s' on '%s' object", name.Value, args[0].Type())
+			}
+			return objects.None_
+		},
+	}
+	setattrIndex := len(c.constants)
+	c.constants = append(c.constants, setattrBuiltin)
+	c.symbolTable.DefineBuiltin("setattr", setattrIndex)
+
+	// 6. dir(obj)
+	dirBuiltin := &objects.Builtin{
+		Name: "dir",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("dir() takes exactly 1 argument")
+			}
+			var names []string
+			switch obj := args[0].(type) {
+			case *objects.Instance:
+				for k := range obj.Fields {
+					names = append(names, k)
+				}
+				for k := range obj.Class.Methods {
+					names = append(names, k)
+				}
+			case *objects.Module:
+				for k := range obj.Fields {
+					names = append(names, k)
+				}
+			case *objects.Class:
+				for k := range obj.Methods {
+					names = append(names, k)
+				}
+			}
+			sort.Strings(names)
+			elements := make([]objects.Object, len(names))
+			for i, n := range names {
+				elements[i] = &objects.String{Value: n}
+			}
+			return &objects.List{Elements: elements}
+		},
+	}
+	dirIndex := len(c.constants)
+	c.constants = append(c.constants, dirBuiltin)
+	c.symbolTable.DefineBuiltin("dir", dirIndex)
+
+	// 7. id(obj)
+	idBuiltin := &objects.Builtin{
+		Name: "id",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("id() takes exactly 1 argument")
+			}
+			return &objects.Integer{Value: int64(reflect.ValueOf(args[0]).Pointer())}
+		},
+	}
+	idIndex := len(c.constants)
+	c.constants = append(c.constants, idBuiltin)
+	c.symbolTable.DefineBuiltin("id", idIndex)
+
+	// 8. hash(obj)
+	hashBuiltin := &objects.Builtin{
+		Name: "hash",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("hash() takes exactly 1 argument")
+			}
+			switch obj := args[0].(type) {
+			case *objects.Integer:
+				return &objects.Integer{Value: obj.Value}
+			case *objects.String:
+				h := int64(0)
+				for _, c := range obj.Value {
+					h = h*31 + int64(c)
+				}
+				return &objects.Integer{Value: h}
+			case *objects.Boolean:
+				if obj.Value {
+					return &objects.Integer{Value: 1}
+				}
+				return &objects.Integer{Value: 0}
+			case *objects.Float:
+				return &objects.Integer{Value: int64(math.Float64bits(obj.Value))}
+			default:
+				return &objects.Integer{Value: int64(reflect.ValueOf(args[0]).Pointer())}
+			}
+		},
+	}
+	hashIndex := len(c.constants)
+	c.constants = append(c.constants, hashBuiltin)
+	c.symbolTable.DefineBuiltin("hash", hashIndex)
+
+	// 9. callable(obj)
+	callableBuiltin := &objects.Builtin{
+		Name: "callable",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("callable() takes exactly 1 argument")
+			}
+			if objects.IsCallable(args[0]) {
+				return objects.True
+			}
+			return objects.False
+		},
+	}
+	callableIndex := len(c.constants)
+	c.constants = append(c.constants, callableBuiltin)
+	c.symbolTable.DefineBuiltin("callable", callableIndex)
+
+	// 10. enumerate(iterable[, start])
+	enumerateBuiltin := &objects.Builtin{
+		Name: "enumerate",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewTypeError("enumerate() takes at least 1 argument")
+			}
+			start := int64(0)
+			if len(args) >= 2 {
+				if s, ok := args[1].(*objects.Integer); ok {
+					start = s.Value
+				}
+			}
+			var elements []objects.Object
+			switch iter := args[0].(type) {
+			case *objects.List:
+				for i, elem := range iter.Elements {
+					elements = append(elements, &objects.Tuple{Elements: []objects.Object{
+						&objects.Integer{Value: start + int64(i)},
+						elem,
+					}})
+				}
+			case *objects.Tuple:
+				for i, elem := range iter.Elements {
+					elements = append(elements, &objects.Tuple{Elements: []objects.Object{
+						&objects.Integer{Value: start + int64(i)},
+						elem,
+					}})
+				}
+			case *objects.String:
+				for i, ch := range iter.Value {
+					elements = append(elements, &objects.Tuple{Elements: []objects.Object{
+						&objects.Integer{Value: start + int64(i)},
+						&objects.String{Value: string(ch)},
+					}})
+				}
+			case *objects.Range:
+				items := iter.ToList()
+				for i, elem := range items {
+					elements = append(elements, &objects.Tuple{Elements: []objects.Object{
+						&objects.Integer{Value: start + int64(i)},
+						elem,
+					}})
+				}
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[0].Type())
+			}
+			return &objects.List{Elements: elements}
+		},
+	}
+	enumerateIndex := len(c.constants)
+	c.constants = append(c.constants, enumerateBuiltin)
+	c.symbolTable.DefineBuiltin("enumerate", enumerateIndex)
+
+	// 11. map(func, iterable)
+	mapBuiltin := &objects.Builtin{
+		Name: "map",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("map() takes exactly 2 arguments")
+			}
+			fn := args[0]
+			var items []objects.Object
+			switch iter := args[1].(type) {
+			case *objects.List:
+				items = iter.Elements
+			case *objects.Tuple:
+				items = iter.Elements
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[1].Type())
+			}
+			result := make([]objects.Object, 0, len(items))
+			for _, item := range items {
+				mapped := objects.CallFunction(fn, item)
+				if mapped.Type() == objects.ERROR_OBJ {
+					return mapped
+				}
+				result = append(result, mapped)
+			}
+			return &objects.List{Elements: result}
+		},
+	}
+	mapIndex := len(c.constants)
+	c.constants = append(c.constants, mapBuiltin)
+	c.symbolTable.DefineBuiltin("map", mapIndex)
+
+	// 12. filter(func, iterable)
+	filterBuiltin := &objects.Builtin{
+		Name: "filter",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("filter() takes exactly 2 arguments")
+			}
+			fn := args[0]
+			var items []objects.Object
+			switch iter := args[1].(type) {
+			case *objects.List:
+				items = iter.Elements
+			case *objects.Tuple:
+				items = iter.Elements
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[1].Type())
+			}
+			result := make([]objects.Object, 0)
+			for _, item := range items {
+				filtered := objects.CallFunction(fn, item)
+				if filtered.Type() == objects.ERROR_OBJ {
+					return filtered
+				}
+				if isTruthy(filtered) {
+					result = append(result, item)
+				}
+			}
+			return &objects.List{Elements: result}
+		},
+	}
+	filterIndex := len(c.constants)
+	c.constants = append(c.constants, filterBuiltin)
+	c.symbolTable.DefineBuiltin("filter", filterIndex)
+
+	// 13. sorted(iterable[, key][, reverse])
+	sortedBuiltin := &objects.Builtin{
+		Name: "sorted",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewTypeError("sorted() takes at least 1 argument")
+			}
+			var items []objects.Object
+			switch iter := args[0].(type) {
+			case *objects.List:
+				items = append([]objects.Object{}, iter.Elements...)
+			case *objects.Tuple:
+				items = append([]objects.Object{}, iter.Elements...)
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[0].Type())
+			}
+			var keyFn objects.Object
+			reverse := false
+			if len(args) >= 2 {
+				if _, ok := args[1].(*objects.Boolean); ok {
+					reverse = args[1].(*objects.Boolean).Value
+				} else if args[1] != objects.None_ {
+					keyFn = args[1]
+				}
+			}
+			if len(args) >= 3 {
+				if b, ok := args[2].(*objects.Boolean); ok {
+					reverse = b.Value
+				}
+			}
+			sort.SliceStable(items, func(i, j int) bool {
+				var aVal, bVal objects.Object
+				if keyFn != nil {
+					aVal = objects.CallFunction(keyFn, items[i])
+					bVal = objects.CallFunction(keyFn, items[j])
+				} else {
+					aVal = items[i]
+					bVal = items[j]
+				}
+				cmp := compareObjects(aVal, bVal)
+				if reverse {
+					return cmp > 0
+				}
+				return cmp < 0
+			})
+			return &objects.List{Elements: items}
+		},
+	}
+	sortedIndex := len(c.constants)
+	c.constants = append(c.constants, sortedBuiltin)
+	c.symbolTable.DefineBuiltin("sorted", sortedIndex)
+
+	// 14. reversed(iterable)
+	reversedBuiltin := &objects.Builtin{
+		Name: "reversed",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("reversed() takes exactly 1 argument")
+			}
+			switch iter := args[0].(type) {
+			case *objects.List:
+				n := len(iter.Elements)
+				result := make([]objects.Object, n)
+				for i, elem := range iter.Elements {
+					result[n-1-i] = elem
+				}
+				return &objects.List{Elements: result}
+			case *objects.Tuple:
+				n := len(iter.Elements)
+				result := make([]objects.Object, n)
+				for i, elem := range iter.Elements {
+					result[n-1-i] = elem
+				}
+				return &objects.List{Elements: result}
+			default:
+				return objects.NewTypeError("'%s' object is not reversible", args[0].Type())
+			}
+		},
+	}
+	reversedIndex := len(c.constants)
+	c.constants = append(c.constants, reversedBuiltin)
+	c.symbolTable.DefineBuiltin("reversed", reversedIndex)
+
+	// 15. repr(obj)
+	reprBuiltin := &objects.Builtin{
+		Name: "repr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("repr() takes exactly 1 argument")
+			}
+			return &objects.String{Value: args[0].Inspect()}
+		},
+	}
+	reprIndex := len(c.constants)
+	c.constants = append(c.constants, reprBuiltin)
+	c.symbolTable.DefineBuiltin("repr", reprIndex)
+
+	// 16. iter(obj)
+	iterBuiltin := &objects.Builtin{
+		Name: "iter",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("iter() takes exactly 1 argument")
+			}
+			return args[0]
+		},
+	}
+	iterIndex := len(c.constants)
+	c.constants = append(c.constants, iterBuiltin)
+	c.symbolTable.DefineBuiltin("iter", iterIndex)
+
+	// 17. any(iterable)
+	anyBuiltin := &objects.Builtin{
+		Name: "any",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("any() takes exactly 1 argument")
+			}
+			var items []objects.Object
+			switch iter := args[0].(type) {
+			case *objects.List:
+				items = iter.Elements
+			case *objects.Tuple:
+				items = iter.Elements
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[0].Type())
+			}
+			for _, item := range items {
+				if isTruthy(item) {
+					return objects.True
+				}
+			}
+			return objects.False
+		},
+	}
+	anyIndex := len(c.constants)
+	c.constants = append(c.constants, anyBuiltin)
+	c.symbolTable.DefineBuiltin("any", anyIndex)
+
+	// 18. all(iterable)
+	allBuiltin := &objects.Builtin{
+		Name: "all",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("all() takes exactly 1 argument")
+			}
+			var items []objects.Object
+			switch iter := args[0].(type) {
+			case *objects.List:
+				items = iter.Elements
+			case *objects.Tuple:
+				items = iter.Elements
+			default:
+				return objects.NewTypeError("'%s' object is not iterable", args[0].Type())
+			}
+			for _, item := range items {
+				if !isTruthy(item) {
+					return objects.False
+				}
+			}
+			return objects.True
+		},
+	}
+	allIndex := len(c.constants)
+	c.constants = append(c.constants, allBuiltin)
+	c.symbolTable.DefineBuiltin("all", allIndex)
+
+	// 19. chr(i)
+	chrBuiltin := &objects.Builtin{
+		Name: "chr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("chr() takes exactly 1 argument")
+			}
+			i, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("chr() argument must be an integer")
+			}
+			if i.Value < 0 || i.Value > 0x10FFFF {
+				return objects.NewValueError("chr() arg not in range(0x110000)")
+			}
+			return &objects.String{Value: string(rune(i.Value))}
+		},
+	}
+	chrIndex := len(c.constants)
+	c.constants = append(c.constants, chrBuiltin)
+	c.symbolTable.DefineBuiltin("chr", chrIndex)
+
+	// 20. ord(c)
+	ordBuiltin := &objects.Builtin{
+		Name: "ord",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("ord() takes exactly 1 argument")
+			}
+			s, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("ord() argument must be a string")
+			}
+			runes := []rune(s.Value)
+			if len(runes) != 1 {
+				return objects.NewTypeError("ord() expected a character, but string of length %d found", len(runes))
+			}
+			return &objects.Integer{Value: int64(runes[0])}
+		},
+	}
+	ordIndex := len(c.constants)
+	c.constants = append(c.constants, ordBuiltin)
+	c.symbolTable.DefineBuiltin("ord", ordIndex)
+
+	// 21. hex(i)
+	hexBuiltin := &objects.Builtin{
+		Name: "hex",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("hex() takes exactly 1 argument")
+			}
+			i, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("hex() argument must be an integer")
+			}
+			return &objects.String{Value: fmt.Sprintf("0x%x", i.Value)}
+		},
+	}
+	hexIndex := len(c.constants)
+	c.constants = append(c.constants, hexBuiltin)
+	c.symbolTable.DefineBuiltin("hex", hexIndex)
+
+	// 22. oct(i)
+	octBuiltin := &objects.Builtin{
+		Name: "oct",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("oct() takes exactly 1 argument")
+			}
+			i, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("oct() argument must be an integer")
+			}
+			return &objects.String{Value: fmt.Sprintf("0o%o", i.Value)}
+		},
+	}
+	octIndex := len(c.constants)
+	c.constants = append(c.constants, octBuiltin)
+	c.symbolTable.DefineBuiltin("oct", octIndex)
+
+	// 23. bin(i)
+	binBuiltin := &objects.Builtin{
+		Name: "bin",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("bin() takes exactly 1 argument")
+			}
+			i, ok := args[0].(*objects.Integer)
+			if !ok {
+				return objects.NewTypeError("bin() argument must be an integer")
+			}
+			return &objects.String{Value: fmt.Sprintf("0b%b", i.Value)}
+		},
+	}
+	binIndex := len(c.constants)
+	c.constants = append(c.constants, binBuiltin)
+	c.symbolTable.DefineBuiltin("bin", binIndex)
+
+	// 24. format(value[, format_spec])
+	formatNewBuiltin := &objects.Builtin{
+		Name: "format",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 || len(args) > 2 {
+				return objects.NewTypeError("format() takes 1 or 2 arguments")
+			}
+			formatSpec := ""
+			if len(args) >= 2 {
+				if s, ok := args[1].(*objects.String); ok {
+					formatSpec = s.Value
+				}
+			}
+			switch val := args[0].(type) {
+			case *objects.Integer:
+				if formatSpec == "" {
+					return &objects.String{Value: fmt.Sprintf("%d", val.Value)}
+				}
+				return &objects.String{Value: fmt.Sprintf("%"+formatSpec, val.Value)}
+			case *objects.Float:
+				if formatSpec == "" {
+					return &objects.String{Value: fmt.Sprintf("%g", val.Value)}
+				}
+				return &objects.String{Value: fmt.Sprintf("%"+formatSpec, val.Value)}
+			case *objects.String:
+				return val
+			default:
+				return &objects.String{Value: val.Inspect()}
+			}
+		},
+	}
+	formatNewIndex := len(c.constants)
+	c.constants = append(c.constants, formatNewBuiltin)
+	c.symbolTable.DefineBuiltin("format", formatNewIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
@@ -2332,6 +3037,67 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 func boolToInt(b bool) int {
 	if b {
 		return 1
+	}
+	return 0
+}
+
+func isTruthy(obj objects.Object) bool {
+	switch o := obj.(type) {
+	case *objects.Boolean:
+		return o.Value
+	case *objects.Integer:
+		return o.Value != 0
+	case *objects.Float:
+		return o.Value != 0.0
+	case *objects.String:
+		return o.Value != ""
+	case *objects.None:
+		return false
+	case *objects.List:
+		return len(o.Elements) > 0
+	case *objects.Tuple:
+		return len(o.Elements) > 0
+	case *objects.Dict:
+		return len(o.Pairs) > 0
+	case *objects.Set:
+		return o.Size() > 0
+	default:
+		return true
+	}
+}
+
+func compareObjects(a, b objects.Object) int {
+	switch a := a.(type) {
+	case *objects.Integer:
+		if bInt, ok := b.(*objects.Integer); ok {
+			if a.Value < bInt.Value {
+				return -1
+			}
+			if a.Value > bInt.Value {
+				return 1
+			}
+			return 0
+		}
+	case *objects.Float:
+		if bFloat, ok := b.(*objects.Float); ok {
+			if a.Value < bFloat.Value {
+				return -1
+			}
+			if a.Value > bFloat.Value {
+				return 1
+			}
+			return 0
+		}
+	case *objects.String:
+		if bStr, ok := b.(*objects.String); ok {
+			if a.Value < bStr.Value {
+				return -1
+			}
+			if a.Value > bStr.Value {
+				return 1
+			}
+			return 0
+		}
 	}
 	return 0
 }

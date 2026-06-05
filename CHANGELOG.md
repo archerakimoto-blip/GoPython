@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-06-05
+
+### 新增内置函数 (24 个)
+
+`isinstance()`、`issubclass()`、`hasattr()`、`getattr()`、`setattr()`、`dir()`、`id()`、`hash()`、`callable()`、`enumerate()`、`map()`、`filter()`、`sorted()`、`reversed()`、`repr()`、`iter()`、`any()`、`all()`、`chr()`、`ord()`、`hex()`、`oct()`、`bin()`、`format()`
+
+### 新增字符串方法 (22 个)
+
+`rfind()`、`rindex()`、`count()`、`isdigit()`、`isalpha()`、`isalnum()`、`isspace()`、`isupper()`、`islower()`、`istitle()`、`capitalize()`、`title()`、`swapcase()`、`center()`、`ljust()`、`rjust()`、`zfill()`、`partition()`、`rpartition()`、`encode()`、`isdecimal()`、`isnumeric()`、`isidentifier()`、`isprintable()`、`expandtabs()`
+
+### 新增列表/字典/集合方法
+
+- `list.sort(key=None, reverse=False)` — 支持 key 函数和 reverse 参数
+- `dict.fromkeys(iterable[, value])` — 从可迭代对象创建字典
+- `set.union()`、`set.intersection()`、`set.difference()`、`set.symmetric_difference()`、`set.issubset()`、`set.issuperset()`、`set.update()`、`set.copy()`
+
+### 新增异常类型 (9 个)
+
+`StopIteration`、`OverflowError`、`FileNotFoundError`、`ImportError`、`SyntaxError`、`IndentationError`、`UnboundLocalError`、`RecursionError`、`MemoryError`
+
+### 其他改进
+
+- 分代 GC `markReferences` 现在追踪 `Instance.SlotValues`
+- `RegexMatch` 字段命名规范化（`Groups_` → `Groups`，`Pattern_` → `Pattern`，`OrigString` → `OriginalString`，`GroupIndices` → `GroupStarts`）
+- 新增 `IsInstanceOf`/`IsSubclassOf` 辅助函数
+- 新增 `BoundMethod` 对象类型
+
 ## [0.15.1] - 2026-06-05
 
 ### Bug 修复 — Python 语义对齐
