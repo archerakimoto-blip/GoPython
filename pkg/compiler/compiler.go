@@ -11,13 +11,18 @@ import (
 	"strings"
 
 	"github.com/go-py/go-python/pkg/ast"
+	"github.com/go-py/go-python/pkg/base64"
 	"github.com/go-py/go-python/pkg/collections"
 	"github.com/go-py/go-python/pkg/concurrency"
+	"github.com/go-py/go-python/pkg/functools"
 	"github.com/go-py/go-python/pkg/gc"
+	"github.com/go-py/go-python/pkg/hashlib"
 	"github.com/go-py/go-python/pkg/interop"
 	"github.com/go-py/go-python/pkg/io"
 	"github.com/go-py/go-python/pkg/objects"
+	"github.com/go-py/go-python/pkg/operator"
 	re "github.com/go-py/go-python/pkg/re"
+	struct_ "github.com/go-py/go-python/pkg/struct"
 )
 
 type Opcode byte
@@ -353,6 +358,41 @@ func (c *Compiler) registerBuiltins() {
 	collectionsIndex := len(c.constants)
 	c.constants = append(c.constants, collectionsModule)
 	c.symbolTable.DefineBuiltin("collections", collectionsIndex)
+
+	// 注册 operator 模块
+	operatorModule := operator.CreateOperatorModule()
+	objects.RegisterModule("operator", operatorModule)
+	operatorIndex := len(c.constants)
+	c.constants = append(c.constants, operatorModule)
+	c.symbolTable.DefineBuiltin("operator", operatorIndex)
+
+	// 注册 functools 模块
+	functoolsModule := functools.CreateFunctoolsModule()
+	objects.RegisterModule("functools", functoolsModule)
+	functoolsIndex := len(c.constants)
+	c.constants = append(c.constants, functoolsModule)
+	c.symbolTable.DefineBuiltin("functools", functoolsIndex)
+
+	// 注册 base64 模块
+	base64Module := base64.CreateBase64Module()
+	objects.RegisterModule("base64", base64Module)
+	base64Index := len(c.constants)
+	c.constants = append(c.constants, base64Module)
+	c.symbolTable.DefineBuiltin("base64", base64Index)
+
+	// 注册 struct 模块
+	structModule := struct_.CreateStructModule()
+	objects.RegisterModule("struct", structModule)
+	structIndex := len(c.constants)
+	c.constants = append(c.constants, structModule)
+	c.symbolTable.DefineBuiltin("struct", structIndex)
+
+	// 注册 hashlib 模块
+	hashlibModule := hashlib.CreateHashlibModule()
+	objects.RegisterModule("hashlib", hashlibModule)
+	hashlibIndex := len(c.constants)
+	c.constants = append(c.constants, hashlibModule)
+	c.symbolTable.DefineBuiltin("hashlib", hashlibIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {

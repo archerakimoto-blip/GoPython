@@ -61,6 +61,18 @@ type Object interface {
 	Inspect() string
 }
 
+// AttributeGetter is an interface for types that have attributes
+type AttributeGetter interface {
+	Object
+	GetAttr(name string) (Object, bool)
+}
+
+// Callable is an interface for types that can be called as functions
+type Callable interface {
+	Object
+	Call(args ...Object) Object
+}
+
 type Integer struct {
 	Value int64
 }
@@ -2818,6 +2830,10 @@ func CallFunction(callee Object, args ...Object) Object {
 
 // IsCallable checks if an object can be called as a Python function.
 func IsCallable(obj Object) bool {
+	// First check if it implements Callable interface
+	if _, ok := obj.(Callable); ok {
+		return true
+	}
 	switch obj.(type) {
 	case *Builtin:
 		return true

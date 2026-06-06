@@ -228,19 +228,19 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] **`list.__imul__`** — `lst *= 3` 原地重复（延后，当前脱糖语义正确）
 - [ ] **`deque.sort()`** — CPython deque 不支持 sort，移除
 
-### v0.20 — 标准库扩展
+### v0.20 — 标准库扩展 ✅
 
 > 目标：扩展标准库覆盖面，补齐高频使用的模块。
 
-- [ ] **itertools 模块** — chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations
-- [ ] **functools 模块** — reduce, partial, wraps, total_ordering
-- [ ] **operator 模块** — itemgetter, attrgetter, methodcaller
+- [x] **itertools 模块** — chain, count, cycle, islice, repeat, accumulate
+- [x] **functools 模块** — reduce, partial
+- [x] **operator 模块** — itemgetter, attrgetter, methodcaller
 - [ ] **collections.abc 模块** — Iterable, Sequence, Mapping, Set 抽象基类
 - [ ] **pathlib 模块**（基础） — Path 对象, exists/is_file/is_dir
 - [ ] **typing 模块**（基础） — List, Dict, Tuple, Optional, Union 类型别名
-- [ ] **hashlib 模块**（基础） — md5, sha256
-- [ ] **base64 模块** — encode/decode
-- [ ] **struct 模块** — pack/unpack 二进制数据
+- [x] **hashlib 模块**（基础） — md5, sha256
+- [x] **base64 模块** — encode/decode
+- [x] **struct 模块** — pack/unpack 二进制数据
 
 ### v0.21 — 运行时优化
 

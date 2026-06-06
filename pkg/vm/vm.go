@@ -2003,6 +2003,29 @@ func (vm *VM) executeCall(numArgs int) error {
 	calleeIndex := vm.sp - numArgs - 1
 	calleeObj := vm.stack[calleeIndex]
 
+	// First, check if it's a Callable type
+	if callable, ok := calleeObj.(objects.Callable); ok {
+		args := vm.stack[vm.sp-numArgs : vm.sp]
+		result := callable.Call(args...)
+		vm.sp = vm.sp - numArgs - 1
+		return vm.push(result)
+	}
+
+	// Next, check if it's an Instance with __call__ method
+	if inst, ok := calleeObj.(*objects.Instance); ok {
+		if callMethod, ok := inst.GetAttr("__call__"); ok {
+			// Push the instance as self, then the args
+			args := make([]objects.Object, numArgs+1)
+			args[0] = inst
+			copy(args[1:], vm.stack[vm.sp-numArgs:vm.sp])
+			// Now set up the call
+			vm.stack[calleeIndex] = callMethod
+			copy(vm.stack[calleeIndex+1:], args)
+			vm.sp = calleeIndex + 1 + numArgs
+			return vm.executeCall(numArgs + 1)
+		}
+	}
+
 	if classObj, ok := calleeObj.(*objects.Class); ok {
 		// Check if the class has a metaclass with __call__
 		if classObj.Metaclass != nil {
