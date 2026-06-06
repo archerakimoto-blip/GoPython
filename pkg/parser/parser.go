@@ -325,12 +325,12 @@ func (p *Parser) parseStatement() ast.Statement {
 		switch p.peekToken.Type {
 		case lexer.ASSIGN:
 			return p.parseAssignStatement()
-		case lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ:
+		case lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ, lexer.PIPE_EQ, lexer.AMPERSAND_EQ, lexer.CARET_EQ:
 			return p.parseAugAssignStatement()
 		default:
 			return p.parseExpressionOrAttrAssign()
 		}
-	case lexer.ASSIGN, lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ:
+	case lexer.ASSIGN, lexer.PLUS_EQ, lexer.MINUS_EQ, lexer.MUL_EQ, lexer.DIV_EQ, lexer.PERCENT_EQ, lexer.FLOOR_DIV_EQ, lexer.POWER_EQ, lexer.PIPE_EQ, lexer.AMPERSAND_EQ, lexer.CARET_EQ:
 		return nil
 	case lexer.RBRACE:
 		return nil
@@ -540,6 +540,12 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 		stmt.Operator = "//"
 	case lexer.POWER_EQ:
 		stmt.Operator = "**"
+	case lexer.PIPE_EQ:
+		stmt.Operator = "|"
+	case lexer.AMPERSAND_EQ:
+		stmt.Operator = "&"
+	case lexer.CARET_EQ:
+		stmt.Operator = "^"
 	}
 
 	p.nextToken()
@@ -592,6 +598,68 @@ func (p *Parser) parseExpressionOrAttrAssign() ast.Statement {
 			Object: ma.Object,
 			Attr:   ma.Member,
 			Value:  value,
+		}
+	}
+
+	// 处理索引赋值：d['a'] = 1
+	if idx, ok := stmt.Expression.(*ast.IndexExpression); ok && p.peekTokenIs(lexer.ASSIGN) {
+		p.nextToken()
+		p.nextToken()
+		value := p.parseExpression(LOWEST)
+
+		if p.peekTokenIs(lexer.SEMICOLON) {
+			p.nextToken()
+		}
+
+		return &ast.IndexAssignStatement{
+			Token: idx.Token,
+			Left:  idx.Left,
+			Index: idx.Index,
+			Value: value,
+		}
+	}
+
+	// 处理索引增强赋值：d['a'] += 1
+	if idx, ok := stmt.Expression.(*ast.IndexExpression); ok {
+		var op string
+		switch p.peekToken.Type {
+		case lexer.PLUS_EQ:
+			op = "+"
+		case lexer.MINUS_EQ:
+			op = "-"
+		case lexer.MUL_EQ:
+			op = "*"
+		case lexer.DIV_EQ:
+			op = "/"
+		case lexer.PERCENT_EQ:
+			op = "%"
+		case lexer.FLOOR_DIV_EQ:
+			op = "//"
+		case lexer.POWER_EQ:
+			op = "**"
+		case lexer.PIPE_EQ:
+			op = "|"
+		case lexer.AMPERSAND_EQ:
+			op = "&"
+		case lexer.CARET_EQ:
+			op = "^"
+		}
+		if op != "" {
+			p.nextToken() // skip to the augmented assign token
+			p.nextToken() // skip to the value
+			value := p.parseExpression(LOWEST)
+
+			if p.peekTokenIs(lexer.SEMICOLON) {
+				p.nextToken()
+			}
+
+			return &ast.AugAssignStatement{
+				Token:      idx.Token,
+				Operator:   op,
+				IndexLeft:  idx.Left,
+				IndexIndex: idx.Index,
+				Value:      value,
+			}
 		}
 	}
 

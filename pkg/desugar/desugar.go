@@ -210,6 +210,27 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Value: desugarExpression(s.Value),
 		}
 	case *ast.AugAssignStatement:
+		if s.IndexLeft != nil {
+			// 索引增强赋值：d['a'] += 1 -> d.__setitem__('a', d.__getitem__('a') + 1)
+			// 脱糖为 IndexAssignStatement: d['a'] = d['a'] + 1
+			indexExpr := &ast.IndexExpression{
+				Token: s.Token,
+				Left:  s.IndexLeft,
+				Index: s.IndexIndex,
+			}
+			infixExpr := &ast.InfixExpression{
+				Token:    s.Token,
+				Left:     indexExpr,
+				Operator: s.Operator,
+				Right:    desugarExpression(s.Value),
+			}
+			return &ast.IndexAssignStatement{
+				Token: s.Token,
+				Left:  s.IndexLeft,
+				Index: s.IndexIndex,
+				Value: infixExpr,
+			}
+		}
 		// 将增强赋值转换为: name = name op value
 		leftIdent := &ast.Identifier{Token: s.Name.Token, Value: s.Name.Value}
 		infixExpr := &ast.InfixExpression{
@@ -222,6 +243,13 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Token: s.Token,
 			Names: []*ast.Identifier{s.Name},
 			Value: infixExpr,
+		}
+	case *ast.IndexAssignStatement:
+		return &ast.IndexAssignStatement{
+			Token: s.Token,
+			Left:  desugarExpression(s.Left),
+			Index: desugarExpression(s.Index),
+			Value: desugarExpression(s.Value),
 		}
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{

@@ -453,6 +453,15 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+		case compiler.OpSetIndex:
+			value := vm.pop()
+			index := vm.pop()
+			left := vm.pop()
+
+			err := vm.executeSetIndex(left, index, value)
+			if err != nil {
+				return err
+			}
 		case compiler.OpSlice:
 			step := vm.pop()
 			end := vm.pop()
@@ -3245,6 +3254,43 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 			}
 		}
 		return fmt.Errorf("index operator not supported: %s", left.Type())
+	}
+}
+
+func (vm *VM) executeSetIndex(left, index, value objects.Object) error {
+	switch left := left.(type) {
+	case *objects.Dict:
+		if err := objects.CheckHashable(index); err != nil {
+			return err
+		}
+		left.Set(index, value)
+		return vm.push(value)
+	case *objects.List:
+		if idx, ok := index.(*objects.Integer); ok {
+			i := idx.Value
+			length := int64(len(left.Elements))
+			if i < 0 {
+				i = length + i
+			}
+			if i < 0 || i >= length {
+				return vm.push(objects.NewIndexError("list assignment index out of range"))
+			}
+			left.Elements[i] = value
+			return vm.push(value)
+		}
+		return fmt.Errorf("list indices must be integers, not %s", index.Type())
+	default:
+		// Check if object has __setitem__ method via GetAttr
+		if setter, ok := left.(interface{ GetAttr(string) (objects.Object, bool) }); ok {
+			if setitem, found := setter.GetAttr("__setitem__"); found {
+				result := objects.CallFunction(setitem, index, value)
+				if err, isErr := result.(*objects.Error); isErr {
+					return err
+				}
+				return vm.push(value)
+			}
+		}
+		return fmt.Errorf("item assignment not supported: %s", left.Type())
 	}
 }
 

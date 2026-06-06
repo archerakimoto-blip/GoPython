@@ -458,6 +458,34 @@ func (od *OrderedDict) GetAttr(name string) (objects.Object, bool) {
 				return &objects.Integer{Value: int64(len(od.KeyOrder))}
 			},
 		}, true
+	case "__getitem__":
+		return &objects.Builtin{
+			Name: "OrderedDict.__getitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 1 {
+					return objects.NewTypeError("__getitem__() takes at least 1 argument")
+				}
+				if val, ok := od.Dict.Get(args[0]); ok {
+					return val
+				}
+				return objects.NewKeyError("%s", args[0].Inspect())
+			},
+		}, true
+	case "__setitem__":
+		return &objects.Builtin{
+			Name: "OrderedDict.__setitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 2 {
+					return objects.NewTypeError("__setitem__() takes at least 2 arguments")
+				}
+				keyStr := od.Dict.HashKey(args[0])
+				if _, exists := od.Dict.Pairs[keyStr]; !exists {
+					od.KeyOrder = append(od.KeyOrder, keyStr)
+				}
+				od.Dict.Set(args[0], args[1])
+				return objects.None_
+			},
+		}, true
 	}
 	return nil, false
 }
@@ -683,6 +711,30 @@ func (c *Counter) GetAttr(name string) (objects.Object, bool) {
 				return &objects.Integer{Value: int64(count)}
 			},
 		}, true
+	case "__getitem__":
+		return &objects.Builtin{
+			Name: "Counter.__getitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 1 {
+					return objects.NewTypeError("__getitem__() takes at least 1 argument")
+				}
+				if val, ok := c.Dict.Get(args[0]); ok {
+					return val
+				}
+				return &objects.Integer{Value: 0}
+			},
+		}, true
+	case "__setitem__":
+		return &objects.Builtin{
+			Name: "Counter.__setitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 2 {
+					return objects.NewTypeError("__setitem__() takes at least 2 arguments")
+				}
+				c.Dict.Set(args[0], args[1])
+				return objects.None_
+			},
+		}, true
 	}
 	return nil, false
 }
@@ -773,6 +825,17 @@ func (dd *defaultdict) GetAttr(name string) (objects.Object, bool) {
 				defaultVal := objects.CallFunction(dd.Factory)
 				dd.Dict.Set(args[0], defaultVal)
 				return defaultVal
+			},
+		}, true
+	case "__setitem__":
+		return &objects.Builtin{
+			Name: "defaultdict.__setitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 2 {
+					return objects.NewTypeError("__setitem__() takes at least 2 arguments")
+				}
+				dd.Dict.Set(args[0], args[1])
+				return objects.None_
 			},
 		}, true
 	case "pop":

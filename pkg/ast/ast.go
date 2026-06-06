@@ -852,16 +852,36 @@ func (aas *AttributeAssignStatement) String() string {
 }
 
 type AugAssignStatement struct {
-	Token   string
-	Name    *Identifier
+	Token    string
+	Name     *Identifier
 	Operator string
-	Value   Expression
+	Value    Expression
+	// 索引增强赋值支持：d['a'] += 1
+	IndexLeft  Expression // IndexExpression, e.g. d['a']
+	IndexIndex Expression // the index part, e.g. 'a'
 }
 
 func (as *AugAssignStatement) statementNode()       {}
 func (as *AugAssignStatement) TokenLiteral() string { return as.Token }
 func (as *AugAssignStatement) String() string {
+	if as.IndexLeft != nil {
+		return as.IndexLeft.String() + " " + as.Operator + "= " + as.Value.String()
+	}
 	return as.Name.String() + " " + as.Operator + "= " + as.Value.String()
+}
+
+// IndexAssignStatement 索引赋值语句: d['a'] = 1
+type IndexAssignStatement struct {
+	Token  string
+	Left   Expression // the object being indexed, e.g. d
+	Index  Expression // the index, e.g. 'a'
+	Value  Expression // the value to assign, e.g. 1
+}
+
+func (ias *IndexAssignStatement) statementNode()       {}
+func (ias *IndexAssignStatement) TokenLiteral() string { return ias.Token }
+func (ias *IndexAssignStatement) String() string {
+	return ias.Left.String() + "[" + ias.Index.String() + "] = " + ias.Value.String()
 }
 
 type ImportStatement struct {

@@ -91,6 +91,7 @@ const (
 	OpSetIntersection
 	OpSetDifference
 	OpSetSymmetricDifference
+	OpSetIndex
 )
 
 type EmittedInstruction struct {
@@ -2239,6 +2240,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.emit(OpSetAttribute, c.addConstant(&objects.String{Value: node.Attr.Value}))
+		c.emit(OpPop)
+
+	case *ast.IndexAssignStatement:
+		// 编译索引赋值: d['a'] = 1
+		// 栈顺序: object, index, value
+		err := c.Compile(node.Left)
+		if err != nil {
+			return err
+		}
+
+		err = c.Compile(node.Index)
+		if err != nil {
+			return err
+		}
+
+		err = c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+
+		c.emit(OpSetIndex)
 		c.emit(OpPop)
 
 	case *ast.DeleteStatement:
