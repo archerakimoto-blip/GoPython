@@ -224,9 +224,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **`deque.count()`** — 计数（已存在）
 - [x] **`deque.extendleft()`** — 左侧扩展（已存在）
 - [x] **`deque.rotate(n)`** — 旋转修正（v0.18 已完成）
-- [ ] **`set.__isub__`** — `s -= other` 原地差集（延后，当前创建新集合语义正确）
-- [ ] **`list.__imul__`** — `lst *= 3` 原地重复（延后，当前脱糖语义正确）
-- [ ] **`deque.sort()`** — CPython deque 不支持 sort，移除
+- [x] **`set.__isub__`** — `s -= other` 原地差集
+- [x] **`list.__imul__`** — `lst *= 3` 原地重复
+- [x] **`deque.sort()`** — CPython deque 不支持 sort，移除
 
 ### v0.20 — 标准库扩展 ✅
 

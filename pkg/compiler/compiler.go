@@ -101,6 +101,18 @@ const (
 	OpSetSymmetricDifference
 	OpSetIndex
 	OpSetSlice
+	OpInPlaceAdd
+	OpInPlaceSub
+	OpInPlaceMul
+	OpInPlaceDiv
+	OpInPlaceMod
+	OpInPlaceFloorDiv
+	OpInPlacePower
+	OpInPlaceBitOr
+	OpInPlaceBitAnd
+	OpInPlaceBitXor
+	OpInPlaceLShift
+	OpInPlaceRShift
 )
 
 type EmittedInstruction struct {
@@ -2015,6 +2027,34 @@ func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
 	}
 }
 
+// augAssignToInPlaceOp maps an augmented assignment operator string to its in-place opcode.
+func augAssignToInPlaceOp(op string) Opcode {
+	switch op {
+	case "+":
+		return OpInPlaceAdd
+	case "-":
+		return OpInPlaceSub
+	case "*":
+		return OpInPlaceMul
+	case "/":
+		return OpInPlaceDiv
+	case "%":
+		return OpInPlaceMod
+	case "//":
+		return OpInPlaceFloorDiv
+	case "**":
+		return OpInPlacePower
+	case "|":
+		return OpInPlaceBitOr
+	case "&":
+		return OpInPlaceBitAnd
+	case "^":
+		return OpInPlaceBitXor
+	default:
+		return OpInPlaceAdd
+	}
+}
+
 func (c *Compiler) Compile(node ast.Node) error {
 	if node == nil {
 		return nil
@@ -2367,6 +2407,49 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		c.emit(OpSetSlice)
 		c.emit(OpPop)
+
+	case *ast.AugAssignStatement:
+		// 增强赋值: x += 1, s -= other, lst *= 3
+		// 生成原地操作码，VM会先尝试__iadd__/__isub__/__imul__等，回退到普通操作
+		inPlaceOp := augAssignToInPlaceOp(node.Operator)
+		if node.IndexLeft != nil {
+			// 索引增强赋值: d['a'] += 1
+			err := c.Compile(node.IndexLeft)
+			if err != nil {
+				return err
+			}
+			err = c.Compile(node.IndexIndex)
+			if err != nil {
+				return err
+			}
+			err = c.Compile(node.Value)
+			if err != nil {
+				return err
+			}
+			c.emit(inPlaceOp)
+			c.emit(OpPop)
+		} else {
+			// 变量增强赋值: x += 1
+			err := c.Compile(node.Name)
+			if err != nil {
+				return err
+			}
+			err = c.Compile(node.Value)
+			if err != nil {
+				return err
+			}
+			c.emit(inPlaceOp)
+			// 原地操作结果赋值回变量
+			symbol, ok := c.symbolTable.Resolve(node.Name.Value)
+			if !ok {
+				symbol = c.symbolTable.Define(node.Name.Value)
+			}
+			if symbol.Scope == GlobalScope {
+				c.emit(OpSetGlobal, symbol.Index)
+			} else {
+				c.emit1(OpSetLocal, symbol.Index)
+			}
+		}
 
 	case *ast.DeleteStatement:
 		for _, target := range node.Targets {

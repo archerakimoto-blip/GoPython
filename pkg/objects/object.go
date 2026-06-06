@@ -846,6 +846,39 @@ func (l *List) GetAttr(name string) (Object, bool) {
 				return None_
 			},
 		}, true
+	case "__imul__":
+		return &Builtin{
+			Name: "list.__imul__",
+			Fn: func(args ...Object) Object {
+				n, ok := args[0].(*Integer)
+				if !ok {
+					return NewTypeError("can't multiply sequence by non-int of type '%s'", args[0].Type())
+				}
+				if n.Value <= 0 {
+					l.Elements = []Object{}
+					return l
+				}
+				original := make([]Object, len(l.Elements))
+				copy(original, l.Elements)
+				for i := int64(1); i < n.Value; i++ {
+					l.Elements = append(l.Elements, original...)
+				}
+				return l
+			},
+		}, true
+	case "__iadd__":
+		return &Builtin{
+			Name: "list.__iadd__",
+			Fn: func(args ...Object) Object {
+				switch other := args[0].(type) {
+				case *List:
+					l.Elements = append(l.Elements, other.Elements...)
+				default:
+					return NewTypeError("'%s' object is not iterable", args[0].Type())
+				}
+				return l
+			},
+		}, true
 	}
 	return nil, false
 }
@@ -1182,6 +1215,113 @@ func (s *Set) GetAttr(name string) (Object, bool) {
 					result.Keys[k] = v
 				}
 				return result
+			},
+		}, true
+	case "__isub__":
+		return &Builtin{
+			Name: "set.__isub__",
+			Fn: func(args ...Object) Object {
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("unsupported operand type(s) for -=: 'set' and '%s'", args[0].Type())
+				}
+				for k := range other.Elements {
+					delete(s.Elements, k)
+					delete(s.Keys, k)
+				}
+				return s
+			},
+		}, true
+	case "difference_update":
+		return &Builtin{
+			Name: "set.difference_update",
+			Fn: func(args ...Object) Object {
+				for _, arg := range args {
+					switch other := arg.(type) {
+					case *Set:
+						for k := range other.Elements {
+							delete(s.Elements, k)
+							delete(s.Keys, k)
+						}
+					case *List:
+						for _, elem := range other.Elements {
+							key := s.HashKey(elem)
+							delete(s.Elements, key)
+							delete(s.Keys, key)
+						}
+					case *Tuple:
+						for _, elem := range other.Elements {
+							key := s.HashKey(elem)
+							delete(s.Elements, key)
+							delete(s.Keys, key)
+						}
+					default:
+						return NewTypeError("'%s' object is not iterable", arg.Type())
+					}
+				}
+				return None_
+			},
+		}, true
+	case "__ior__":
+		return &Builtin{
+			Name: "set.__ior__",
+			Fn: func(args ...Object) Object {
+				switch other := args[0].(type) {
+				case *Set:
+					for k, v := range other.Elements {
+						s.Elements[k] = v
+						s.Keys[k] = v
+					}
+				case *List:
+					for _, elem := range other.Elements {
+						s.Add(elem)
+					}
+				case *Tuple:
+					for _, elem := range other.Elements {
+						s.Add(elem)
+					}
+				default:
+					return NewTypeError("unsupported operand type(s) for |=: 'set' and '%s'", args[0].Type())
+				}
+				return s
+			},
+		}, true
+	case "__iand__":
+		return &Builtin{
+			Name: "set.__iand__",
+			Fn: func(args ...Object) Object {
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("unsupported operand type(s) for &=: 'set' and '%s'", args[0].Type())
+				}
+				for k := range s.Elements {
+					if _, ok := other.Elements[k]; !ok {
+						delete(s.Elements, k)
+						delete(s.Keys, k)
+					}
+				}
+				return s
+			},
+		}, true
+	case "__ixor__":
+		return &Builtin{
+			Name: "set.__ixor__",
+			Fn: func(args ...Object) Object {
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("unsupported operand type(s) for ^=: 'set' and '%s'", args[0].Type())
+				}
+				// Elements in either but not both: remove common, add exclusive from other
+				for k, v := range other.Elements {
+					if _, exists := s.Elements[k]; exists {
+						delete(s.Elements, k)
+						delete(s.Keys, k)
+					} else {
+						s.Elements[k] = v
+						s.Keys[k] = v
+					}
+				}
+				return s
 			},
 		}, true
 	}

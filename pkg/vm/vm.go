@@ -473,6 +473,25 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+
+		case compiler.OpInPlaceAdd,
+			compiler.OpInPlaceSub,
+			compiler.OpInPlaceMul,
+			compiler.OpInPlaceDiv,
+			compiler.OpInPlaceMod,
+			compiler.OpInPlaceFloorDiv,
+			compiler.OpInPlacePower,
+			compiler.OpInPlaceBitOr,
+			compiler.OpInPlaceBitAnd,
+			compiler.OpInPlaceBitXor:
+			right := vm.pop()
+			left := vm.pop()
+
+			err := vm.executeInPlaceOperation(op, left, right)
+			if err != nil {
+				return err
+			}
+
 		case compiler.OpSlice:
 			step := vm.pop()
 			end := vm.pop()
@@ -2909,6 +2928,52 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 	}
 
 	return fmt.Errorf("unsupported types for binary operation: %s %s", leftType, rightType)
+}
+
+// inPlaceAttrMap maps in-place opcodes to their corresponding __ixxx__ attribute names
+// and the fallback regular opcodes.
+var inPlaceAttrMap = map[compiler.Opcode]struct {
+	attrName   string
+	fallbackOp compiler.Opcode
+}{
+	compiler.OpInPlaceAdd:       {"__iadd__", compiler.OpAdd},
+	compiler.OpInPlaceSub:       {"__isub__", compiler.OpSub},
+	compiler.OpInPlaceMul:       {"__imul__", compiler.OpMul},
+	compiler.OpInPlaceDiv:       {"__itruediv__", compiler.OpDiv},
+	compiler.OpInPlaceMod:       {"__imod__", compiler.OpMod},
+	compiler.OpInPlaceFloorDiv:  {"__ifloordiv__", compiler.OpFloorDiv},
+	compiler.OpInPlacePower:     {"__ipow__", compiler.OpPower},
+	compiler.OpInPlaceBitOr:     {"__ior__", compiler.OpBitOr},
+	compiler.OpInPlaceBitAnd:    {"__iand__", compiler.OpBitAnd},
+	compiler.OpInPlaceBitXor:    {"__ixor__", compiler.OpBitXor},
+}
+
+func (vm *VM) executeInPlaceOperation(op compiler.Opcode, left, right objects.Object) error {
+	info, ok := inPlaceAttrMap[op]
+	if !ok {
+		// No in-place handler, fall back to regular binary operation
+		vm.push(left)
+		vm.push(right)
+		return vm.executeBinaryOperation(info.fallbackOp)
+	}
+
+	// Try __ixxx__ method on left operand
+	if getter, ok := left.(objects.AttributeGetter); ok {
+		if method, found := getter.GetAttr(info.attrName); found {
+			if builtin, ok := method.(*objects.Builtin); ok {
+				result := builtin.Fn(right)
+				if result.Type() != objects.ERROR_OBJ {
+					return vm.push(result)
+				}
+				// __ixxx__ returned error, fall through to regular operation
+			}
+		}
+	}
+
+	// Fallback: use regular binary operation
+	vm.push(left)
+	vm.push(right)
+	return vm.executeBinaryOperation(info.fallbackOp)
 }
 
 func toString(obj objects.Object) string {
