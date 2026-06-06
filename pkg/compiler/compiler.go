@@ -92,6 +92,7 @@ const (
 	OpSetDifference
 	OpSetSymmetricDifference
 	OpSetIndex
+	OpSetSlice
 )
 
 type EmittedInstruction struct {
@@ -2261,6 +2262,46 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 
 		c.emit(OpSetIndex)
+		c.emit(OpPop)
+
+	case *ast.SliceAssignStatement:
+		err := c.Compile(node.Left)
+		if err != nil {
+			return err
+		}
+		// Compile lower bound (or None if nil)
+		if node.Lower != nil {
+			err = c.Compile(node.Lower)
+			if err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpNull)
+		}
+		// Compile upper bound (or None if nil)
+		if node.Upper != nil {
+			err = c.Compile(node.Upper)
+			if err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpNull)
+		}
+		// Compile step (or None if nil)
+		if node.Step != nil {
+			err = c.Compile(node.Step)
+			if err != nil {
+				return err
+			}
+		} else {
+			c.emit(OpNull)
+		}
+		// Compile value
+		err = c.Compile(node.Value)
+		if err != nil {
+			return err
+		}
+		c.emit(OpSetSlice)
 		c.emit(OpPop)
 
 	case *ast.DeleteStatement:

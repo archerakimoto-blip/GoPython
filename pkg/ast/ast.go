@@ -884,6 +884,30 @@ func (ias *IndexAssignStatement) String() string {
 	return ias.Left.String() + "[" + ias.Index.String() + "] = " + ias.Value.String()
 }
 
+// SliceAssignStatement slice assignment: lst[1:3] = [4,5]
+type SliceAssignStatement struct {
+	Token   string
+	Left    Expression // the object being sliced, e.g. lst
+	Lower   Expression // the lower bound, e.g. 1 (nil if omitted)
+	Upper   Expression // the upper bound, e.g. 3 (nil if omitted)
+	Step    Expression // the step, e.g. nil (usually nil for assignment)
+	Value   Expression // the value to assign, e.g. [4,5]
+}
+
+func (sas *SliceAssignStatement) statementNode()       {}
+func (sas *SliceAssignStatement) TokenLiteral() string { return sas.Token }
+func (sas *SliceAssignStatement) String() string {
+	lower := ""
+	if sas.Lower != nil {
+		lower = sas.Lower.String()
+	}
+	upper := ""
+	if sas.Upper != nil {
+		upper = sas.Upper.String()
+	}
+	return sas.Left.String() + "[" + lower + ":" + upper + "] = " + sas.Value.String()
+}
+
 type ImportStatement struct {
 	Token    string
 	Module   *Identifier

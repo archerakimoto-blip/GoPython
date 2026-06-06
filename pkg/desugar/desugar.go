@@ -251,6 +251,15 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 			Index: desugarExpression(s.Index),
 			Value: desugarExpression(s.Value),
 		}
+	case *ast.SliceAssignStatement:
+		return &ast.SliceAssignStatement{
+			Token: s.Token,
+			Left:  desugarExpression(s.Left),
+			Lower: desugarExpression(s.Lower),
+			Upper: desugarExpression(s.Upper),
+			Step:  desugarExpression(s.Step),
+			Value: desugarExpression(s.Value),
+		}
 	case *ast.ReturnStatement:
 		return &ast.ReturnStatement{
 			Token:       s.Token,

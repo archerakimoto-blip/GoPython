@@ -462,6 +462,17 @@ func (vm *VM) Run() error {
 			if err != nil {
 				return err
 			}
+		case compiler.OpSetSlice:
+			value := vm.pop()
+			step := vm.pop()
+			upper := vm.pop()
+			lower := vm.pop()
+			left := vm.pop()
+
+			err := vm.executeSetSlice(left, lower, upper, step, value)
+			if err != nil {
+				return err
+			}
 		case compiler.OpSlice:
 			step := vm.pop()
 			end := vm.pop()
@@ -2736,6 +2747,29 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 	leftType := left.Type()
 	rightType := right.Type()
 
+	// Dict merge: d | other creates a new dict; d |= other merges in-place
+	if leftType == objects.DICT_OBJ && rightType == objects.DICT_OBJ {
+		leftDict := left.(*objects.Dict)
+		rightDict := right.(*objects.Dict)
+		switch op {
+		case compiler.OpBitOr:
+			result := objects.NewDict()
+			for _, keyStr := range leftDict.KeyOrder {
+				key := leftDict.Keys[keyStr]
+				val := leftDict.Pairs[keyStr]
+				result.Set(key, val)
+			}
+			for _, keyStr := range rightDict.KeyOrder {
+				key := rightDict.Keys[keyStr]
+				val := rightDict.Pairs[keyStr]
+				result.Set(key, val)
+			}
+			return vm.push(result)
+		default:
+			return vm.push(objects.NewTypeError("unsupported operand type(s) for binary operation: '%s' and '%s'", leftType, rightType))
+		}
+	}
+
 	// Set operations: | (union), & (intersection), - (difference), ^ (symmetric difference)
 	if leftType == objects.SET_OBJ && rightType == objects.SET_OBJ {
 		leftSet := left.(*objects.Set)
@@ -3259,6 +3293,10 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 
 func (vm *VM) executeSetIndex(left, index, value objects.Object) error {
 	switch left := left.(type) {
+	case *objects.Tuple:
+		return fmt.Errorf("'tuple' object does not support item assignment")
+	case *objects.String:
+		return fmt.Errorf("'str' object does not support item assignment")
 	case *objects.Dict:
 		if err := objects.CheckHashable(index); err != nil {
 			return err
@@ -3292,6 +3330,96 @@ func (vm *VM) executeSetIndex(left, index, value objects.Object) error {
 		}
 		return fmt.Errorf("item assignment not supported: %s", left.Type())
 	}
+}
+
+func (vm *VM) executeSetSlice(left, lower, upper, step, value objects.Object) error {
+	// Only lists support slice assignment
+	list, ok := left.(*objects.List)
+	if !ok {
+		return fmt.Errorf("'%s' object does not support slice assignment", left.Type())
+	}
+
+	// step must be None for now (we don't support extended slice assignment)
+	if _, isNone := step.(*objects.None); !isNone {
+		return fmt.Errorf("slice assignment with step is not supported")
+	}
+
+	length := int64(len(list.Elements))
+
+	// Parse lower bound
+	var lo int64
+	if lower == nil {
+		lo = 0
+	} else if _, isNone := lower.(*objects.None); isNone {
+		lo = 0
+	} else if i, ok := lower.(*objects.Integer); ok {
+		lo = i.Value
+		if lo < 0 {
+			lo = length + lo
+			if lo < 0 {
+				lo = 0
+			}
+		}
+		if lo > length {
+			lo = length
+		}
+	} else {
+		return fmt.Errorf("slice indices must be integers or None")
+	}
+
+	// Parse upper bound
+	var hi int64
+	if upper == nil {
+		hi = length
+	} else if _, isNone := upper.(*objects.None); isNone {
+		hi = length
+	} else if i, ok := upper.(*objects.Integer); ok {
+		hi = i.Value
+		if hi < 0 {
+			hi = length + hi
+			if hi < 0 {
+				hi = 0
+			}
+		}
+		if hi > length {
+			hi = length
+		}
+	} else {
+		return fmt.Errorf("slice indices must be integers or None")
+	}
+
+	// Get replacement values
+	var replacements []objects.Object
+	switch v := value.(type) {
+	case *objects.List:
+		replacements = v.Elements
+	case *objects.Tuple:
+		replacements = v.Elements
+	default:
+		return fmt.Errorf("can only assign an iterable to a slice")
+	}
+
+	// Perform slice replacement
+	if lo > hi {
+		lo = hi
+	}
+	oldLen := int64(len(list.Elements))
+	newLen := oldLen - (hi - lo) + int64(len(replacements))
+
+	if newLen > oldLen {
+		// Grow the list
+		list.Elements = append(list.Elements, make([]objects.Object, newLen-oldLen)...)
+		// Shift elements right
+		copy(list.Elements[lo+int64(len(replacements)):], list.Elements[hi:])
+	} else if newLen < oldLen {
+		// Shift elements left first
+		copy(list.Elements[lo+int64(len(replacements)):], list.Elements[hi:])
+		// Truncate
+		list.Elements = list.Elements[:newLen]
+	}
+
+	copy(list.Elements[lo:], replacements)
+	return vm.push(value)
 }
 
 func (vm *VM) executeArrayIndex(array, index objects.Object) error {

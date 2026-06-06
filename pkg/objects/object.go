@@ -1316,6 +1316,156 @@ func (d *Dict) GetAttr(name string) (Object, bool) {
 				return result
 			},
 		}, true
+	case "update":
+		return &Builtin{
+			Name: "dict.update",
+			Fn: func(args ...Object) Object {
+				// Handle dict/iterable argument
+				if len(args) >= 1 {
+					switch other := args[0].(type) {
+					case *Dict:
+						for _, keyStr := range other.KeyOrder {
+							key := other.Keys[keyStr]
+							val := other.Pairs[keyStr]
+							d.Set(key, val)
+						}
+					case *List:
+						for _, elem := range other.Elements {
+							if pair, ok := elem.(*Tuple); ok && len(pair.Elements) == 2 {
+								d.Set(pair.Elements[0], pair.Elements[1])
+							}
+						}
+					case *Tuple:
+						for _, elem := range other.Elements {
+							if pair, ok := elem.(*Tuple); ok && len(pair.Elements) == 2 {
+								d.Set(pair.Elements[0], pair.Elements[1])
+							}
+						}
+					}
+				}
+				// Handle keyword arguments (passed as a Dict named "kwargs" after positional args)
+				if len(args) >= 2 {
+					if kwargs, ok := args[len(args)-1].(*Dict); ok {
+						for _, keyStr := range kwargs.KeyOrder {
+							key := kwargs.Keys[keyStr]
+							val := kwargs.Pairs[keyStr]
+							d.Set(key, val)
+						}
+					}
+				}
+				return None_
+			},
+		}, true
+	case "setdefault":
+		return &Builtin{
+			Name: "dict.setdefault",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("setdefault() takes at least 1 argument")
+				}
+				if val, ok := d.Get(args[0]); ok {
+					return val
+				}
+				var defaultVal Object = None_
+				if len(args) >= 2 {
+					defaultVal = args[1]
+				}
+				d.Set(args[0], defaultVal)
+				return defaultVal
+			},
+		}, true
+	case "popitem":
+		return &Builtin{
+			Name: "dict.popitem",
+			Fn: func(args ...Object) Object {
+				if len(d.KeyOrder) == 0 {
+					return NewKeyError("dictionary is empty")
+				}
+				keyStr := d.KeyOrder[len(d.KeyOrder)-1]
+				key := d.Keys[keyStr]
+				val := d.Pairs[keyStr]
+				d.Delete(key)
+				return &Tuple{Elements: []Object{key, val}}
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "dict.pop",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("pop() takes at least 1 argument")
+				}
+				if val, ok := d.Get(args[0]); ok {
+					d.Delete(args[0])
+					return val
+				}
+				if len(args) >= 2 {
+					return args[1]
+				}
+				return NewKeyError("%s", args[0].Inspect())
+			},
+		}, true
+	case "get":
+		return &Builtin{
+			Name: "dict.get",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("get() takes at least 1 argument")
+				}
+				var defaultVal Object = None_
+				if len(args) >= 2 {
+					defaultVal = args[1]
+				}
+				if val, ok := d.Get(args[0]); ok {
+					return val
+				}
+				return defaultVal
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "dict.clear",
+			Fn: func(args ...Object) Object {
+				d.Pairs = make(map[string]Object)
+				d.Keys = make(map[string]Object)
+				d.KeyOrder = make([]string, 0)
+				return None_
+			},
+		}, true
+	case "copy":
+		return &Builtin{
+			Name: "dict.copy",
+			Fn: func(args ...Object) Object {
+				newDict := NewDict()
+				for _, keyStr := range d.KeyOrder {
+					key := d.Keys[keyStr]
+					val := d.Pairs[keyStr]
+					newDict.Set(key, val)
+				}
+				return newDict
+			},
+		}, true
+	case "keys":
+		return &Builtin{
+			Name: "dict.keys",
+			Fn: func(args ...Object) Object {
+				return NewDictKeys(d)
+			},
+		}, true
+	case "values":
+		return &Builtin{
+			Name: "dict.values",
+			Fn: func(args ...Object) Object {
+				return NewDictValues(d)
+			},
+		}, true
+	case "items":
+		return &Builtin{
+			Name: "dict.items",
+			Fn: func(args ...Object) Object {
+				return NewDictItems(d)
+			},
+		}, true
 	}
 	return nil, false
 }

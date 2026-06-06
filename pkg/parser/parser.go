@@ -610,8 +610,28 @@ func (p *Parser) parseExpressionOrAttrAssign() ast.Statement {
 		}
 	}
 
-	// 处理索引赋值：d['a'] = 1
+	// Handle index/slice assignment
 	if idx, ok := stmt.Expression.(*ast.IndexExpression); ok && p.peekTokenIs(lexer.ASSIGN) {
+		// Check if this is a slice assignment: lst[1:3] = [4,5]
+		if slice, ok := idx.Index.(*ast.SliceExpression); ok {
+			p.nextToken()
+			p.nextToken()
+			value := p.parseExpression(LOWEST)
+
+			if p.peekTokenIs(lexer.SEMICOLON) {
+				p.nextToken()
+			}
+
+			return &ast.SliceAssignStatement{
+				Token: idx.Token,
+				Left:  idx.Left,
+				Lower: slice.Lower,
+				Upper: slice.Upper,
+				Step:  slice.Step,
+				Value: value,
+			}
+		}
+		// Regular index assignment: d['a'] = 1
 		p.nextToken()
 		p.nextToken()
 		value := p.parseExpression(LOWEST)
@@ -698,7 +718,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.ASYNC) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(lexer.SEMICOLON) && !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.FOR) && !p.peekTokenIs(lexer.ASYNC) && !p.peekTokenIs(lexer.RBRACKET) && !p.peekTokenIs(lexer.COMMA) && !p.peekTokenIs(lexer.RBRACE) && !p.peekTokenIs(lexer.IF) && !p.peekTokenIs(lexer.EXCEPT) && !p.peekTokenIs(lexer.FINALLY) && !p.peekTokenIs(lexer.ELSE) && !p.peekTokenIs(lexer.INDENT) && !p.peekTokenIs(lexer.DEDENT) && !p.peekTokenIs(lexer.RPAREN) && !p.curTokenIs(lexer.ASSIGN) && precedence < p.peekPrecedence() {
 		if p.peekTokenIs(lexer.AS) {
 			return leftExp
 		}
@@ -1664,7 +1684,7 @@ func (p *Parser) parseExpressionListWithComprehensionCheck(end lexer.TokenType) 
 func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	p.nextToken()
 
-	// Check if this is a slice expression (contains colon)
+	// Check if this is a slice expression (starts with colon or colon is next)
 	if p.curTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COLON) {
 		slice := &ast.SliceExpression{Token: "["}
 
@@ -1702,8 +1722,51 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 		// Consume ]
 		if !p.curTokenIs(lexer.RBRACKET) {
 			p.expectPeek(lexer.RBRACKET)
-		} else {
+		}
+
+		// Wrap in IndexExpression
+		return &ast.IndexExpression{
+			Token: "[",
+			Left:  left,
+			Index: slice,
+		}
+	}
+
+	// Parse the first expression (could be index or lower bound of slice)
+	firstExpr := p.parseExpression(LOWEST)
+
+	// After parsing, check if we hit a colon — if so, this is a slice
+	if p.curTokenIs(lexer.COLON) || p.peekTokenIs(lexer.COLON) {
+		slice := &ast.SliceExpression{Token: "["}
+		slice.Lower = firstExpr
+
+		// Move past first colon
+		if !p.curTokenIs(lexer.COLON) {
 			p.nextToken()
+		}
+		p.nextToken()
+
+		// Parse upper bound (before second colon or closing bracket)
+		if !p.curTokenIs(lexer.COLON) && !p.curTokenIs(lexer.RBRACKET) {
+			oldErrors := len(p.errors)
+			slice.Upper = p.parseExpression(LOWEST)
+			p.errors = p.errors[:oldErrors]
+		}
+
+		// Check for step (second colon)
+		if p.curTokenIs(lexer.COLON) {
+			p.nextToken()
+			// Parse step value
+			if !p.curTokenIs(lexer.RBRACKET) {
+				oldErrors := len(p.errors)
+				slice.Step = p.parseExpression(LOWEST)
+				p.errors = p.errors[:oldErrors]
+			}
+		}
+
+		// Consume ]
+		if !p.curTokenIs(lexer.RBRACKET) {
+			p.expectPeek(lexer.RBRACKET)
 		}
 
 		// Wrap in IndexExpression
@@ -1716,7 +1779,7 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 
 	// Normal index
 	exp := &ast.IndexExpression{Token: "[", Left: left}
-	exp.Index = p.parseExpression(LOWEST)
+	exp.Index = firstExpr
 
 	if !p.expectPeek(lexer.RBRACKET) {
 		return nil

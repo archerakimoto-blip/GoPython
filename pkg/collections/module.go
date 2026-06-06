@@ -304,6 +304,30 @@ func (d *deque) GetAttr(name string) (objects.Object, bool) {
 				return objects.None_
 			},
 		}, true
+	case "__contains__":
+		return &objects.Builtin{
+			Name: "deque.__contains__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 1 {
+					return objects.NewTypeError("__contains__() takes at least 1 argument")
+				}
+				for _, item := range d.items {
+					if objects.Equal(item, args[0]) {
+						return &objects.Boolean{Value: true}
+					}
+				}
+				return &objects.Boolean{Value: false}
+			},
+		}, true
+	case "copy":
+		return &objects.Builtin{
+			Name: "deque.copy",
+			Fn: func(args ...objects.Object) objects.Object {
+				newD := newDeque()
+				newD.items = append(newD.items, d.items...)
+				return newD
+			},
+		}, true
 	case "maxlen":
 		return &objects.Builtin{
 			Name: "deque.maxlen",
@@ -414,11 +438,23 @@ func (od *OrderedDict) GetAttr(name string) (objects.Object, bool) {
 				if len(od.KeyOrder) == 0 {
 					return objects.NewKeyError("dictionary is empty")
 				}
-				keyStr := od.KeyOrder[len(od.KeyOrder)-1]
+				last := true
+				if len(args) >= 1 {
+					if b, ok := args[0].(*objects.Boolean); ok {
+						last = b.Value
+					}
+				}
+				var idx int
+				if last {
+					idx = len(od.KeyOrder) - 1
+				} else {
+					idx = 0
+				}
+				keyStr := od.KeyOrder[idx]
 				key := od.Dict.Keys[keyStr]
 				val, _ := od.Dict.Get(key)
 				od.Dict.Delete(key)
-				od.KeyOrder = od.KeyOrder[:len(od.KeyOrder)-1]
+				od.KeyOrder = append(od.KeyOrder[:idx], od.KeyOrder[idx+1:]...)
 				return &objects.Tuple{Elements: []objects.Object{key, val}}
 			},
 		}, true
@@ -429,13 +465,24 @@ func (od *OrderedDict) GetAttr(name string) (objects.Object, bool) {
 				if len(args) < 1 {
 					return objects.NewTypeError("move_to_end() takes at least 1 argument")
 				}
+				last := true
+				if len(args) >= 2 {
+					if b, ok := args[1].(*objects.Boolean); ok {
+						last = b.Value
+					}
+				}
 				keyStr := od.Dict.HashKey(args[0])
 				found := false
 				for i, k := range od.KeyOrder {
 					if k == keyStr {
 						found = true
-						copy(od.KeyOrder[i:], od.KeyOrder[i+1:])
-						od.KeyOrder[len(od.KeyOrder)-1] = keyStr
+						// Remove from current position
+						od.KeyOrder = append(od.KeyOrder[:i], od.KeyOrder[i+1:]...)
+						if last {
+							od.KeyOrder = append(od.KeyOrder, keyStr)
+						} else {
+							od.KeyOrder = append([]string{keyStr}, od.KeyOrder...)
+						}
 						break
 					}
 				}

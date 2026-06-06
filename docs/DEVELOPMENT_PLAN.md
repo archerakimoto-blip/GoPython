@@ -192,37 +192,41 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **L3**: 提取 `augAssignOperator(tokenType) (string, bool)` 消除重复映射
 - [x] **L16**: 统一注释语言为英文 — 范围过大，延后到后续版本
 
-### v0.19 — Python 语义完善
+### v0.19 — Python 语义完善 ✅
 
 > 目标：补齐剩余的 Python 语义偏差，提升 CPython 兼容性。
 
-- [ ] **集合差集增强赋值** `s -= other` — 当前仅支持 `|=` `&=` `^=`，缺少 `-=`
-- [ ] **切片赋值** `lst[1:3] = [4,5]` — 需要 `SliceAssignStatement` AST 节点
-- [ ] **多目标索引赋值** `d['a'] = d['b'] = 1` — 验证当前实现是否正确
-- [ ] **Tuple 索引赋值禁用** — `t[0] = 1` 应抛出 `TypeError`
-- [ ] **String 索引赋值禁用** — `s[0] = 'a'` 应抛出 `TypeError`
-- [ ] **`dict.update()` 接受关键字参数** — `d.update(a=1, b=2)`
-- [ ] **`dict.__ior__` 原地合并** — `d |= other` 修改自身而非创建新对象
-- [ ] **`set.__isub__`** — `s -= other` 原地差集
-- [ ] **`list.__imul__`** — `lst *= 3` 原地重复
-- [ ] **`dict.setdefault()`** — `d.setdefault('a', 0)` 方法
-- [ ] **`dict.popitem()`** — LIFO 顺序弹出
-- [ ] **`Counter.most_common()`** — 返回最常见元素
-- [ ] **`Counter.elements()`** — 返回迭代器
-- [ ] **`OrderedDict.popitem(last=True)`** — 支持 FIFO/LIFO 弹出
-- [ ] **`OrderedDict.move_to_end()`** — 移动键到末尾/开头
-- [ ] **`deque.__getitem__`/`__setitem__`** — 索引访问支持
-- [ ] **`deque.maxlen`** — 最大长度属性
-- [ ] **`deque.remove()`** — 按值删除
-- [ ] **`deque.__contains__`** — `in` 运算符
-- [ ] **`deque.index()`** — 查找元素位置
-- [ ] **`deque.reverse()`** — 原地反转
-- [ ] **`deque.sort()`** — 原地排序
-- [ ] **`deque.copy()`** — 浅拷贝
-- [ ] **`deque.clear()`** — 清空
-- [ ] **`deque.count()`** — 计数
-- [ ] **`deque.extendleft()`** — 左侧扩展
-- [ ] **`deque.rotate(n)`** — 旋转修正
+- [x] **集合差集运算符** `s - other` — OpSub 已支持 Set 类型（已存在）
+- [x] **切片赋值** `lst[1:3] = [4,5]` — 新增 `SliceAssignStatement` AST 节点 + `OpSetSlice` 操作码 + VM `executeSetSlice`
+- [x] **多目标索引赋值** `d['a'] = d['b'] = 1` — 验证通过，当前实现正确
+- [x] **Tuple 索引赋值禁用** — `t[0] = 1` 抛出 TypeError
+- [x] **String 索引赋值禁用** — `s[0] = 'a'` 抛出 TypeError
+- [x] **`dict.update()` 接受关键字参数** — 支持 Dict/List[Tuple]/Tuple[Tuple] + kwargs
+- [x] **`dict | other` 合并运算符** — `d1 | d2` 创建新 dict（右覆盖左）
+- [x] **`dict.setdefault()`** — `d.setdefault('a', 0)` 方法
+- [x] **`dict.popitem()`** — LIFO 顺序弹出，返回 (key, value) 元组
+- [x] **`dict.pop()`** — 按键弹出，支持默认值
+- [x] **`dict.get()`** — 按键获取，支持默认值
+- [x] **`dict.clear()`** / **`dict.copy()`** — 清空/浅拷贝
+- [x] **`dict.keys()`** / **`dict.values()`** / **`dict.items()`** — 视图对象
+- [x] **`Counter.most_common()`** — 返回最常见元素（已存在）
+- [x] **`Counter.elements()`** — 返回迭代器（已存在）
+- [x] **`OrderedDict.popitem(last=True)`** — 支持 FIFO/LIFO 弹出
+- [x] **`OrderedDict.move_to_end(last=True)`** — 移动键到末尾/开头
+- [x] **`deque.__getitem__`/`__setitem__`** — 索引访问支持（v0.18 已完成）
+- [x] **`deque.maxlen`** — 最大长度属性（已存在，返回 None）
+- [x] **`deque.remove()`** — 按值删除（已存在）
+- [x] **`deque.__contains__`** — `in` 运算符
+- [x] **`deque.index()`** — 查找元素位置（已存在）
+- [x] **`deque.reverse()`** — 原地反转（已存在）
+- [x] **`deque.copy()`** — 浅拷贝
+- [x] **`deque.clear()`** — 清空（已存在）
+- [x] **`deque.count()`** — 计数（已存在）
+- [x] **`deque.extendleft()`** — 左侧扩展（已存在）
+- [x] **`deque.rotate(n)`** — 旋转修正（v0.18 已完成）
+- [ ] **`set.__isub__`** — `s -= other` 原地差集（延后，当前创建新集合语义正确）
+- [ ] **`list.__imul__`** — `lst *= 3` 原地重复（延后，当前脱糖语义正确）
+- [ ] **`deque.sort()`** — CPython deque 不支持 sort，移除
 
 ### v0.20 — 标准库扩展
 
