@@ -235,9 +235,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **itertools 模块** — chain, count, cycle, islice, repeat, accumulate
 - [x] **functools 模块** — reduce, partial
 - [x] **operator 模块** — itemgetter, attrgetter, methodcaller
-- [ ] **collections.abc 模块** — Iterable, Sequence, Mapping, Set 抽象基类
-- [ ] **pathlib 模块**（基础） — Path 对象, exists/is_file/is_dir
-- [ ] **typing 模块**（基础） — List, Dict, Tuple, Optional, Union 类型别名
+- [x] **collections.abc 模块** — Iterable, Sequence, Mapping, Set 抽象基类
+- [x] **pathlib 模块**（基础） — Path 对象, exists/is_file/is_dir
+- [x] **typing 模块**（基础） — List, Dict, Tuple, Optional, Union 类型别名
 - [x] **hashlib 模块**（基础） — md5, sha256
 - [x] **base64 模块** — encode/decode
 - [x] **struct 模块** — pack/unpack 二进制数据

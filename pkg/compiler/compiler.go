@@ -13,6 +13,7 @@ import (
 	"github.com/go-py/go-python/pkg/ast"
 	"github.com/go-py/go-python/pkg/base64"
 	"github.com/go-py/go-python/pkg/collections"
+	collections_abc "github.com/go-py/go-python/pkg/collections_abc"
 	"github.com/go-py/go-python/pkg/concurrency"
 	"github.com/go-py/go-python/pkg/functools"
 	"github.com/go-py/go-python/pkg/gc"
@@ -21,8 +22,10 @@ import (
 	"github.com/go-py/go-python/pkg/io"
 	"github.com/go-py/go-python/pkg/objects"
 	"github.com/go-py/go-python/pkg/operator"
+	"github.com/go-py/go-python/pkg/pathlib"
 	re "github.com/go-py/go-python/pkg/re"
 	struct_ "github.com/go-py/go-python/pkg/struct"
+	"github.com/go-py/go-python/pkg/typing"
 )
 
 type Opcode byte
@@ -393,6 +396,27 @@ func (c *Compiler) registerBuiltins() {
 	hashlibIndex := len(c.constants)
 	c.constants = append(c.constants, hashlibModule)
 	c.symbolTable.DefineBuiltin("hashlib", hashlibIndex)
+
+	// 注册 collections.abc 模块
+	collectionsABCModule := collections_abc.CreateCollectionsABCModule()
+	objects.RegisterModule("collections.abc", collectionsABCModule)
+	collectionsABCIndex := len(c.constants)
+	c.constants = append(c.constants, collectionsABCModule)
+	c.symbolTable.DefineBuiltin("collections.abc", collectionsABCIndex)
+
+	// 注册 pathlib 模块
+	pathlibModule := pathlib.CreatePathlibModule()
+	objects.RegisterModule("pathlib", pathlibModule)
+	pathlibIndex := len(c.constants)
+	c.constants = append(c.constants, pathlibModule)
+	c.symbolTable.DefineBuiltin("pathlib", pathlibIndex)
+
+	// 注册 typing 模块
+	typingModule := typing.CreateTypingModule()
+	objects.RegisterModule("typing", typingModule)
+	typingIndex := len(c.constants)
+	c.constants = append(c.constants, typingModule)
+	c.symbolTable.DefineBuiltin("typing", typingIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
