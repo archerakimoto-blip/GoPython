@@ -84,6 +84,13 @@ const (
 	OpListUnpack
 	OpDictUnpack
 	OpEllipsis
+	OpBitOr
+	OpBitAnd
+	OpBitXor
+	OpSetUnion
+	OpSetIntersection
+	OpSetDifference
+	OpSetSymmetricDifference
 )
 
 type EmittedInstruction struct {
@@ -2015,6 +2022,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpEqual)
 		case "!=":
 			c.emit(OpNotEqual)
+		case "|":
+			c.emit(OpBitOr)
+		case "&":
+			c.emit(OpBitAnd)
+		case "^":
+			c.emit(OpBitXor)
 		case "and", "or":
 			return fmt.Errorf("and/or operators should be desugared before compilation")
 		default:

@@ -23,6 +23,12 @@ const (
 	PERCENT  = "%"
 	LT       = "<"
 	GT       = ">"
+	PIPE     = "|"
+	PIPE_EQ  = "|="
+	AMPERSAND = "&"
+	AMPERSAND_EQ = "&="
+	CARET    = "^"
+	CARET_EQ = "^="
 	PLUS_EQ  = "+="
 	MINUS_EQ = "-="
 	MUL_EQ   = "*="
@@ -288,6 +294,30 @@ func (l *Lexer) NextToken() Token {
 		}
 	case '<':
 		tok = newToken(LT, l.ch)
+	case '|':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: PIPE_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(PIPE, l.ch)
+		}
+	case '&':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: AMPERSAND_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(AMPERSAND, l.ch)
+		}
+	case '^':
+		if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: CARET_EQ, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(CARET, l.ch)
+		}
 	case '>':
 		tok = newToken(GT, l.ch)
 	case ';':

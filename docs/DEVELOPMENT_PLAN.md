@@ -625,7 +625,7 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 
 ### v0.17.x — 标准库补全（续）
 
-#### 🔴 严重问题 (4 项)
+#### 🔴 严重问题 (4 项) ✅ 已全部修复
 
 1. **集合字面量解析失败** ✅ 已修复 — `parseBraceLiteral` 函数将 `{1, 2, 3}` 当作字典解析
    - 修复：在 `parseBraceLiteral` 中添加逗号检查，调用 `parseSetLiteral(firstExpr)`
@@ -637,14 +637,23 @@ _(v0.12 所有计划中的 bug 修复已完成)_
 3. **`int()` 内置函数不支持无参数调用** ✅ 已修复 — `intBuiltin` 要求恰好1个参数
    - 修复：修改 `intBuiltin` 支持0个参数调用，返回默认值 0
 
-4. **集合运算符 `|` `&` `-` `^` 作为运算符不可用** ⚠️ 未完成 — 方法调用可用，但运算符语法不可用
-   - 根因：lexer 未定义 `|` `&` `^` token，parser/VM 未实现集合运算符脱糖
-   - 需要：在 lexer 中添加 `|` `&` `^` token，在 VM 的 `executeBinaryOperation` 中添加集合运算符处理
+4. **集合运算符 `|` `&` `-` `^` 作为运算符不可用** ✅ 已修复
+   - 修复：在 lexer 中添加了 `|` `&` `^` token，在 parser 中添加了优先级，在 compiler 中添加了 opcode，在 VM 中添加了集合运算处理
+   - 支持集合的：
+     - `|` union（并集）
+     - `&` intersection（交集）
+     - `-` difference（差集）
+     - `^` symmetric difference（对称差集）
+   - 支持整数的位运算：按位或、按位与、按位异或
+
+5. **VM 的索引运算符不支持自定义对象** ✅ 已修复
+   - 修复：修改 `vm.executeIndexExpression` 以支持通过 `GetAttr` 获取 `__getitem__` 属性并调用
+   - 现在 `defaultdict` 的索引访问能正常工作了
 
 #### 🟡 中等问题 (2 项)
 
 5. **集合推导式 `{x for x in iter}` 解析可能受影响** — 需要测试验证
-6. **defaultdict 的 `__getitem__` 调用 factory 时未传递参数** — `defaultdict.__getitem__` 调用 `objects.CallFunction(dd.Factory)` 时未传递参数
+6. **defaultdict 的 `__setitem__` 运算符需要支持** — 目前只实现了 `__getitem__`，没有实现 `__setitem__`，所以 `d['a'] += 1` 中的赋值部分不工作
 
 ### v1.0.0 — Production Ready
 

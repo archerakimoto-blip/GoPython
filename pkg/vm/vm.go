@@ -298,7 +298,7 @@ func (vm *VM) Run() error {
 				}
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower:
+		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower, compiler.OpBitOr, compiler.OpBitAnd, compiler.OpBitXor:
 			err := vm.executeBinaryOperation(op)
 			if err != nil {
 				return err
@@ -2727,6 +2727,26 @@ func (vm *VM) executeBinaryOperation(op compiler.Opcode) error {
 	leftType := left.Type()
 	rightType := right.Type()
 
+	// Set operations: | (union), & (intersection), - (difference), ^ (symmetric difference)
+	if leftType == objects.SET_OBJ && rightType == objects.SET_OBJ {
+		leftSet := left.(*objects.Set)
+		rightSet := right.(*objects.Set)
+		var result *objects.Set
+		switch op {
+		case compiler.OpBitOr:
+			result = leftSet.Union(rightSet)
+		case compiler.OpBitAnd:
+			result = leftSet.Intersection(rightSet)
+		case compiler.OpSub:
+			result = leftSet.Difference(rightSet)
+		case compiler.OpBitXor:
+			result = leftSet.SymmetricDifference(rightSet)
+		default:
+			return vm.push(objects.NewTypeError("unsupported operand type(s) for binary operation: '%s' and '%s'", leftType, rightType))
+		}
+		return vm.push(result)
+	}
+
 	if leftType == objects.INTEGER_OBJ && rightType == objects.INTEGER_OBJ {
 		return vm.executeBinaryIntegerOperation(op, left, right)
 	}
@@ -2901,6 +2921,12 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
 	case compiler.OpLessThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+	case compiler.OpBitOr:
+		result = leftValue | rightValue
+	case compiler.OpBitAnd:
+		result = leftValue & rightValue
+	case compiler.OpBitXor:
+		result = leftValue ^ rightValue
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}
@@ -3207,6 +3233,17 @@ func (vm *VM) executeIndexExpression(left, index objects.Object) error {
 	case left.Type() == objects.DICT_ITEMS_OBJ && index.Type() == objects.INTEGER_OBJ:
 		return vm.executeDictItemsIndex(left, index)
 	default:
+		// Check if object has __getitem__ method via GetAttr
+		if getter, ok := left.(interface{ GetAttr(string) (objects.Object, bool) }); ok {
+			if getitem, found := getter.GetAttr("__getitem__"); found {
+				// Call __getitem__ method
+				result := objects.CallFunction(getitem, index)
+				if err, isErr := result.(*objects.Error); isErr {
+					return err
+				}
+				return vm.push(result)
+			}
+		}
 		return fmt.Errorf("index operator not supported: %s", left.Type())
 	}
 }
