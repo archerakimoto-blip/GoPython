@@ -32,6 +32,51 @@ func (d *deque) Inspect() string {
 
 func (d *deque) GetAttr(name string) (objects.Object, bool) {
 	switch name {
+	case "__getitem__":
+		return &objects.Builtin{
+			Name: "deque.__getitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 1 {
+					return objects.NewTypeError("__getitem__() takes at least 1 argument")
+				}
+				idx, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewTypeError("deque indices must be integers, not %s", args[0].Type())
+				}
+				i := int(idx.Value)
+				length := len(d.items)
+				if i < 0 {
+					i = length + i
+				}
+				if i < 0 || i >= length {
+					return objects.NewIndexError("deque index out of range")
+				}
+				return d.items[i]
+			},
+		}, true
+	case "__setitem__":
+		return &objects.Builtin{
+			Name: "deque.__setitem__",
+			Fn: func(args ...objects.Object) objects.Object {
+				if len(args) < 2 {
+					return objects.NewTypeError("__setitem__() takes at least 2 arguments")
+				}
+				idx, ok := args[0].(*objects.Integer)
+				if !ok {
+					return objects.NewTypeError("deque indices must be integers, not %s", args[0].Type())
+				}
+				i := int(idx.Value)
+				length := len(d.items)
+				if i < 0 {
+					i = length + i
+				}
+				if i < 0 || i >= length {
+					return objects.NewIndexError("deque index out of range")
+				}
+				d.items[i] = args[1]
+				return objects.None_
+			},
+		}, true
 	case "append":
 		return &objects.Builtin{
 			Name: "deque.append",
@@ -188,12 +233,15 @@ func (d *deque) GetAttr(name string) (objects.Object, bool) {
 					return objects.NewTypeError("insert() argument 1 must be int")
 				}
 				i := int(idx.Value)
+			if i < 0 {
+				i = len(d.items) + i
 				if i < 0 {
 					i = 0
 				}
-				if i > len(d.items) {
-					i = len(d.items)
-				}
+			}
+			if i > len(d.items) {
+				i = len(d.items)
+			}
 				d.items = append(d.items, objects.None_)
 				copy(d.items[i+1:], d.items[i:])
 				d.items[i] = args[1]
@@ -236,24 +284,23 @@ func (d *deque) GetAttr(name string) (objects.Object, bool) {
 						n = int(i.Value)
 					}
 				}
-				if len(d.items) == 0 {
+				length := len(d.items)
+				if length == 0 {
 					return objects.None_
 				}
-				// Handle negative rotation
-				for n < 0 {
-					// Rotate left
-					first := d.items[0]
-					d.items = d.items[1:]
-					d.items = append(d.items, first)
-					n++
+				n = n % length
+				if n < 0 {
+					n += length
 				}
-				for n > 0 {
-					// Rotate right
-					last := d.items[len(d.items)-1]
-					d.items = d.items[:len(d.items)-1]
-					d.items = append([]objects.Object{last}, d.items...)
-					n--
+				if n == 0 {
+					return objects.None_
 				}
+				// Rotate right by n: last n elements move to front
+				mid := length - n
+				rotated := make([]objects.Object, length)
+				copy(rotated[:n], d.items[mid:])
+				copy(rotated[n:], d.items[:mid])
+				d.items = rotated
 				return objects.None_
 			},
 		}, true
@@ -415,20 +462,24 @@ func (od *OrderedDict) GetAttr(name string) (objects.Object, bool) {
 					return objects.None_
 				}
 				switch other := args[0].(type) {
-				case *objects.Dict:
-					for keyStr, val := range other.Pairs {
-						key := other.Keys[keyStr]
-						od.Dict.Set(key, val)
+			case *objects.Dict:
+				for keyStr, val := range other.Pairs {
+					key := other.Keys[keyStr]
+					if _, exists := od.Dict.Pairs[keyStr]; !exists {
 						od.KeyOrder = append(od.KeyOrder, keyStr)
 					}
-				case *OrderedDict:
-					for _, keyStr := range other.KeyOrder {
-						key := other.Dict.Keys[keyStr]
-						val, _ := other.Dict.Get(key)
-						od.Dict.Set(key, val)
-						od.KeyOrder = append(od.KeyOrder, keyStr)
-					}
+					od.Dict.Set(key, val)
 				}
+			case *OrderedDict:
+				for _, keyStr := range other.KeyOrder {
+					key := other.Dict.Keys[keyStr]
+					val, _ := other.Dict.Get(key)
+					if _, exists := od.Dict.Pairs[keyStr]; !exists {
+						od.KeyOrder = append(od.KeyOrder, keyStr)
+					}
+					od.Dict.Set(key, val)
+				}
+			}
 				return objects.None_
 			},
 		}, true

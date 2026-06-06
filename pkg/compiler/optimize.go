@@ -173,6 +173,18 @@ func EliminateDeadCode(ins Instructions) Instructions {
 
 		case op == OpReturnValue || op == OpReturn || op == OpRaise:
 
+		case op == OpFinally:
+			// OpFinally has a jump target (finallyEndIP) that must be reachable
+			target := int(uint16(ins[current+1])<<8 | uint16(ins[current+2]))
+			if target > 0 && target < len(ins) && !reachable[target] {
+				reachable[target] = true
+				queue = append(queue, target)
+			}
+			if nextInst < len(ins) && !reachable[nextInst] {
+				reachable[nextInst] = true
+				queue = append(queue, nextInst)
+			}
+
 		default:
 			if nextInst < len(ins) && !reachable[nextInst] {
 				reachable[nextInst] = true
@@ -209,6 +221,14 @@ func EliminateDeadCode(ins Instructions) Instructions {
 
 			if op == OpJump || op == OpJumpNotTruthy {
 				oldTarget, _ := readOperand(ins, oldPos, op)
+				if newTarget, ok := posMap[oldTarget]; ok {
+					chunk[1] = byte(newTarget >> 8)
+					chunk[2] = byte(newTarget & 0xFF)
+				}
+			}
+
+			if op == OpFinally {
+				oldTarget := int(uint16(ins[oldPos+1])<<8 | uint16(ins[oldPos+2]))
 				if newTarget, ok := posMap[oldTarget]; ok {
 					chunk[1] = byte(newTarget >> 8)
 					chunk[2] = byte(newTarget & 0xFF)

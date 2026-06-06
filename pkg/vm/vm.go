@@ -3273,7 +3273,7 @@ func (vm *VM) executeSetIndex(left, index, value objects.Object) error {
 				i = length + i
 			}
 			if i < 0 || i >= length {
-				return vm.push(objects.NewIndexError("list assignment index out of range"))
+				return fmt.Errorf("list assignment index out of range")
 			}
 			left.Elements[i] = value
 			return vm.push(value)

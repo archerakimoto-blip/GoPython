@@ -35,6 +35,9 @@ func (s *StringIO) GetAttr(name string) (objects.Object, bool) {
 						size = int(i.Value)
 					}
 				}
+				if size == 0 {
+					return &objects.String{Value: ""}
+				}
 				content := s.Buffer.String()
 				if size < 0 {
 					result := content[s.Pos:]
@@ -57,11 +60,13 @@ func (s *StringIO) GetAttr(name string) (objects.Object, bool) {
 				if len(args) < 1 {
 					return objects.NewTypeError("write() takes at least 1 argument")
 				}
-				if str, ok := args[0].(*objects.String); ok {
-					s.Buffer.WriteString(str.Value)
-					s.Pos = s.Buffer.Len()
+				str, ok := args[0].(*objects.String)
+				if !ok {
+					return objects.NewTypeError("write() argument must be a string, not %s", args[0].Type())
 				}
-				return objects.None_
+				s.Buffer.WriteString(str.Value)
+				s.Pos = s.Buffer.Len()
+				return &objects.Integer{Value: int64(len(str.Value))}
 			},
 		}, true
 	case "seek":
@@ -185,6 +190,9 @@ func (b *BytesIO) GetAttr(name string) (objects.Object, bool) {
 						size = int(i.Value)
 					}
 				}
+				if size == 0 {
+					return &objects.Bytes{Value: []byte{}}
+				}
 				content := b.Buffer.Bytes()
 				if size < 0 {
 					result := content[b.Pos:]
@@ -207,11 +215,13 @@ func (b *BytesIO) GetAttr(name string) (objects.Object, bool) {
 				if len(args) < 1 {
 					return objects.NewTypeError("write() takes at least 1 argument")
 				}
-				if bs, ok := args[0].(*objects.Bytes); ok {
-					b.Buffer.Write(bs.Value)
-					b.Pos = b.Buffer.Len()
+				bs, ok := args[0].(*objects.Bytes)
+				if !ok {
+					return objects.NewTypeError("write() argument must be bytes, not %s", args[0].Type())
 				}
-				return objects.None_
+				b.Buffer.Write(bs.Value)
+				b.Pos = b.Buffer.Len()
+				return &objects.Integer{Value: int64(len(bs.Value))}
 			},
 		}, true
 	case "seek":

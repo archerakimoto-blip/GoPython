@@ -50,6 +50,36 @@ var precedences = map[lexer.TokenType]int{
 	lexer.DOT:     CALL,
 }
 
+// augAssignOperator maps an augmented assignment token type to its operator string.
+// Returns the operator string and true if the token is an augmented assignment operator,
+// or an empty string and false otherwise.
+func augAssignOperator(tokenType lexer.TokenType) (string, bool) {
+	switch tokenType {
+	case lexer.PLUS_EQ:
+		return "+", true
+	case lexer.MINUS_EQ:
+		return "-", true
+	case lexer.MUL_EQ:
+		return "*", true
+	case lexer.DIV_EQ:
+		return "/", true
+	case lexer.PERCENT_EQ:
+		return "%", true
+	case lexer.FLOOR_DIV_EQ:
+		return "//", true
+	case lexer.POWER_EQ:
+		return "**", true
+	case lexer.PIPE_EQ:
+		return "|", true
+	case lexer.AMPERSAND_EQ:
+		return "&", true
+	case lexer.CARET_EQ:
+		return "^", true
+	default:
+		return "", false
+	}
+}
+
 type Parser struct {
 	l      *lexer.Lexer
 	errors []string
@@ -525,28 +555,7 @@ func (p *Parser) parseAugAssignStatement() *ast.AugAssignStatement {
 	stmt.Name = &ast.Identifier{Token: p.curToken.Literal, Value: p.curToken.Literal}
 
 	p.nextToken()
-	switch p.curToken.Type {
-	case lexer.PLUS_EQ:
-		stmt.Operator = "+"
-	case lexer.MINUS_EQ:
-		stmt.Operator = "-"
-	case lexer.MUL_EQ:
-		stmt.Operator = "*"
-	case lexer.DIV_EQ:
-		stmt.Operator = "/"
-	case lexer.PERCENT_EQ:
-		stmt.Operator = "%"
-	case lexer.FLOOR_DIV_EQ:
-		stmt.Operator = "//"
-	case lexer.POWER_EQ:
-		stmt.Operator = "**"
-	case lexer.PIPE_EQ:
-		stmt.Operator = "|"
-	case lexer.AMPERSAND_EQ:
-		stmt.Operator = "&"
-	case lexer.CARET_EQ:
-		stmt.Operator = "^"
-	}
+	stmt.Operator, _ = augAssignOperator(p.curToken.Type)
 
 	p.nextToken()
 
@@ -621,29 +630,7 @@ func (p *Parser) parseExpressionOrAttrAssign() ast.Statement {
 
 	// 处理索引增强赋值：d['a'] += 1
 	if idx, ok := stmt.Expression.(*ast.IndexExpression); ok {
-		var op string
-		switch p.peekToken.Type {
-		case lexer.PLUS_EQ:
-			op = "+"
-		case lexer.MINUS_EQ:
-			op = "-"
-		case lexer.MUL_EQ:
-			op = "*"
-		case lexer.DIV_EQ:
-			op = "/"
-		case lexer.PERCENT_EQ:
-			op = "%"
-		case lexer.FLOOR_DIV_EQ:
-			op = "//"
-		case lexer.POWER_EQ:
-			op = "**"
-		case lexer.PIPE_EQ:
-			op = "|"
-		case lexer.AMPERSAND_EQ:
-			op = "&"
-		case lexer.CARET_EQ:
-			op = "^"
-		}
+		op, _ := augAssignOperator(p.peekToken.Type)
 		if op != "" {
 			p.nextToken() // skip to the augmented assign token
 			p.nextToken() // skip to the value

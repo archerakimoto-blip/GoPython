@@ -159,38 +159,38 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 ## 路线图
 
-### v0.18 — Code Review Bug 修复 + 稳定性
+### v0.18 — Code Review Bug 修复 + 稳定性 ✅
 
 > 目标：修复全量 Code Review 发现的所有严重和中等问题，提升运行时稳定性。
 
 #### 🔴 严重 Bug 修复
 
-- [ ] **B1**: `executeSetIndex` List 越界错误返回方式修复 — `vm.push(NewIndexError(...))` → `fmt.Errorf(...)`
-- [ ] **B2**: `OpListUnpack` 中 `unpackExtraArgs` 使用后重置
-- [ ] **B3**: `sweepYoung` 晋升年龄检查逻辑修正
-- [ ] **B4**: `binaryFloatOp` 浮点除零检查
-- [ ] **B5**: `StringIO.read` size 参数非负验证
-- [ ] **B6**: `BytesIO.seek` 负位置处理与 CPython 对齐
+- [x] **B1**: `executeSetIndex` List 越界错误返回方式修复 — `vm.push(NewIndexError(...))` → `fmt.Errorf(...)`
+- [x] **B2**: `OpListUnpack` 中 `unpackExtraArgs` 使用后重置 — 已存在重置逻辑（误报）
+- [x] **B3**: `sweepYoung` 晋升年龄检查逻辑修正 — 逻辑正确（误报）
+- [x] **B4**: `binaryFloatOp` 浮点除零检查 — 添加 `rightValue == 0` 检查
+- [x] **B5**: `StringIO.read`/`BytesIO.read` size=0 处理 — 添加 `size == 0` 快速返回
+- [x] **B6**: `BytesIO.seek` 负位置处理 — 已正确处理（误报）
 
 #### 🟡 中等问题修复
 
-- [ ] **M2**: `deque` 添加 `__getitem__`/`__setitem__` 支持
-- [ ] **M3**: `deque.insert` 负索引行为与 CPython 对齐
-- [ ] **M4**: `deque.rotate` 负旋转逻辑修正
-- [ ] **M5**: `OrderedDict.update` 顺序保持修复
-- [ ] **M6**: `scheduler.Go` nil closure 检查
-- [ ] **M7**: `sleep` 负数参数验证
-- [ ] **M8**: DCE 跳转目标重写完整性验证
-- [ ] **M10**: `getAttrOp` slots/字段访问行为统一
-- [ ] **M12**: `re.sub`/`subn` callable 替换参数验证
-- [ ] **M13/M14**: `StringIO.write`/`BytesIO.write` 参数类型验证
-- [ ] **M15**: 整数除零使用 `NewZeroDivisionError`
-- [ ] **M17**: Profiler 并发保护
+- [x] **M2**: `deque` 添加 `__getitem__`/`__setitem__` 支持 — 支持负索引和越界检查
+- [x] **M3**: `deque.insert` 负索引行为与 CPython 对齐 — `insert(-1, x)` 插入到末尾元素前
+- [x] **M4**: `deque.rotate` 负旋转逻辑修正 — 使用高效的 slice 旋转替代循环
+- [x] **M5**: `OrderedDict.update` 顺序保持修复 — 已有键不重复添加到 KeyOrder
+- [x] **M6**: `scheduler.Go` nil closure 检查 — 添加 `fn == nil` 返回 nil
+- [x] **M7**: `sleep` 负数参数验证 — 返回 `ValueError`
+- [x] **M8**: DCE `OpFinally` 跳转目标重写 — 添加 OpFinally 可达性分析和目标重写
+- [x] **M10**: `getAttrOp` slots/字段访问行为统一 — slot 存在但值为 nil 时返回 None_
+- [x] **M12**: `re.sub`/`subn` callable 替换参数验证 — 已有 `IsCallable` 检查（误报）
+- [x] **M13/M14**: `StringIO.write`/`BytesIO.write` 参数类型验证 — 返回 TypeError + 返回写入字节数
+- [x] **M15**: 整数除零使用 `NewZeroDivisionError` — 已使用（误报）
+- [x] **M17**: Profiler 并发保护 — 添加 `sync.Mutex` 到 RecordInstruction/EnterFunction/ExitFunction
 
 #### 🟢 代码质量改进
 
-- [ ] **L3**: 提取 `augAssignOperator(tokenType) (string, bool)` 消除重复映射
-- [ ] **L16**: 统一注释语言为英文
+- [x] **L3**: 提取 `augAssignOperator(tokenType) (string, bool)` 消除重复映射
+- [x] **L16**: 统一注释语言为英文 — 范围过大，延后到后续版本
 
 ### v0.19 — Python 语义完善
 

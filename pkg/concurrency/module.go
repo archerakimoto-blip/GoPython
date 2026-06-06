@@ -169,7 +169,11 @@ func CreateConcurrencyModule() *objects.Module {
 			default:
 				return objects.NewTypeError("sleep() argument must be a number")
 			}
-			
+
+			if secs < 0 {
+				return objects.NewValueError("sleep length must be non-negative")
+			}
+
 			time.Sleep(time.Duration(secs * float64(time.Second)))
 			return objects.None_
 		},

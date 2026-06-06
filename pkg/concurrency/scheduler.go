@@ -133,6 +133,9 @@ func (s *Scheduler) Go(fn func() objects.Object, parent *Goroutine) *Goroutine {
 	if s.stopped.Load() {
 		return nil
 	}
+	if fn == nil {
+		return nil
+	}
 	
 	g := &Goroutine{
 		ID:       atomic.AddUint64(&goroutineIDCounter, 1),

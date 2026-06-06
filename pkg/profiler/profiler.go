@@ -3,12 +3,14 @@ package profiler
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/go-py/go-python/pkg/compiler"
 )
 
 type Profiler struct {
+	mu               sync.Mutex
 	enabled          bool
 	startTime        time.Time
 	instructionCount int
@@ -43,20 +45,29 @@ func (p *Profiler) RecordInstruction(op compiler.Opcode) {
 	if !p.enabled {
 		return
 	}
+	p.mu.Lock()
 	p.instructionCount++
+	p.mu.Unlock()
 }
 
 func (p *Profiler) EnterFunction(name string) {
 	if !p.enabled {
 		return
 	}
+	p.mu.Lock()
 	p.timerStack = append(p.timerStack, time.Now())
 	p.currentFunction = name
 	p.functionCalls[name]++
+	p.mu.Unlock()
 }
 
 func (p *Profiler) ExitFunction() {
-	if !p.enabled || len(p.timerStack) == 0 {
+	if !p.enabled {
+		return
+	}
+	p.mu.Lock()
+	if len(p.timerStack) == 0 {
+		p.mu.Unlock()
 		return
 	}
 	start := p.timerStack[len(p.timerStack)-1]
@@ -70,6 +81,7 @@ func (p *Profiler) ExitFunction() {
 	if len(p.timerStack) > 0 {
 		p.currentFunction = ""
 	}
+	p.mu.Unlock()
 }
 
 func (p *Profiler) Report() string {

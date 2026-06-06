@@ -1841,6 +1841,9 @@ func (rvm *RegisterVM) binaryFloatOp(op compiler.Opcode, left, right objects.Obj
 	case compiler.OpMul:
 		result = leftValue * rightValue
 	case compiler.OpDiv:
+		if rightValue == 0 {
+			return nil, fmt.Errorf("float division by zero")
+		}
 		result = leftValue / rightValue
 	case compiler.OpMod:
 		result = math.Mod(leftValue, rightValue)
@@ -2248,6 +2251,8 @@ func (rvm *RegisterVM) getAttrOp(obj objects.Object, attrName string) (objects.O
 				if instance.SlotValues[idx] != nil {
 					return instance.SlotValues[idx], nil
 				}
+				// Slot exists but value is nil - return None for uninitialized slots
+				return objects.None_, nil
 			}
 		}
 		if val, ok := instance.Fields[attrName]; ok {
