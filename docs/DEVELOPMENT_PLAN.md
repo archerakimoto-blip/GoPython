@@ -93,8 +93,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ JIT 热点检测 + 逃逸分析
 ✅ OpInPlaceLShift/RShift inPlaceAttrMap 条目
 ✅ 寄存器 VM slice step 支持
-⚠️ StringBuilder 操作码 — VM 已处理，编译器端生成路径待实现
-⚠️ OpArrayPrealloc 操作码 — VM 已处理，编译器端生成路径待实现
+✅ StringBuilder 操作码 — VM 已处理，编译器端 WhileStatement 循环模式检测生成 OpStringBuilderCreate/Append/Build
+✅ OpArrayPrealloc 操作码 — VM 已处理，编译器端脱糖 for 循环 range(N) 常量模式检测生成预分配指令
 ⚠️ JIT 框架 — 热点检测已实现，但 copyPropagation/registerAllocation/loopOptimizations 为空函数体，ExecuteFunction 返回 nil
 ⚠️ 直接线程 — 未实现
 
@@ -335,8 +335,8 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **V5**: OpYield 标记为 Deprecated 死操作码（保留定义避免 iota 值偏移）
 - [x] **V6**: RegOpDictUnpack 文档化 — 字典已通过寄存器传递给 RegOpCall，executeCall 自动检测
 - [x] **V7**: 寄存器 VM slice step 完善 — 新增 sliceOpWithStep 支持 step 参数（正/负步长，List/String/Bytes/Tuple）
-- ⚠️ **V3**: StringBuilder 编译器端生成路径 — 需循环模式检测，复杂度高，延后至 v0.23
-- ⚠️ **V4**: OpArrayPrealloc 编译器端生成路径 — 需脱糖层 range() 检测，复杂度高，延后至 v0.23
+- [x] **V3**: StringBuilder 编译器端生成路径 — WhileStatement 循环体扫描 s += expr 模式，生成 OpStringBuilderCreate/Append/Build
+- [x] **V4**: OpArrayPrealloc 编译器端生成路径 — 脱糖 for 循环 range(N) 常量模式检测，生成 OpArrayPrealloc
 
 #### 标准库补齐
 
@@ -355,11 +355,6 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ### v0.23 — 并发完善 + JIT 框架
 
 > 目标：完善 asyncio 生态，实现 JIT 框架核心功能，完成延期的编译器端优化。
-
-#### 编译器端优化（延自 v0.22）
-
-- [ ] **V3**: StringBuilder 编译器端生成路径 — 在字符串 += 循环模式中生成 OpStringBuilderCreate/Append/Build
-- [ ] **V4**: OpArrayPrealloc 编译器端生成路径 — 在 `for x in range(N)` 模式中生成预分配指令
 
 #### asyncio 模块
 
@@ -439,7 +434,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | JIT 优化引入正确性回归 | 高 | 低 | 优化前后结果对比测试 |
 | asyncio 实现复杂度 | 高 | 中 | 分阶段实现，对标 CPython 子集 |
 | itertools 完全缺失但计划标记已完成 | 高 | 低 | 已修正计划状态，v0.22 补齐 |
-| StringBuilder/ArrayPrealloc 操作码 VM 已处理但编译器未生成 | 中 | 低 | v0.22 添加编译器端生成路径 |
+| StringBuilder/ArrayPrealloc 编译器端生成路径已完成 | 中 | 低 | v0.22 已实现 WhileStatement 循环模式检测 |
 | JIT 框架大量空函数体 | 中 | 高 | v0.23 分阶段实现核心优化 pass |
 
 ---

@@ -132,6 +132,10 @@ type Compiler struct {
 	instructions        Instructions
 	lastInstruction     EmittedInstruction
 	previousInstruction EmittedInstruction
+
+	// stringBuilderLocals tracks variables that should use StringBuilder optimization
+	// in the current while loop. Map from original var name to temp local symbol.
+	stringBuilderLocals map[string]Symbol
 }
 
 type Bytecode struct {
@@ -2445,6 +2449,27 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(inPlaceOp)
 			c.emit(OpPop)
 		} else {
+			// V3: StringBuilder optimization for string += in loops
+			if node.Operator == "+" && c.stringBuilderLocals != nil && node.Name != nil {
+				if tempSymbol, ok := c.stringBuilderLocals[node.Name.Value]; ok {
+					// Emit: OpGetLocal(temp), compile value, OpStringBuilderAppend
+					c.emit1(OpGetLocal, tempSymbol.Index)
+					err := c.Compile(node.Value)
+					if err != nil {
+						return err
+					}
+					c.emit(OpStringBuilderAppend)
+					// Still need to update the original variable for use after the loop
+					// Emit: OpGetLocal(temp), OpStringBuilderBuild, OpSetLocal(original)
+					originalSymbol, resolved := c.symbolTable.Resolve(node.Name.Value)
+					if resolved {
+						c.emit1(OpGetLocal, tempSymbol.Index)
+						c.emit(OpStringBuilderBuild)
+						c.emit1(OpSetLocal, originalSymbol.Index)
+					}
+					return nil
+				}
+			}
 			// 变量增强赋值: x += 1
 			err := c.Compile(node.Name)
 			if err != nil {
@@ -2877,6 +2902,31 @@ func (c *Compiler) Compile(node ast.Node) error {
 		c.emit(OpReturnValue)
 
 	case *ast.WhileStatement:
+		// Scan loop body for optimization opportunities
+		stringBuilderVars := c.findStringBuilderCandidates(node)
+		arrayPreallocInfo := c.findArrayPreallocCandidate(node)
+
+		// V3: StringBuilder optimization - create builders before the loop
+		sbTempLocals := make(map[string]Symbol) // original var name -> temp local symbol
+		for _, varName := range stringBuilderVars {
+			symbol, ok := c.symbolTable.Resolve(varName)
+			if !ok || symbol.Scope != LocalScope {
+				continue
+			}
+			// Define a temp local for the StringBuilder
+			tempName := "_sb_" + varName
+			tempSymbol := c.symbolTable.Define(tempName)
+			sbTempLocals[varName] = tempSymbol
+			// Emit: OpStringBuilderCreate, OpSetLocal(temp)
+			c.emit(OpStringBuilderCreate)
+			c.emit1(OpSetLocal, tempSymbol.Index)
+		}
+
+		// V4: ArrayPrealloc optimization - pre-allocate list capacity
+		if arrayPreallocInfo != nil {
+			c.emit(OpArrayPrealloc, arrayPreallocInfo.capacity)
+		}
+
 		conditionPos := len(c.instructions)
 		err := c.Compile(node.Condition)
 		if err != nil {
@@ -2885,7 +2935,10 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
 
+		// Compile loop body with StringBuilder optimization context
+		c.stringBuilderLocals = sbTempLocals
 		err = c.Compile(node.Body)
+		c.stringBuilderLocals = nil
 		if err != nil {
 			return err
 		}
@@ -2898,6 +2951,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		afterLoopPos := len(c.instructions)
 		c.changeOperand(jumpNotTruthyPos, afterLoopPos)
+
+		// V3: After the loop, build StringBuilders back to original variables
+		for varName, tempSymbol := range sbTempLocals {
+			originalSymbol, ok := c.symbolTable.Resolve(varName)
+			if !ok {
+				continue
+			}
+			// Emit: OpGetLocal(temp), OpStringBuilderBuild, OpSetLocal(original)
+			c.emit1(OpGetLocal, tempSymbol.Index)
+			c.emit(OpStringBuilderBuild)
+			c.emit1(OpSetLocal, originalSymbol.Index)
+		}
 
 	case *ast.ForStatement:
 		return fmt.Errorf("for loops should be desugared before compilation")
@@ -3451,6 +3516,144 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	c.instructions = append(c.instructions, compilationScope...)
 
 	return nil
+}
+
+// arrayPreallocInfo holds information about a list that can be pre-allocated.
+type arrayPreallocInfo struct {
+	varName  string
+	capacity int
+}
+
+// findStringBuilderCandidates scans a while loop body for local variables
+// that are accumulated with += (string concatenation pattern).
+// Returns a list of variable names that are candidates for StringBuilder optimization.
+func (c *Compiler) findStringBuilderCandidates(node *ast.WhileStatement) []string {
+	var candidates []string
+	seen := make(map[string]bool)
+	scanBlockForStringBuilders(node.Body, c.symbolTable, seen)
+	for name := range seen {
+		candidates = append(candidates, name)
+	}
+	return candidates
+}
+
+// scanBlockForStringBuilders recursively scans a block for += on local variables.
+func scanBlockForStringBuilders(block *ast.BlockStatement, st *SymbolTable, seen map[string]bool) {
+	if block == nil {
+		return
+	}
+	for _, stmt := range block.Statements {
+		scanStmtForStringBuilders(stmt, st, seen)
+	}
+}
+
+// scanStmtForStringBuilders scans a single statement for += patterns.
+func scanStmtForStringBuilders(stmt ast.Statement, st *SymbolTable, seen map[string]bool) {
+	switch s := stmt.(type) {
+	case *ast.AugAssignStatement:
+		if s.Operator == "+" && s.Name != nil && s.IndexLeft == nil {
+			symbol, ok := st.Resolve(s.Name.Value)
+			if ok && symbol.Scope == LocalScope {
+				seen[s.Name.Value] = true
+			}
+		}
+	case *ast.BlockStatement:
+		scanBlockForStringBuilders(s, st, seen)
+	case *ast.WhileStatement:
+		// Don't recurse into nested loops for simplicity
+	case *ast.ExpressionStatement:
+		// Handle if expressions which may contain += in branches
+		if ifExpr, ok := s.Expression.(*ast.IfExpression); ok {
+			scanBlockForStringBuilders(ifExpr.Consequence, st, seen)
+			if ifExpr.Alternative != nil {
+				scanBlockForStringBuilders(ifExpr.Alternative, st, seen)
+			}
+		}
+	case *ast.TryStatement:
+		scanBlockForStringBuilders(s.Body, st, seen)
+		for _, handler := range s.Excepts {
+			scanBlockForStringBuilders(handler.Body, st, seen)
+		}
+		if s.Finally != nil {
+			scanBlockForStringBuilders(s.Finally, st, seen)
+		}
+	}
+}
+
+// findArrayPreallocCandidate scans a while loop for the pattern:
+//   lst = []
+//   while _i_N < N:
+//     ... lst.append(x) ...
+// Returns pre-allocation info if the pattern is detected.
+func (c *Compiler) findArrayPreallocCandidate(node *ast.WhileStatement) *arrayPreallocInfo {
+	// Check if the condition is of the form: _i_N < N (desugared for loop)
+	cond, ok := node.Condition.(*ast.InfixExpression)
+	if !ok || cond.Operator != "<" {
+		return nil
+	}
+
+	// Check left side is a loop counter variable (_i_N)
+	leftIdent, ok := cond.Left.(*ast.Identifier)
+	if !ok {
+		return nil
+	}
+	if !strings.HasPrefix(leftIdent.Value, "_i_") {
+		return nil
+	}
+
+	// Check right side is a constant or len() call
+	var capacity int
+	switch right := cond.Right.(type) {
+	case *ast.IntegerLiteral:
+		capacity = int(right.Value)
+	case *ast.CallExpression:
+		// len() call - can't determine capacity at compile time
+		return nil
+	default:
+		return nil
+	}
+
+	if capacity <= 0 || capacity > 1000000 {
+		return nil
+	}
+
+	// Check if the loop body contains .append() calls on a local variable
+	appendVars := findAppendVars(node.Body)
+	if len(appendVars) == 0 {
+		return nil
+	}
+
+	// Return info for the first append variable found
+	return &arrayPreallocInfo{
+		varName:  appendVars[0],
+		capacity: capacity,
+	}
+}
+
+// findAppendVars scans a block for lst.append(x) patterns.
+func findAppendVars(block *ast.BlockStatement) []string {
+	var result []string
+	seen := make(map[string]bool)
+	if block == nil {
+		return result
+	}
+	for _, stmt := range block.Statements {
+		if es, ok := stmt.(*ast.ExpressionStatement); ok {
+			if call, ok := es.Expression.(*ast.CallExpression); ok {
+				if ma, ok := call.Function.(*ast.MemberAccess); ok {
+					if ma.Member.Value == "append" {
+						if ident, ok := ma.Object.(*ast.Identifier); ok {
+							if !seen[ident.Value] {
+								seen[ident.Value] = true
+								result = append(result, ident.Value)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return result
 }
 
 func (c *Compiler) compileAsyncListComprehension(node *ast.AsyncListComprehension) error {
