@@ -601,9 +601,62 @@ func (vm *VM) Run() error {
 			index := vm.pop()
 			left := vm.pop()
 
+			// 内联缓存快速路径
+			cacheKey := IndexCacheKey{FrameIndex: vm.framesIndex - 1, IP: ip}
+			leftType := left.Type()
+			indexType := index.Type()
+			if entry, hit := vm.indexCache[cacheKey]; hit {
+				if entry.LeftType == leftType && entry.IndexType == indexType {
+					switch entry.Handler {
+					case IndexHandlerListInt:
+						if lst, ok := left.(*objects.List); ok {
+							if idx, ok := index.(*objects.Integer); ok {
+								i := idx.Value
+								length := int64(len(lst.Elements))
+								if i < 0 {
+									i = length + i
+								}
+								if i >= 0 && i < length {
+									lst.Elements[i] = value
+									vm.push(value)
+									continue
+								}
+								break
+							}
+						}
+					case IndexHandlerDict:
+						if d, ok := left.(*objects.Dict); ok {
+							if err := objects.CheckHashable(index); err == nil {
+								d.Set(index, value)
+								vm.push(value)
+								continue
+							}
+							break
+						}
+					}
+				}
+			}
+
+			// 缓存未命中，走正常路径并填充缓存
+			handler := -1
+			switch {
+			case leftType == objects.LIST_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerListInt
+			case leftType == objects.DICT_OBJ:
+				handler = IndexHandlerDict
+			}
+
 			err := vm.executeSetIndex(left, index, value)
 			if err != nil {
 				return err
+			}
+
+			if handler >= 0 {
+				vm.indexCache[cacheKey] = IndexCacheEntry{
+					LeftType:  leftType,
+					IndexType: indexType,
+					Handler:   handler,
+				}
 			}
 		case compiler.OpSetSlice:
 			value := vm.pop()
@@ -644,7 +697,7 @@ func (vm *VM) Run() error {
 
 		case compiler.OpStringBuilderAppend:
 			value := vm.pop()
-			sb := vm.stack[vm.sp-1] // StringBuilder 在栈顶下方
+			sb := vm.stack[vm.sp-1] // StringBuilder 在栈顶
 			if builder, ok := sb.(*objects.StringBuilder); ok {
 				var s string
 				if str, ok := value.(*objects.String); ok {
@@ -654,11 +707,18 @@ func (vm *VM) Run() error {
 				}
 				builder.Builder.WriteString(s)
 			}
+			// value 已消费，StringBuilder 仍在栈顶
 
 		case compiler.OpStringBuilderBuild:
 			sb := vm.pop()
 			if builder, ok := sb.(*objects.StringBuilder); ok {
 				err := vm.push(&objects.String{Value: builder.Builder.String()})
+				if err != nil {
+					return err
+				}
+			} else {
+				// 类型不匹配，将原对象放回栈上避免栈不平衡
+				err := vm.push(sb)
 				if err != nil {
 					return err
 				}
@@ -3139,10 +3199,10 @@ var inPlaceAttrMap = map[compiler.Opcode]struct {
 func (vm *VM) executeInPlaceOperation(op compiler.Opcode, left, right objects.Object) error {
 	info, ok := inPlaceAttrMap[op]
 	if !ok {
-		// No in-place handler, fall back to regular binary operation
+		// Unknown in-place opcode, fall back to regular binary operation
 		vm.push(left)
 		vm.push(right)
-		return vm.executeBinaryOperation(info.fallbackOp)
+		return vm.executeBinaryOperation(op)
 	}
 
 	// 字符串 += 快速路径：使用 strings.Builder 避免重复分配

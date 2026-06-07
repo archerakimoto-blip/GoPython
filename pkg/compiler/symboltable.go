@@ -239,6 +239,24 @@ type CompiledFunction struct {
 	NonEscapingLocals     []bool // 标记哪些局部变量不逃逸（不被闭包捕获、不被返回、不被赋值给全局/实例属性）
 }
 
+// HasNonEscapingLocals 返回是否有不逃逸的局部变量
+func (cf *CompiledFunction) HasNonEscapingLocals() bool {
+	for _, v := range cf.NonEscapingLocals {
+		if v {
+			return true
+		}
+	}
+	return false
+}
+
+// IsLocalNonEscaping 返回指定索引的局部变量是否不逃逸
+func (cf *CompiledFunction) IsLocalNonEscaping(idx int) bool {
+	if idx < 0 || idx >= len(cf.NonEscapingLocals) {
+		return false
+	}
+	return cf.NonEscapingLocals[idx]
+}
+
 func (cf *CompiledFunction) Type() objects.ObjectType {
 	return objects.FUNCTION_OBJ
 }

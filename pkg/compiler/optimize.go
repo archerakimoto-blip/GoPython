@@ -281,11 +281,11 @@ func EliminateDeadCodeInFunctions(bytecode *Bytecode) *Bytecode {
 // analyzeEscape 分析函数中哪些局部变量不逃逸
 // 一个局部变量"逃逸"如果它：
 // 1. 被闭包捕获（OpGetFree 引用）
-// 2. 被返回（OpReturnValue 之前最后写入的局部变量）
-// 3. 被赋值给全局变量（OpSetGlobal）
-// 4. 被赋值给实例属性（OpSetAttribute）
-// 5. 被作为函数参数传递给外部函数
-// 不逃逸的局部变量可以安全地在栈上分配
+// 2. 被返回（OpReturnValue）
+// 3. 被赋值给全局变量（OpSetGlobal 之前的 OpGetLocal）
+// 4. 被赋值给实例属性（OpSetAttribute 之前的 OpGetLocal）
+// 5. 被作为函数参数传递（OpCall 之前的 OpGetLocal）
+// 不逃逸的局部变量可以安全地在栈上分配，不需要GC追踪
 func analyzeEscape(fn *CompiledFunction) []bool {
 	if fn.NumLocals == 0 {
 		return nil
@@ -297,32 +297,33 @@ func analyzeEscape(fn *CompiledFunction) []bool {
 		nonEscaping[i] = true
 	}
 
-	// 参数总是不逃逸的（它们在函数入口就绑定了）
-	// 但如果参数被用于逃逸操作，则标记为逃逸
-
 	ins := fn.Instructions
+
+	// 追踪最近一次 OpGetLocal 加载的局部变量索引
+	// 用于在 OpSetGlobal/OpSetAttribute/OpCall/OpReturnValue 时判断源变量
+	lastGetLocal := -1
+
 	for i := 0; i < len(ins); {
 		op := Opcode(ins[i])
 		size := InstructionSize(op)
 
 		switch op {
+		case OpGetLocal:
+			if size >= 2 && i+1 < len(ins) {
+				lastGetLocal = int(ins[i+1])
+			}
+
 		case OpSetGlobal:
-			// 赋值给全局变量：源局部变量逃逸
-			// OpSetGlobal 的操作数是全局索引，不是局部索引
-			// 但在这之前一定有 OpGetLocal 将局部变量加载到栈上
-			// 我们无法直接追踪，保守标记所有在 OpSetGlobal 之前的 OpGetLocal 对应的变量为逃逸
-			// 简化处理：如果有 OpSetGlobal，标记所有局部变量为可能逃逸
-			for j := range nonEscaping {
-				if j >= fn.NumParameters {
-					nonEscaping[j] = false
-				}
+			// 赋值给全局变量：如果之前有 OpGetLocal，标记该局部变量逃逸
+			if lastGetLocal >= 0 && lastGetLocal < len(nonEscaping) {
+				nonEscaping[lastGetLocal] = false
 			}
 
 		case OpSetAttribute:
 			// 赋值给实例属性：值可能逃逸
-			// 保守处理：标记所有非参数局部变量为可能逃逸
-			// 但这太保守了，让我们只在值是局部变量时标记
-			// 由于无法确定栈上的值来自哪个局部变量，跳过
+			if lastGetLocal >= 0 && lastGetLocal < len(nonEscaping) {
+				nonEscaping[lastGetLocal] = false
+			}
 
 		case OpGetFree:
 			// 被闭包捕获的变量逃逸
@@ -333,18 +334,29 @@ func analyzeEscape(fn *CompiledFunction) []bool {
 				}
 			}
 
+		case OpCall:
+			// 函数参数传递可能导致逃逸
+			// 保守处理：如果之前有 OpGetLocal，标记该局部变量逃逸
+			if lastGetLocal >= 0 && lastGetLocal < len(nonEscaping) {
+				nonEscaping[lastGetLocal] = false
+			}
+
 		case OpReturnValue:
 			// 返回值：如果返回的是局部变量，它逃逸
-			// 但我们无法确定返回的是哪个局部变量
-			// 保守处理：标记所有非参数局部变量为可能逃逸
-			// 实际上，只有被 OpGetLocal 加载然后返回的才逃逸
-			// 让我们追踪 OpGetLocal + OpReturnValue 模式
-			if i >= 2 && Opcode(ins[i-2]) == OpGetLocal {
-				localIdx := int(ins[i-1])
-				if localIdx < len(nonEscaping) {
-					nonEscaping[localIdx] = false
-				}
+			if lastGetLocal >= 0 && lastGetLocal < len(nonEscaping) {
+				nonEscaping[lastGetLocal] = false
 			}
+
+		case OpClosure:
+			// 闭包创建：捕获的变量逃逸
+			if lastGetLocal >= 0 && lastGetLocal < len(nonEscaping) {
+				nonEscaping[lastGetLocal] = false
+			}
+		}
+
+		// 非 OpGetLocal 操作重置追踪
+		if op != OpGetLocal {
+			lastGetLocal = -1
 		}
 
 		i += size
