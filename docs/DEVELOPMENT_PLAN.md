@@ -88,7 +88,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 内联缓存 + 全局变量缓存 + 特化操作码 + 常量折叠
 ✅ 对象池 + Dict 优化 + 死代码消除 + 字符串驻留
 ✅ BoundMethod + Range/Zip 惰性迭代器
-✅ 寄存器 VM + 分代 GC
+✅ 寄存器 VM（翻译层模式）+ 分代 GC
 ✅ 内联缓存泛化（OpIndex/OpSetIndex）+ 快速整数算术 + StringBuilder + 列表预分配
 ✅ JIT 热点检测 + 逃逸分析
 ✅ OpInPlaceLShift/RShift inPlaceAttrMap 条目
@@ -97,6 +97,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ OpArrayPrealloc 操作码 — VM 已处理，编译器端脱糖 for 循环 range(N) 常量模式检测生成预分配指令
 ⚠️ JIT 框架 — 热点检测已实现，但 copyPropagation/registerAllocation/loopOptimizations 为空函数体，ExecuteFunction 返回 nil
 ⚠️ 直接线程 — 未实现
+⚠️ 寄存器 VM — 翻译层模式运行，缺失位运算/集合运算/原地操作/SetIndex/SetSlice/StringBuilder/ArrayPrealloc 操作码，无内联缓存，函数调用回退到栈式 VM
 
 ### 5. 标准库 (完成度: 90%)
 
@@ -352,9 +353,29 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **P1**: 返回类型注解保留 — parseExpression(LOWEST) 解析类型表达式，存储到 FunctionLiteral.ReturnType
 - [x] **P2/P3**: async for/with 脱糖实现 — async for → while+await __anext__+StopAsyncIteration；async with → await __aenter__/__aexit__
 
-### v0.23 — 并发完善 + JIT 框架
+### v0.23 — 寄存器 VM 迁移 Phase 1 + 并发完善
 
-> 目标：完善 asyncio 生态，实现 JIT 框架核心功能，完成延期的编译器端优化。
+> 目标：补齐寄存器 VM 缺失操作码，引入直接编译器后端，完善 asyncio 生态。
+
+#### 寄存器 VM 迁移 Phase 1：操作码补齐 + 直接编译器后端
+
+**缺失操作码补齐（翻译层 + 执行层）**
+
+- [ ] **R1.1**: 位运算操作码 — RegOpBitOr/RegOpBitAnd/RegOpBitXor + 翻译层 OpBitOr/OpBitAnd/OpBitXor 映射
+- [ ] **R1.2**: 集合运算操作码 — RegOpSetUnion/RegOpSetIntersection/RegOpSetDifference/RegOpSetSymmetricDifference + 翻译层映射
+- [ ] **R1.3**: 原地操作码 — RegOpInPlaceAdd/Sub/Mul/Div/Mod/FloorDiv/Power/BitOr/BitAnd/BitXor/LShift/RShift + inPlaceAttrMap 支持
+- [ ] **R1.4**: OpSetIndex 寄存器化 — RegOpSetIndex + 内联缓存快速路径（List+Int, Dict）
+- [ ] **R1.5**: OpSetSlice 寄存器化 — RegOpSetSlice
+- [ ] **R1.6**: StringBuilder 操作码 — RegOpStringBuilderCreate/RegOpStringBuilderAppend/RegOpStringBuilderBuild
+- [ ] **R1.7**: OpArrayPrealloc 寄存器化 — RegOpArrayPrealloc
+
+**直接编译器后端（绕过栈式字节码翻译）**
+
+- [ ] **R1.8**: 编译器寄存器后端框架 — `RegisterCompiler` 结构体，直接生成 `[]RegInstruction`
+- [ ] **R1.9**: 寄存器分配器 — 基于活跃变量分析的线性扫描寄存器分配
+- [ ] **R1.10**: 基础表达式编译 — 常量加载、二元运算、比较运算、一元运算的寄存器端编译
+- [ ] **R1.11**: 变量存取编译 — GetLocal/SetLocal/GetGlobal/SetGlobal/GetFree 的寄存器端编译
+- [ ] **R1.12**: 控制流编译 — if/while 的寄存器端跳转指令生成
 
 #### asyncio 模块
 
@@ -363,8 +384,36 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] **asyncio.sleep** — 异步休眠
 - [ ] **asyncio.create_task** — 创建任务
 - [ ] **asyncio.run** — 运行协程入口
-- [ ] **异步文件 I/O** — 基于协程的文件操作
-- [ ] **异步网络** — 基于协程的 TCP/UDP
+
+### v0.24 — 寄存器 VM 迁移 Phase 2 + JIT 框架
+
+> 目标：寄存器 VM 功能对齐栈式 VM，引入内联缓存和性能优化，实现 JIT 框架核心。
+
+#### 寄存器 VM 迁移 Phase 2：功能对齐 + 性能优化
+
+**内联缓存与性能优化**
+
+- [ ] **R2.1**: 属性访问内联缓存 — RegOpGetAttr 添加 attrCache，缓存类型分派结果
+- [ ] **R2.2**: 索引访问内联缓存 — RegOpIndex/RegOpSetIndex 添加 indexCache
+- [ ] **R2.3**: 全局变量缓存 — RegOpGetGlobal 已有 globalCache，验证正确性
+- [ ] **R2.4**: 快速整数算术 — RegOpAdd/Sub/Mul 等添加 int+int 快速路径，避免函数调用开销
+- [ ] **R2.5**: 属性访问完整实现 — getAttrOp 对齐栈式 VM 的完整属性查找链（Instance→Class→MRO→__getattr__）
+
+**高级功能对齐**
+
+- [ ] **R2.6**: 函数调用原生实现 — RegOpCall 不再回退到栈式 executeCall，原生实现参数匹配/默认值/*args/**kwargs
+- [ ] **R2.7**: 闭包调用原生实现 — 原生处理闭包参数传递、默认值、可变参数
+- [ ] **R2.8**: 生成器/异步原生实现 — RegOpMakeGenerator/RegOpMakeAsync/RegOpYieldValue/RegOpAwait 完整实现
+- [ ] **R2.9**: 异常处理完善 — try/except/finally/raise 与栈式 VM 行为完全对齐
+- [ ] **R2.10**: 上下文管理器完善 — RegOpEnterContext/RegOpExitContext 对齐栈式 VM
+
+**编译器寄存器后端扩展**
+
+- [ ] **R2.11**: 函数/闭包编译 — 函数定义、闭包创建的寄存器端编译
+- [ ] **R2.12**: 数据结构编译 — 列表/字典/集合/元组字面量的寄存器端编译
+- [ ] **R2.13**: 属性访问编译 — get/set/del attribute 的寄存器端编译
+- [ ] **R2.14**: 类定义编译 — 类创建/继承/元类的寄存器端编译
+- [ ] **R2.15**: 异常处理编译 — try/except/finally 的寄存器端编译
 
 #### JIT 框架实现
 
@@ -374,12 +423,47 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] **J4**: findTargetFunction 实现 — 内联优化目标函数查找
 - [ ] **J5/J6**: ExecuteFunction/Compile 实现 — JIT 编译后函数的实际执行
 
+### v0.25 — 寄存器 VM 迁移 Phase 3 + 生产就绪
+
+> 目标：寄存器 VM 成为默认执行引擎，栈式 VM 降级为兼容后备，跨平台验证。
+
+#### 寄存器 VM 迁移 Phase 3：默认引擎切换
+
+**编译器端切换**
+
+- [ ] **R3.1**: 寄存器后端覆盖全部 AST 节点 — 所有语句/表达式类型均可直接编译为寄存器指令
+- [ ] **R3.2**: 编译器模式选择 — `--vm=register`/`--vm=stack` 命令行参数，默认使用寄存器后端
+- [ ] **R3.3**: 字节码序列化格式 — 定义寄存器字节码的二进制序列化格式（.pyc 兼容设计）
+- [ ] **R3.4**: 翻译层移除 — 删除 translate() 函数，所有代码路径直接使用寄存器后端
+
+**性能验证与优化**
+
+- [ ] **R3.5**: 性能基准测试 — 寄存器 VM vs 栈式 VM 全面对比，确保无性能回退
+- [ ] **R3.6**: 寄存器分配优化 — 图着色寄存器分配替代线性扫描，减少寄存器溢出
+- [ ] **R3.7**: 指令调度优化 — 基于依赖分析的指令重排序，提升流水线效率
+- [ ] **R3.8**: 栈式 VM 兼容模式 — 保留栈式 VM 作为后备，通过 `--vm=stack` 启用
+
+**跨平台验证**
+
+- [ ] **R3.9**: Linux/AMD64 验证 — 全部测试通过
+- [ ] **R3.10**: Linux/ARM64 验证 — 全部测试通过
+- [ ] **R3.11**: macOS 验证 — 全部测试通过
+- [ ] **R3.12**: Windows 验证 — 全部测试通过
+- [ ] **R3.13**: WebAssembly 验证 — 确保寄存器 VM 可在 WASM 环境运行
+
+**异步 I/O 扩展**
+
+- [ ] **异步文件 I/O** — 基于协程的文件操作
+- [ ] **异步网络** — 基于协程的 TCP/UDP
+
 ### v1.0.0 — Production Ready
 
-- [ ] 所有 v0.18-v0.23 里程碑完成
+- [ ] 所有 v0.18-v0.25 里程碑完成
+- [ ] 寄存器 VM 为默认执行引擎，栈式 VM 为兼容后备
 - [ ] 性能基准测试达标（CPython 80%+）
 - [ ] 测试覆盖率 > 80%
 - [ ] 关键路径测试覆盖率 > 95%
+- [ ] 跨平台验证（Linux/macOS/Windows/WASM）
 - [ ] 生产环境验证
 
 ---
@@ -435,7 +519,10 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | asyncio 实现复杂度 | 高 | 中 | 分阶段实现，对标 CPython 子集 |
 | itertools 完全缺失但计划标记已完成 | 高 | 低 | 已修正计划状态，v0.22 补齐 |
 | StringBuilder/ArrayPrealloc 编译器端生成路径已完成 | 中 | 低 | v0.22 已实现 WhileStatement 循环模式检测 |
-| JIT 框架大量空函数体 | 中 | 高 | v0.23 分阶段实现核心优化 pass |
+| JIT 框架大量空函数体 | 中 | 高 | v0.24 分阶段实现核心优化 pass |
+| 寄存器 VM 迁移 — 翻译层到直接编译器后端切换 | 高 | 中 | 三版本渐进迁移，Phase 1 保留翻译层，Phase 2 双后端并行，Phase 3 切换默认 |
+| 寄存器 VM 函数调用原生实现复杂度 | 高 | 中 | Phase 2 逐步从回退模式迁移到原生实现，保留回退路径 |
+| 跨平台兼容性 — 寄存器分配器平台差异 | 中 | 低 | 纯 Go 实现，无平台相关代码；WASM 环境需验证寄存器数量限制 |
 
 ---
 
