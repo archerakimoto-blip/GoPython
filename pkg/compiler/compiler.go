@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-py/go-python/pkg/ast"
+	"github.com/go-py/go-python/pkg/asyncio"
 	"github.com/go-py/go-python/pkg/base64"
 	"github.com/go-py/go-python/pkg/collections"
 	collections_abc "github.com/go-py/go-python/pkg/collections_abc"
@@ -445,6 +446,13 @@ func (c *Compiler) registerBuiltins() {
 	typingIndex := len(c.constants)
 	c.constants = append(c.constants, typingModule)
 	c.symbolTable.DefineBuiltin("typing", typingIndex)
+
+	// 注册 asyncio 模块
+	asyncioModule := asyncio.CreateAsyncioModule()
+	objects.RegisterModule("asyncio", asyncioModule)
+	asyncioIndex := len(c.constants)
+	c.constants = append(c.constants, asyncioModule)
+	c.symbolTable.DefineBuiltin("asyncio", asyncioIndex)
 
 	lenBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {

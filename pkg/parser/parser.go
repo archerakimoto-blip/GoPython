@@ -38,6 +38,8 @@ var precedences = map[lexer.TokenType]int{
 	lexer.PIPE:     SUM,
 	lexer.AMPERSAND: PRODUCT,
 	lexer.CARET:    PRODUCT,
+	lexer.LSHIFT:   PRODUCT,
+	lexer.RSHIFT:   PRODUCT,
 	lexer.SLASH:    PRODUCT,
 	lexer.ASTERISK: PRODUCT,
 	lexer.LPAREN:   CALL,
@@ -75,6 +77,10 @@ func augAssignOperator(tokenType lexer.TokenType) (string, bool) {
 		return "&", true
 	case lexer.CARET_EQ:
 		return "^", true
+	case lexer.LSHIFT_EQ:
+		return "<<", true
+	case lexer.RSHIFT_EQ:
+		return ">>", true
 	default:
 		return "", false
 	}
@@ -142,6 +148,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.AMPERSAND_EQ, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.CARET, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.CARET_EQ, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.LSHIFT, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.RSHIFT, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.LSHIFT_EQ, func() ast.Expression { return nil })
+	p.registerPrefix(lexer.RSHIFT_EQ, func() ast.Expression { return nil })
 	p.registerPrefix(lexer.RPAREN, func() ast.Expression { return nil })
 
 	p.infixParseFns = make(map[lexer.TokenType]infixParseFn)
@@ -150,6 +160,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.PIPE, p.parseInfixExpression)
 	p.registerInfix(lexer.AMPERSAND, p.parseInfixExpression)
 	p.registerInfix(lexer.CARET, p.parseInfixExpression)
+	p.registerInfix(lexer.LSHIFT, p.parseInfixExpression)
+	p.registerInfix(lexer.RSHIFT, p.parseInfixExpression)
 	p.registerInfix(lexer.SLASH, p.parseInfixExpression)
 	p.registerInfix(lexer.ASTERISK, p.parseInfixExpression)
 	p.registerInfix(lexer.PERCENT, p.parseInfixExpression)

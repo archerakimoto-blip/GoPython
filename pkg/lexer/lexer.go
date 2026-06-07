@@ -38,6 +38,10 @@ const (
 	FLOOR_DIV_EQ = "//="
 	POWER    = "**"
 	POWER_EQ = "**="
+	LSHIFT     = "<<"
+	RSHIFT     = ">>"
+	LSHIFT_EQ  = "<<="
+	RSHIFT_EQ  = ">>="
 	VAR_ARGS = "VAR_ARGS"
 	KW_ARGS  = "KW_ARGS"
 	ELLIPSIS = "ELLIPSIS"
@@ -293,7 +297,18 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(BANG, l.ch)
 		}
 	case '<':
-		tok = newToken(LT, l.ch)
+		if l.peekChar() == '<' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: LSHIFT_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: LSHIFT, Literal: string(ch) + string(l.ch)}
+			}
+		} else {
+			tok = newToken(LT, l.ch)
+		}
 	case '|':
 		if l.peekChar() == '=' {
 			ch := l.ch
@@ -319,7 +334,18 @@ func (l *Lexer) NextToken() Token {
 			tok = newToken(CARET, l.ch)
 		}
 	case '>':
-		tok = newToken(GT, l.ch)
+		if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok = Token{Type: RSHIFT_EQ, Literal: string(ch) + string(l.ch) + "="}
+			} else {
+				tok = Token{Type: RSHIFT, Literal: string(ch) + string(l.ch)}
+			}
+		} else {
+			tok = newToken(GT, l.ch)
+		}
 	case ';':
 		tok = newToken(SEMICOLON, l.ch)
 	case '.':

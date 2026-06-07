@@ -26,6 +26,7 @@ var (
 	jitPlatform          = flag.String("jit-platform", "", "Target platform for JIT (x86_64, arm64)")
 	jitAggressive        = flag.Bool("jit-aggressive", false, "Enable aggressive optimizations")
 	jitProfiling         = flag.Bool("jit-profiling", false, "Enable JIT profiling")
+	vmFlag               = flag.String("vm", "stack", "VM backend: stack (default) or register")
 )
 
 func main() {
@@ -35,12 +36,19 @@ func main() {
 		filename := flag.Arg(0)
 		if *jitFlag {
 			runFileWithJIT(filename)
+		} else if *vmFlag == "register" {
+			runFileRegister(filename)
 		} else {
 			runFile(filename)
 		}
 		return
 	}
-	runREPL()
+
+	if *vmFlag == "register" {
+		runREPLRegister()
+	} else {
+		runREPL()
+	}
 }
 
 func runREPL() {
@@ -258,5 +266,96 @@ func printParserErrors(errors []string) {
 	fmt.Println("Parser errors:")
 	for _, msg := range errors {
 		fmt.Println("\t" + msg)
+	}
+}
+
+func runFileRegister(filename string) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("Error reading file: %s\n", err)
+		return
+	}
+
+	l := lexer.New(string(data))
+	p := parser.New(l)
+	program := p.ParseProgram()
+
+	if len(p.Errors()) != 0 {
+		printParserErrors(p.Errors())
+		return
+	}
+
+	program = desugar.Desugar(program)
+
+	regComp := compiler.NewRegisterCompiler()
+	err = regComp.Compile(program)
+	if err != nil {
+		fmt.Printf("Register compilation error: %s\n", err)
+		return
+	}
+
+	regBytecode := regComp.Bytecode()
+
+	rvm := vm.NewRegisterVMWithBytecode(regBytecode, make([]objects.Object, vm.GlobalSize))
+	err = rvm.RunRegDirect(regBytecode)
+	if err != nil {
+		fmt.Printf("Register VM execution error: %s\n", err)
+		return
+	}
+
+	lastPopped := rvm.LastPopped()
+	if lastPopped != nil {
+		fmt.Println(lastPopped.Inspect())
+	}
+}
+
+func runREPLRegister() {
+	scanner := bufio.NewScanner(os.Stdin)
+	globals := make([]objects.Object, vm.GlobalSize)
+
+	var savedConstants []objects.Object
+	var savedSymbolTable *compiler.SymbolTable
+
+	for {
+		fmt.Print(PROMPT)
+		scanned := scanner.Scan()
+		if !scanned {
+			return
+		}
+
+		line := scanner.Text()
+		l := lexer.New(line)
+		p := parser.New(l)
+
+		program := p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			printParserErrors(p.Errors())
+			continue
+		}
+
+		program = desugar.Desugar(program)
+
+		regComp := compiler.NewRegisterCompilerWithState(savedSymbolTable, savedConstants)
+		err := regComp.Compile(program)
+		if err != nil {
+			fmt.Printf("Register compilation error:\n %s\n", err)
+			continue
+		}
+
+		regBytecode := regComp.Bytecode()
+		savedConstants = regBytecode.Constants
+		savedSymbolTable = regComp.SymbolTable()
+
+		rvm := vm.NewRegisterVMWithBytecode(regBytecode, globals)
+		err = rvm.RunRegDirect(regBytecode)
+		if err != nil {
+			fmt.Printf("Register VM execution error:\n %s\n", err)
+			continue
+		}
+
+		lastPopped := rvm.LastPopped()
+		if lastPopped != nil {
+			fmt.Println(lastPopped.Inspect())
+		}
 	}
 }

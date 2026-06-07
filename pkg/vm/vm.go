@@ -256,11 +256,6 @@ func (vm *VM) popFrame() *Frame {
 }
 
 func (vm *VM) Run() error {
-	// If register VM mode is enabled, delegate to the register-based execution
-	if vm.useRegisterVM && vm.regVM != nil {
-		return vm.regVM.RunReg()
-	}
-
 	var ip int
 	var ins compiler.Instructions
 	var op compiler.Opcode

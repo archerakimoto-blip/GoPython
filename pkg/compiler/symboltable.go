@@ -237,6 +237,7 @@ type CompiledFunction struct {
 	VarArgs               bool
 	KwArgs                bool
 	NonEscapingLocals     []bool // 标记哪些局部变量不逃逸（不被闭包捕获、不被返回、不被赋值给全局/实例属性）
+	RegInstructions       []RegInstruction // Register-mode instructions (for register VM)
 }
 
 // HasNonEscapingLocals 返回是否有不逃逸的局部变量

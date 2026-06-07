@@ -60,6 +60,7 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 				Body:        desugaredFn.Body,
 				VarArgs:     desugaredFn.VarArgs,
 				KwArgs:      desugaredFn.KwArgs,
+				ReturnType:  desugaredFn.ReturnType,
 			}
 
 			letStmt := &ast.LetStatement{
@@ -793,17 +794,18 @@ func desugarExpression(expr ast.Expression) ast.Expression {
 		}
 
 		return &ast.FunctionLiteral{
-			Token:         e.Token,
-			Name:          e.Name,
-			Parameters:    e.Parameters,
-			Defaults:      e.Defaults,
-			KeywordOnly:   e.KeywordOnly,
+			Token:          e.Token,
+			Name:           e.Name,
+			Parameters:     e.Parameters,
+			Defaults:       e.Defaults,
+			KeywordOnly:    e.KeywordOnly,
 			PositionalOnly: e.PositionalOnly,
-			Body:          desugaredBody,
-			VarArgs:       e.VarArgs,
-			KwArgs:        e.KwArgs,
-			Decorators:    desugaredDecorators,
-			IsAsync:       e.IsAsync,
+			Body:           desugaredBody,
+			VarArgs:        e.VarArgs,
+			KwArgs:         e.KwArgs,
+			Decorators:     desugaredDecorators,
+			IsAsync:        e.IsAsync,
+			ReturnType:     desugarExpression(e.ReturnType),
 		}
 	case *ast.LambdaExpression:
 		return &ast.LambdaExpression{
@@ -1911,6 +1913,7 @@ func desugarLruCache(fn *ast.FunctionLiteral) ast.Statement {
 		Body:        wrapperBody,
 		VarArgs:     fn.VarArgs,
 		KwArgs:      fn.KwArgs,
+		ReturnType:  fn.ReturnType,
 	}
 
 	origFn := &ast.FunctionLiteral{
@@ -1920,8 +1923,9 @@ func desugarLruCache(fn *ast.FunctionLiteral) ast.Statement {
 		Defaults:    fn.Defaults,
 		KeywordOnly: fn.KeywordOnly,
 		Body:        desugarBlockStatement(fn.Body),
-		VarArgs:    fn.VarArgs,
-		KwArgs:     fn.KwArgs,
+		VarArgs:     fn.VarArgs,
+		KwArgs:      fn.KwArgs,
+		ReturnType:  fn.ReturnType,
 	}
 
 	return &ast.BlockStatement{

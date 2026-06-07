@@ -4,6 +4,45 @@
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-06
+
+### 寄存器 VM 迁移 Phase 3：默认引擎切换
+
+- **寄存器帧隔离**：RegFrame 新增 regBase 字段，regSet/regGet 自动加上当前帧偏移，修复函数调用覆盖调用者寄存器的 bug
+- **全 AST 节点覆盖**：RegisterCompiler 支持 ~35 种 AST 节点（ComplexLiteral、ByteStringLiteral、FStringLiteral、TernaryExpression、NamedExpression、AwaitExpression、ForStatement、ImportStatement、MatchStatement 等）
+- **编译器模式选择**：`--vm=register`/`--vm=stack` 命令行参数，默认使用栈式后端
+- **字节码序列化格式**：GPYC 魔数 + 版本号 + 常量 + 指令 + NumRegs 的二进制序列化
+- **翻译层移除**：删除 translate()、RunReg()、registerAllocator 等翻译层代码（~2400 行），所有代码路径直接使用寄存器后端
+- **executeRegFrame 操作码补全**：补全所有缺失的寄存器操作码处理器（BuildList/BuildDict/BuildSet/Index/Slice/GetAttr/SetAttr/Closure/BitOr/BitAnd/BitXor/InPlace*/SetIndex/SetSlice/StringBuilder/ArrayPrealloc/Class/Exception/Context 等）
+- **性能基准测试**：新增 Stack VM vs Register VM 基准测试，函数调用场景寄存器 VM 比栈式 VM 快 ~44%
+- **compilerToVMOpcode 映射**：编译器和 VM 操作码排序不同，通过显式映射表转换
+- **asyncio 模块扩展**：wait_for、open、create_subprocess_exec
+
+## [0.24.0] - 2026-06
+
+### 寄存器 VM 迁移 Phase 2 + JIT 框架
+
+- **内联缓存**：attrCache（属性访问）、indexCache（索引访问）、globalCache（全局变量）迁移到寄存器 VM
+- **快速整数算术**：RegOpAdd/Sub/Mul/Div/Mod/FloorDiv/Power 添加 int+int 快速路径
+- **原生函数调用**：RegOpCall 不再全部回退到栈式 executeCall，原生实现 Builtin/Callable/CompiledFunction/Closure/Class 调用
+- **RegOpAwait 修复**：正确处理 async 对象的 await 操作
+- **异常处理 IP 映射修复**：regIPToStackIP 映射表确保 try/except 在寄存器模式下正确工作
+- **JIT 框架核心实现**：copyPropagation（复写传播）、registerAllocation（寄存器分配）、loopOptimizations（循环优化：不变量外提+强度削减）、findTargetFunction（内联目标查找）、ExecuteFunction（JIT 编译后执行）
+- **编译器寄存器后端扩展**：函数/闭包编译、数据结构编译、属性访问编译、类定义编译、异常处理编译
+
+## [0.23.0] - 2026-06
+
+### 寄存器 VM 迁移 Phase 1 + asyncio 模块
+
+- **位运算操作码**：RegOpBitOr/RegOpBitAnd/RegOpBitXor + 翻译层映射
+- **集合运算操作码**：RegOpSetUnion/RegOpSetIntersection/RegOpSetDifference/RegOpSetSymmetricDifference
+- **原地操作码**：RegOpInPlaceAdd/Sub/Mul/Div/Mod/FloorDiv/Power/BitOr/BitAnd/BitXor/LShift/RShift + inPlaceAttrMap 支持
+- **SetIndex/SetSlice 操作码**：RegOpSetIndex + 内联缓存快速路径、RegOpSetSlice
+- **StringBuilder 操作码**：RegOpStringBuilderCreate/RegOpStringBuilderAppend/RegOpStringBuilderBuild
+- **ArrayPrealloc 操作码**：RegOpArrayPrealloc
+- **RegisterCompiler 框架**：直接生成 RegInstruction 绕过翻译层，支持 13 种表达式 + 6 种语句编译
+- **asyncio 模块**：run、create_task、sleep、gather、Event、Future
+
 ## [0.22.0] - 2026-06
 
 ### VM/编译器修复

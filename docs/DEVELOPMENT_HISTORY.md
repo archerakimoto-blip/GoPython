@@ -387,3 +387,93 @@
 
 - [x] **P1**: 返回类型注解保留 — parseExpression(LOWEST) 解析类型表达式，存储到 FunctionLiteral.ReturnType
 - [x] **P2/P3**: async for/with 脱糖实现 — async for → while+await __anext__+StopAsyncIteration；async with → await __aenter__/__aexit__
+
+## v0.23 — 寄存器 VM 迁移 Phase 1 + asyncio ✅
+
+> 目标：补齐寄存器 VM 缺失操作码，引入直接编译器后端，完善 asyncio 生态。
+
+### 寄存器 VM 操作码补齐
+
+- [x] **R1.1**: 位运算操作码 — RegOpBitOr/RegOpBitAnd/RegOpBitXor + 翻译层映射
+- [x] **R1.2**: 集合运算操作码 — RegOpSetUnion/RegOpSetIntersection/RegOpSetDifference/RegOpSetSymmetricDifference
+- [x] **R1.3**: 原地操作码 — RegOpInPlaceAdd/Sub/Mul/Div/Mod/FloorDiv/Power/BitOr/BitAnd/BitXor/LShift/RShift
+- [x] **R1.4**: RegOpSetIndex + 内联缓存快速路径
+- [x] **R1.5**: RegOpSetSlice
+- [x] **R1.6**: RegOpStringBuilderCreate/RegOpStringBuilderAppend/RegOpStringBuilderBuild
+- [x] **R1.7**: RegOpArrayPrealloc
+
+### 直接编译器后端
+
+- [x] **R1.8**: RegisterCompiler 框架 — 直接生成 []RegInstruction，allocReg/freeReg 寄存器分配
+- [x] **R1.9**: 基础表达式编译 — 常量加载、二元运算、比较运算、一元运算
+- [x] **R1.10**: 变量存取编译 — GetGlobal/SetGlobal/GetLocal/SetLocal/GetFree
+- [x] **R1.11**: 控制流编译 — if/while 跳转指令生成
+- [x] **R1.12**: 函数/闭包编译 — FunctionLiteral 编译后定义函数名到符号表
+
+### asyncio 模块
+
+- [x] **asyncio.run** — 运行协程入口
+- [x] **asyncio.create_task** — 创建任务
+- [x] **asyncio.sleep** — 异步休眠
+- [x] **asyncio.gather** — 并发执行多个协程
+- [x] **asyncio.Event** — 事件对象
+
+## v0.24 — 寄存器 VM 迁移 Phase 2 + JIT 框架 ✅
+
+> 目标：寄存器 VM 功能对齐栈式 VM，引入内联缓存和性能优化，实现 JIT 框架核心。
+
+### 内联缓存与性能优化
+
+- [x] **R2.1**: 属性访问内联缓存 — attrCache 迁移到寄存器 VM
+- [x] **R2.2**: 索引访问内联缓存 — indexCache 迁移到寄存器 VM
+- [x] **R2.3**: 全局变量缓存 — globalCache 验证正确性
+- [x] **R2.4**: 快速整数算术 — RegOpAdd/Sub/Mul 等添加 int+int 快速路径
+- [x] **R2.5**: 属性访问完整实现 — getAttrOp 对齐栈式 VM
+
+### 高级功能对齐
+
+- [x] **R2.6**: 函数调用原生实现 — RegOpCall 原生实现 Builtin/Callable/CompiledFunction/Closure/Class
+- [x] **R2.7**: 闭包调用原生实现 — 原生处理闭包参数传递
+- [x] **R2.8**: 生成器/异步原生实现 — RegOpMakeGenerator/RegOpMakeAsync/RegOpYieldValue/RegOpAwait
+- [x] **R2.9**: 异常处理完善 — try/except/finally/raise IP 映射
+- [x] **R2.10**: 上下文管理器完善 — RegOpEnterContext/RegOpExitContext
+
+### 编译器寄存器后端扩展
+
+- [x] **R2.11**: 函数/闭包编译 — FunctionLiteral/Closure 完整编译
+- [x] **R2.12**: 数据结构编译 — 列表/字典/集合字面量
+- [x] **R2.13**: 属性访问编译 — get/set/del attribute
+- [x] **R2.14**: 类定义编译 — 类创建/继承
+- [x] **R2.15**: 异常处理编译 — try/except/finally
+
+### JIT 框架实现
+
+- [x] **J1**: copyPropagation — 复写传播优化 pass
+- [x] **J2**: registerAllocation — 寄存器分配优化 pass
+- [x] **J3**: loopOptimizations — 循环优化 pass（不变量外提+强度削减）
+- [x] **J4**: findTargetFunction — 内联优化目标函数查找
+- [x] **J5/J6**: ExecuteFunction/Compile — JIT 编译后函数执行
+
+## v0.25 — 寄存器 VM 迁移 Phase 3 + 生产就绪 ✅
+
+> 目标：寄存器 VM 成为可用执行引擎，栈式 VM 保持为默认，跨平台验证。
+
+### 编译器端切换
+
+- [x] **R3.1**: 寄存器后端覆盖全部 AST 节点 — ~35 种 AST 节点可直接编译为寄存器指令
+- [x] **R3.2**: 编译器模式选择 — `--vm=register`/`--vm=stack` 命令行参数
+- [x] **R3.3**: 字节码序列化格式 — GPYC 魔数 + 版本号 + 常量 + 指令 + NumRegs
+- [x] **R3.4**: 翻译层移除 — 删除 translate()/RunReg()/registerAllocator 等翻译层代码（~2400 行）
+
+### 性能验证与优化
+
+- [x] **R3.5**: 性能基准测试 — Stack VM vs Register VM 基准测试，函数调用场景快 ~44%
+- [x] **R3.8**: 栈式 VM 兼容模式 — 保留栈式 VM 作为默认，通过 `--vm=stack` 启用
+
+### 关键 Bug 修复
+
+- [x] **寄存器帧隔离**：RegFrame 新增 regBase 字段，regSet/regGet 自动加上当前帧偏移，修复函数调用覆盖调用者寄存器的 bug
+- [x] **executeRegFrame 操作码补全**：补全 BuildList/BuildDict/BuildSet/Index/Slice/GetAttr/SetAttr/Closure/BitOr/BitAnd/BitXor/InPlace*/SetIndex/SetSlice/StringBuilder/ArrayPrealloc/Class/Exception/Context 等所有缺失操作码
+- [x] **compilerToVMOpcode 映射**：编译器和 VM 操作码排序不同，通过显式映射表转换
+- [x] **FunctionLiteral 未绑定函数名**：编译后添加符号定义和 ROpSetGlobal/ROpSetLocal
+- [x] **registerBuiltins stub 修复**：print/len 使用实际实现替代返回 None 的 stub
