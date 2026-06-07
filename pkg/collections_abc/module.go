@@ -144,6 +144,92 @@ var (
 		AbstractMethods: []string{"__call__"},
 		ParentABCs:      nil,
 	}
+
+	// Container ABC with __contains__
+	ContainerABC = &AbstractBaseClass{
+		Name:            "Container",
+		AbstractMethods: []string{"__contains__"},
+		ParentABCs:      nil,
+	}
+
+	// Iterator ABC with __next__ and __iter__ (inherits from Iterable)
+	IteratorABC = &AbstractBaseClass{
+		Name:            "Iterator",
+		AbstractMethods: []string{"__next__", "__iter__"},
+		ParentABCs:      []*AbstractBaseClass{IterableABC},
+	}
+
+	// MutableSequence ABC (inherits from Sequence)
+	MutableSequenceABC = &AbstractBaseClass{
+		Name: "MutableSequence",
+		AbstractMethods: []string{
+			"__setitem__", "__delitem__", "insert",
+			"append", "reverse", "extend", "pop", "remove", "__iadd__",
+		},
+		ParentABCs: []*AbstractBaseClass{SequenceABC},
+	}
+
+	// ByteString ABC (inherits from Sequence)
+	ByteStringABC = &AbstractBaseClass{
+		Name:            "ByteString",
+		AbstractMethods: []string{"__getitem__", "__len__"},
+		ParentABCs:      []*AbstractBaseClass{SequenceABC},
+	}
+
+	// MutableSet ABC (inherits from Set)
+	MutableSetABC = &AbstractBaseClass{
+		Name: "MutableSet",
+		AbstractMethods: []string{
+			"add", "discard", "remove", "pop", "clear",
+			"__ior__", "__iand__", "__isub__", "__ixor__",
+		},
+		ParentABCs: []*AbstractBaseClass{SetABC},
+	}
+
+	// MutableMapping ABC (inherits from Mapping)
+	MutableMappingABC = &AbstractBaseClass{
+		Name: "MutableMapping",
+		AbstractMethods: []string{
+			"__setitem__", "__delitem__", "clear",
+			"pop", "popitem", "setdefault", "update",
+		},
+		ParentABCs: []*AbstractBaseClass{MappingABC},
+	}
+
+	// MappingView ABC with __len__ and __repr__
+	MappingViewABC = &AbstractBaseClass{
+		Name:            "MappingView",
+		AbstractMethods: []string{"__len__", "__repr__"},
+		ParentABCs:      nil,
+	}
+
+	// ItemsView ABC (MappingView + Set)
+	ItemsViewABC = &AbstractBaseClass{
+		Name:            "ItemsView",
+		AbstractMethods: []string{},
+		ParentABCs:      []*AbstractBaseClass{MappingViewABC, SetABC},
+	}
+
+	// KeysView ABC (MappingView + Set)
+	KeysViewABC = &AbstractBaseClass{
+		Name:            "KeysView",
+		AbstractMethods: []string{},
+		ParentABCs:      []*AbstractBaseClass{MappingViewABC, SetABC},
+	}
+
+	// ValuesView ABC (MappingView)
+	ValuesViewABC = &AbstractBaseClass{
+		Name:            "ValuesView",
+		AbstractMethods: []string{"__contains__"},
+		ParentABCs:      []*AbstractBaseClass{MappingViewABC},
+	}
+
+	// Reversible ABC with __reversed__ (inherits from Iterable)
+	ReversibleABC = &AbstractBaseClass{
+		Name:            "Reversible",
+		AbstractMethods: []string{"__reversed__"},
+		ParentABCs:      []*AbstractBaseClass{IterableABC},
+	}
 )
 
 // CreateCollectionsABCModule creates the collections.abc module
@@ -158,6 +244,17 @@ func CreateCollectionsABCModule() *objects.Module {
 	module.Fields["Mapping"] = MappingABC
 	module.Fields["Set"] = SetABC
 	module.Fields["Callable"] = CallableABC
+	module.Fields["Container"] = ContainerABC
+	module.Fields["Iterator"] = IteratorABC
+	module.Fields["MutableSequence"] = MutableSequenceABC
+	module.Fields["ByteString"] = ByteStringABC
+	module.Fields["MutableSet"] = MutableSetABC
+	module.Fields["MutableMapping"] = MutableMappingABC
+	module.Fields["MappingView"] = MappingViewABC
+	module.Fields["ItemsView"] = ItemsViewABC
+	module.Fields["KeysView"] = KeysViewABC
+	module.Fields["ValuesView"] = ValuesViewABC
+	module.Fields["Reversible"] = ReversibleABC
 
 	// Helper function: isinstance_of_abc(obj, abc_name)
 	module.Fields["isinstance_of_abc"] = &objects.Builtin{
@@ -181,6 +278,28 @@ func CreateCollectionsABCModule() *objects.Module {
 						abcObj = SetABC
 					case "Callable":
 						abcObj = CallableABC
+					case "Container":
+						abcObj = ContainerABC
+					case "Iterator":
+						abcObj = IteratorABC
+					case "MutableSequence":
+						abcObj = MutableSequenceABC
+					case "ByteString":
+						abcObj = ByteStringABC
+					case "MutableSet":
+						abcObj = MutableSetABC
+					case "MutableMapping":
+						abcObj = MutableMappingABC
+					case "MappingView":
+						abcObj = MappingViewABC
+					case "ItemsView":
+						abcObj = ItemsViewABC
+					case "KeysView":
+						abcObj = KeysViewABC
+					case "ValuesView":
+						abcObj = ValuesViewABC
+					case "Reversible":
+						abcObj = ReversibleABC
 					default:
 						return objects.NewTypeError("unknown ABC: %s", name.Value)
 					}

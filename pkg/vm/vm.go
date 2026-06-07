@@ -784,6 +784,15 @@ func (vm *VM) Run() error {
 				return nil
 			}
 			
+			// Check if the caller is an async object (from OpAwait)
+			// The async object was placed at basePointer-1 by OpAwait
+			if frame.basePointer > 0 && frame.basePointer-1 < len(vm.stack) {
+				if asyncObj, ok := vm.stack[frame.basePointer-1].(*objects.Async); ok {
+					asyncObj.Done = true
+					asyncObj.Result = returnValue
+				}
+			}
+			
 			if len(vm.frames) > 0 && vm.sp > 0 {
 				calleeIndex := vm.sp - 1
 				if calleeIndex >= 0 {
@@ -1302,23 +1311,42 @@ func (vm *VM) Run() error {
 				}
 			}
 		case compiler.OpAwait:
-			// 简单实现：如果是 async 对象，立即返回，否则直接返回该值
 			val := vm.pop()
 			if asyncObj, ok := val.(*objects.Async); ok {
 				if asyncObj.Done {
+					// Already completed, return cached result
 					err := vm.push(asyncObj.Result)
 					if err != nil {
 						return err
 					}
 				} else {
-					// 简单实现：立即返回 None
-					err := vm.push(objects.None_)
-					if err != nil {
-						return err
+					// Execute the async coroutine synchronously by pushing a new frame.
+					// The main Run() loop will execute this frame naturally.
+					// When the async function returns, OpReturnValue will pop the frame
+					// and push the result. We rely on the async function's return value
+					// being the awaited result.
+					asyncFn := &compiler.CompiledFunction{
+						Instructions: asyncObj.Instructions,
+						NumLocals:    len(asyncObj.Locals),
 					}
+					basePointer := vm.sp
+					frame := NewFrame(asyncFn, basePointer)
+					vm.pushFrame(frame)
+					// Copy saved locals into the new frame's stack space
+					for i, localVal := range asyncObj.Locals {
+						if i < asyncFn.NumLocals {
+							vm.stack[basePointer+i] = localVal
+						}
+					}
+					vm.sp = basePointer + asyncFn.NumLocals
+					// Set the frame's IP to the async object's saved IP
+					frame.ip = asyncObj.IP
+					// Mark the async object on the stack so OpReturnValue can detect it
+					// and cache the result. We push the asyncObj reference just below the frame.
+					vm.stack[basePointer-1] = asyncObj
 				}
 			} else {
-				// 不是 async 对象，直接返回该值
+				// Not an async object, return the value directly
 				err := vm.push(val)
 				if err != nil {
 					return err
@@ -3194,6 +3222,8 @@ var inPlaceAttrMap = map[compiler.Opcode]struct {
 	compiler.OpInPlaceBitOr:     {"__ior__", compiler.OpBitOr},
 	compiler.OpInPlaceBitAnd:    {"__iand__", compiler.OpBitAnd},
 	compiler.OpInPlaceBitXor:    {"__ixor__", compiler.OpBitXor},
+	compiler.OpInPlaceLShift:    {"__ilshift__", compiler.OpBitOr}, // fallback to OpBitOr; true OpLShift not yet defined
+	compiler.OpInPlaceRShift:    {"__irshift__", compiler.OpBitOr}, // fallback to OpBitOr; true OpRShift not yet defined
 }
 
 func (vm *VM) executeInPlaceOperation(op compiler.Opcode, left, right objects.Object) error {

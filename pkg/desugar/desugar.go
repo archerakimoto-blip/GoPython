@@ -1301,61 +1301,208 @@ func desugarYieldFromStatement(stmt *ast.YieldFromStatement) ast.Statement {
 }
 
 // desugarAsyncForStatement 脱糖 async for 语句
-// 我们保留原样，因为异步操作需要特殊处理
+// 将 async for x in iterable: body 转换为：
+//   _iter = await iterable.__aiter__()
+//   while True:
+//     try:
+//       x = await _iter.__anext__()
+//     except StopAsyncIteration:
+//       break
+//     body
+var asyncForCounter int
+
 func desugarAsyncForStatement(stmt *ast.AsyncForStatement) ast.Statement {
-	// 脱糖迭代器和循环体
+	asyncForCounter++
+	iterVar := &ast.Identifier{Token: fmt.Sprintf("_aiter_%d", asyncForCounter), Value: fmt.Sprintf("_aiter_%d", asyncForCounter)}
 	desugaredIterable := desugarExpression(stmt.Iterable)
 	desugaredBody := desugarBlockStatement(stmt.Body)
 
-	return &ast.AsyncForStatement{
-		Token:    stmt.Token,
-		Value:    stmt.Value,
-		Iterable: desugaredIterable,
-		Body:     desugaredBody,
+	// _iter = await iterable.__aiter__()
+	iterAssign := &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{iterVar},
+		Value: &ast.AwaitExpression{
+			Token: "await",
+			Value: &ast.MethodCall{
+				Token:  ".",
+				Object: desugaredIterable,
+				Method: &ast.Identifier{Token: "__aiter__", Value: "__aiter__"},
+			},
+		},
+	}
+
+	// x = await _iter.__anext__()
+	nextAssign := &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{stmt.Value},
+		Value: &ast.AwaitExpression{
+			Token: "await",
+			Value: &ast.MethodCall{
+				Token:  ".",
+				Object: iterVar,
+				Method: &ast.Identifier{Token: "__anext__", Value: "__anext__"},
+			},
+		},
+	}
+
+	// try:
+	//   x = await _iter.__anext__()
+	// except StopAsyncIteration:
+	//   break
+	tryStmt := &ast.TryStatement{
+		Token: "try",
+		Body: &ast.BlockStatement{
+			Token:      "try",
+			Statements: []ast.Statement{nextAssign},
+		},
+		Excepts: []*ast.ExceptClause{
+			{
+				Token: "except",
+				Type:  &ast.Identifier{Token: "StopAsyncIteration", Value: "StopAsyncIteration"},
+				Body: &ast.BlockStatement{
+					Token:      "except",
+					Statements: []ast.Statement{&ast.BreakStatement{Token: "break"}},
+				},
+			},
+		},
+	}
+
+	// while True:
+	//   try: ... except: break
+	//   body
+	whileBodyStmts := []ast.Statement{tryStmt}
+	whileBodyStmts = append(whileBodyStmts, desugaredBody.Statements...)
+
+	whileStmt := &ast.WhileStatement{
+		Token:     "while",
+		Condition: &ast.Boolean{Token: "True", Value: true},
+		Body: &ast.BlockStatement{
+			Token:      "while",
+			Statements: whileBodyStmts,
+		},
+	}
+
+	return &ast.BlockStatement{
+		Token: stmt.Token,
+		Statements: []ast.Statement{
+			iterAssign,
+			whileStmt,
+		},
 	}
 }
 
 // desugarAsyncWithStatement 脱糖 async with 语句
-// 我们保留原样，因为异步操作需要特殊处理
+// 将 async with cm as var: body 转换为：
+//   var = await cm.__aenter__()
+//   try:
+//     body
+//   finally:
+//     await cm.__aexit__(None, None, None)
+var asyncWithCounter int
+
 func desugarAsyncWithStatement(stmt *ast.AsyncWithStatement) ast.Statement {
-	// 脱糖上下文管理器表达式和循环体
-	desugaredItems := make([]*ast.ContextManagerItem, 0, len(stmt.Items))
-	for _, item := range stmt.Items {
-		desugaredItems = append(desugaredItems, &ast.ContextManagerItem{
-			Expr: desugarExpression(item.Expr),
-			Name: item.Name,
-		})
+	asyncWithCounter++
+
+	// 如果有多个上下文管理器，嵌套处理
+	if len(stmt.Items) > 1 {
+		var nestedStatement ast.Statement = &ast.AsyncWithStatement{
+			Token: stmt.Token,
+			Items: []*ast.ContextManagerItem{stmt.Items[len(stmt.Items)-1]},
+			Body:  stmt.Body,
+		}
+		for i := len(stmt.Items) - 2; i >= 0; i-- {
+			nestedStatement = &ast.AsyncWithStatement{
+				Token: stmt.Token,
+				Items: []*ast.ContextManagerItem{stmt.Items[i]},
+				Body: &ast.BlockStatement{
+					Token:      stmt.Token,
+					Statements: []ast.Statement{nestedStatement},
+				},
+			}
+		}
+		return desugarStatement(nestedStatement)
 	}
+
+	// 单个上下文管理器的情况
+	item := stmt.Items[0]
+	desugaredExpr := desugarExpression(item.Expr)
 	desugaredBody := desugarBlockStatement(stmt.Body)
 
-	// 如果只有一个上下文管理器，直接返回
-	if len(desugaredItems) == 1 {
-		return &ast.AsyncWithStatement{
-			Token: stmt.Token,
-			Items: desugaredItems,
-			Body:  desugaredBody,
+	// 为上下文管理器表达式创建临时变量，避免重复求值
+	cmVar := &ast.Identifier{Token: fmt.Sprintf("_acm_%d", asyncWithCounter), Value: fmt.Sprintf("_acm_%d", asyncWithCounter)}
+	cmAssign := &ast.AssignStatement{
+		Token: "=",
+		Names: []*ast.Identifier{cmVar},
+		Value: desugaredExpr,
+	}
+
+	// var = await cm.__aenter__()
+	var enterValue ast.Expression = &ast.AwaitExpression{
+		Token: "await",
+		Value: &ast.MethodCall{
+			Token:  ".",
+			Object: cmVar,
+			Method: &ast.Identifier{Token: "__aenter__", Value: "__aenter__"},
+		},
+	}
+
+	var enterStmt ast.Statement
+	if item.Name != nil {
+		enterStmt = &ast.AssignStatement{
+			Token: "=",
+			Names: []*ast.Identifier{item.Name},
+			Value: enterValue,
+		}
+	} else {
+		// 没有 as 子句，仍然需要调用 __aenter__
+		enterStmt = &ast.ExpressionStatement{
+			Token:      "await",
+			Expression: enterValue,
 		}
 	}
 
-	// 多个上下文管理器，嵌套处理
-	var nestedStatement ast.Statement = &ast.AsyncWithStatement{
-		Token: stmt.Token,
-		Items: []*ast.ContextManagerItem{desugaredItems[len(desugaredItems)-1]},
-		Body:  desugaredBody,
-	}
-
-	for i := len(desugaredItems) - 2; i >= 0; i-- {
-		nestedStatement = &ast.AsyncWithStatement{
-			Token: stmt.Token,
-			Items: []*ast.ContextManagerItem{desugaredItems[i]},
-			Body: &ast.BlockStatement{
-				Token:      stmt.Token,
-				Statements: []ast.Statement{nestedStatement},
+	// finally: await cm.__aexit__(None, None, None)
+	finallyBlock := &ast.BlockStatement{
+		Token: "finally",
+		Statements: []ast.Statement{
+			&ast.ExpressionStatement{
+				Token: "await",
+				Expression: &ast.AwaitExpression{
+					Token: "await",
+					Value: &ast.MethodCall{
+						Token:  ".",
+						Object: cmVar,
+						Method: &ast.Identifier{Token: "__aexit__", Value: "__aexit__"},
+						Arguments: []ast.Expression{
+							&ast.Identifier{Token: "None", Value: "None"},
+							&ast.Identifier{Token: "None", Value: "None"},
+							&ast.Identifier{Token: "None", Value: "None"},
+						},
+					},
+				},
 			},
-		}
+		},
 	}
 
-	return nestedStatement
+	// try: body finally: await cm.__aexit__(None, None, None)
+	tryBody := &ast.BlockStatement{
+		Token:      "try",
+		Statements: append([]ast.Statement{enterStmt}, desugaredBody.Statements...),
+	}
+
+	tryStmt := &ast.TryStatement{
+		Token:   "try",
+		Body:    tryBody,
+		Finally: finallyBlock,
+	}
+
+	return &ast.BlockStatement{
+		Token: stmt.Token,
+		Statements: []ast.Statement{
+			cmAssign,
+			tryStmt,
+		},
+	}
 }
 
 func desugarMatchStatement(ms *ast.MatchStatement) ast.Statement {

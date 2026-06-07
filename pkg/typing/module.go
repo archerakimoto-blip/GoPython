@@ -78,6 +78,90 @@ func newTypingAlias(name string, origin objects.Object) *TypingAlias {
 	}
 }
 
+// TypeVarInstance represents a typing.TypeVar object
+type TypeVarInstance struct {
+	Name          string
+	Constraints   []objects.Object
+	Bound         objects.Object
+	Covariant     bool
+	Contravariant bool
+}
+
+func (tv *TypeVarInstance) Type() objects.ObjectType { return objects.INSTANCE_OBJ }
+
+func (tv *TypeVarInstance) Inspect() string {
+	return "~" + tv.Name
+}
+
+func (tv *TypeVarInstance) GetAttr(name string) (objects.Object, bool) {
+	switch name {
+	case "__name__":
+		return &objects.String{Value: tv.Name}, true
+	case "__constraints__":
+		elements := make([]objects.Object, len(tv.Constraints))
+		copy(elements, tv.Constraints)
+		return &objects.Tuple{Elements: elements}, true
+	case "__bound__":
+		if tv.Bound != nil {
+			return tv.Bound, true
+		}
+		return objects.None_, true
+	case "__covariant__":
+		if tv.Covariant {
+			return objects.True, true
+		}
+		return objects.False, true
+	case "__contravariant__":
+		if tv.Contravariant {
+			return objects.True, true
+		}
+		return objects.False, true
+	}
+	return nil, false
+}
+
+// ParamSpecInstance represents a typing.ParamSpec object
+type ParamSpecInstance struct {
+	Name string
+}
+
+func (ps *ParamSpecInstance) Type() objects.ObjectType { return objects.INSTANCE_OBJ }
+
+func (ps *ParamSpecInstance) Inspect() string {
+	return "typing.ParamSpec(" + ps.Name + ")"
+}
+
+func (ps *ParamSpecInstance) GetAttr(name string) (objects.Object, bool) {
+	switch name {
+	case "__name__":
+		return &objects.String{Value: ps.Name}, true
+	}
+	return nil, false
+}
+
+// ConcatenateInstance represents a typing.Concatenate object
+type ConcatenateInstance struct {
+	Args []objects.Object
+}
+
+func (c *ConcatenateInstance) Type() objects.ObjectType { return objects.INSTANCE_OBJ }
+
+func (c *ConcatenateInstance) Inspect() string {
+	parts := make([]string, len(c.Args))
+	for i, arg := range c.Args {
+		parts[i] = arg.Inspect()
+	}
+	return "typing.Concatenate[" + strings.Join(parts, ", ") + "]"
+}
+
+func (c *ConcatenateInstance) GetAttr(name string) (objects.Object, bool) {
+	switch name {
+	case "__args__":
+		return &objects.Tuple{Elements: c.Args}, true
+	}
+	return nil, false
+}
+
 // CreateTypingModule creates the typing module with basic type hints
 func CreateTypingModule() *objects.Module {
 	module := &objects.Module{
@@ -118,6 +202,85 @@ func CreateTypingModule() *objects.Module {
 
 	// Callable - callable type hint
 	module.Fields["Callable"] = newTypingAlias("Callable", nil)
+
+	// TypeVar - creates a type variable for generic types
+	module.Fields["TypeVar"] = &objects.Builtin{
+		Name: "typing.TypeVar",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewTypeError("TypeVar() takes at least 1 argument")
+			}
+			nameObj, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("TypeVar() first argument must be a string")
+			}
+
+			tv := &TypeVarInstance{
+				Name:        nameObj.Value,
+				Constraints: []objects.Object{},
+			}
+
+			// Remaining positional args are constraints
+			for i := 1; i < len(args); i++ {
+				tv.Constraints = append(tv.Constraints, args[i])
+			}
+
+			return tv
+		},
+	}
+
+	// Generic - base class for generic types
+	module.Fields["Generic"] = &TypingAlias{
+		Name:   "Generic",
+		Args:   nil,
+		Origin: nil,
+	}
+
+	// Protocol - base class for structural subtyping
+	module.Fields["Protocol"] = &TypingAlias{
+		Name:   "Protocol",
+		Args:   nil,
+		Origin: nil,
+	}
+
+	// Literal - type representing a specific set of literal values
+	module.Fields["Literal"] = newTypingAlias("Literal", nil)
+
+	// Final - type indicating a value that cannot be reassigned
+	module.Fields["Final"] = newTypingAlias("Final", nil)
+
+	// TypeAlias - marker for type aliases
+	module.Fields["TypeAlias"] = &TypingAlias{
+		Name:   "TypeAlias",
+		Args:   nil,
+		Origin: nil,
+	}
+
+	// ParamSpec - parameter specification type variable
+	module.Fields["ParamSpec"] = &objects.Builtin{
+		Name: "typing.ParamSpec",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 1 {
+				return objects.NewTypeError("ParamSpec() takes at least 1 argument")
+			}
+			nameObj, ok := args[0].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("ParamSpec() first argument must be a string")
+			}
+			return &ParamSpecInstance{Name: nameObj.Value}
+		},
+	}
+
+	// Concatenate - concatenate parameter specifications
+	module.Fields["Concatenate"] = &objects.Builtin{
+		Name: "typing.Concatenate",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) < 2 {
+				return objects.NewTypeError("Concatenate() takes at least 2 arguments")
+			}
+			return &ConcatenateInstance{Args: args}
+		},
+	}
 
 	return module
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/go-py/go-python/pkg/functools"
 	"github.com/go-py/go-python/pkg/gc"
 	"github.com/go-py/go-python/pkg/hashlib"
+	"github.com/go-py/go-python/pkg/itertools"
 	"github.com/go-py/go-python/pkg/interop"
 	"github.com/go-py/go-python/pkg/io"
 	"github.com/go-py/go-python/pkg/objects"
@@ -72,7 +73,7 @@ const (
 	OpExceptHandler
 	OpExceptStarHandler
 	OpFinally
-	OpYield
+	OpYield // Deprecated: unused dead opcode; all yield operations use OpYieldValue
 	OpEnterContext
 	OpExitContext
 	OpMakeGenerator
@@ -391,6 +392,13 @@ func (c *Compiler) registerBuiltins() {
 	functoolsIndex := len(c.constants)
 	c.constants = append(c.constants, functoolsModule)
 	c.symbolTable.DefineBuiltin("functools", functoolsIndex)
+
+	// 注册 itertools 模块
+	itertoolsModule := itertools.CreateItertoolsModule()
+	objects.RegisterModule("itertools", itertoolsModule)
+	itertoolsIndex := len(c.constants)
+	c.constants = append(c.constants, itertoolsModule)
+	c.symbolTable.DefineBuiltin("itertools", itertoolsIndex)
 
 	// 注册 base64 模块
 	base64Module := base64.CreateBase64Module()
@@ -2054,6 +2062,10 @@ func augAssignToInPlaceOp(op string) Opcode {
 		return OpInPlaceBitAnd
 	case "^":
 		return OpInPlaceBitXor
+	case "<<":
+		return OpInPlaceLShift
+	case ">>":
+		return OpInPlaceRShift
 	default:
 		return OpInPlaceAdd
 	}

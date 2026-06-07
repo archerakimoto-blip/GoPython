@@ -1158,10 +1158,8 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	// 支持返回类型注解: def func() -> int:
 	if p.peekTokenIs(lexer.RETURN_TYPE) {
 		p.nextToken() // 跳过 ->
-		// 跳过类型表达式（简单实现：跳过直到遇到冒号）
-		for !p.peekTokenIs(lexer.COLON) && !p.peekTokenIs(lexer.EOF) {
-			p.nextToken()
-		}
+		p.nextToken() // 移动到类型表达式的第一个 token
+		lit.ReturnType = p.parseExpression(LOWEST)
 	}
 
 	if !p.expectPeek(lexer.COLON) {

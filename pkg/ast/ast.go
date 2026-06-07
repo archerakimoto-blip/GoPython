@@ -224,6 +224,7 @@ type FunctionLiteral struct {
 	KwArgs        *Identifier
 	Decorators    []Expression // 装饰器列表
 	IsAsync       bool         // 是否为 async 函数
+	ReturnType    Expression   // 返回类型注解: def func() -> int:
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}
@@ -247,7 +248,11 @@ func (fl *FunctionLiteral) String() string {
 	if fl.Name != "" {
 		out.WriteString("<" + fl.Name + ">")
 	}
-	out.WriteString("(" + strings.Join(params, ", ") + ") ")
+	out.WriteString("(" + strings.Join(params, ", ") + ")")
+	if fl.ReturnType != nil {
+		out.WriteString(" -> " + fl.ReturnType.String())
+	}
+	out.WriteString(" ")
 	out.WriteString(fl.Body.String())
 	return out.String()
 }

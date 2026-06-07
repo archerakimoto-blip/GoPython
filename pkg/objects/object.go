@@ -3728,8 +3728,52 @@ func CreateSysModule() *Module {
 			if len(args) != 1 {
 				return NewTypeError("getsizeof() takes exactly 1 argument")
 			}
-			// 简单实现，返回固定大小
-			return &Integer{Value: 24}
+			obj := args[0]
+			switch o := obj.(type) {
+			case *Integer:
+				return &Integer{Value: 28}
+			case *Float:
+				return &Integer{Value: 24}
+			case *Boolean:
+				return &Integer{Value: 28}
+			case *String:
+				return &Integer{Value: int64(49 + len(o.Value))}
+			case *List:
+				return &Integer{Value: int64(56 + 8*len(o.Elements))}
+			case *Dict:
+				n := len(o.Pairs)
+				return &Integer{Value: int64(64 + 8*n + 8*n)}
+			case *Tuple:
+				return &Integer{Value: int64(40 + 8*len(o.Elements))}
+			case *Set:
+				n := len(o.Elements)
+				return &Integer{Value: int64(216 + 8*n)}
+			case *Bytes:
+				return &Integer{Value: int64(33 + len(o.Value))}
+			case *None:
+				return &Integer{Value: 16}
+			case *Complex:
+				return &Integer{Value: 32}
+			case *Closure:
+				return &Integer{Value: 136}
+			case *Builtin:
+				return &Integer{Value: 136}
+			case *BoundMethod:
+				return &Integer{Value: 136}
+			case *Class:
+				return &Integer{Value: 64}
+			case *Instance:
+				size := int64(56)
+				if o.Fields != nil {
+					size += int64(8 * len(o.Fields))
+				}
+				if o.SlotValues != nil {
+					size += int64(8 * len(o.SlotValues))
+				}
+				return &Integer{Value: size}
+			default:
+				return &Integer{Value: 24}
+			}
 		},
 	}
 
