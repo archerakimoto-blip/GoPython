@@ -113,6 +113,10 @@ const (
 	OpInPlaceBitXor
 	OpInPlaceLShift
 	OpInPlaceRShift
+	OpStringBuilderCreate
+	OpStringBuilderAppend
+	OpStringBuilderBuild
+	OpArrayPrealloc
 )
 
 type EmittedInstruction struct {
@@ -3392,6 +3396,27 @@ func compareObjects(a, b objects.Object) int {
 }
 
 func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
+	// 检测 range(N) 常量模式，用于列表预分配优化
+	if callExpr, ok := node.Iterable.(*ast.CallExpression); ok {
+		if ident, ok := callExpr.Function.(*ast.Identifier); ok && ident.Value == "range" {
+			if len(callExpr.Arguments) == 1 {
+				if intLit, ok := callExpr.Arguments[0].(*ast.IntegerLiteral); ok && intLit.Value > 0 && intLit.Value <= 65535 {
+					c.emit(OpArrayPrealloc, int(intLit.Value))
+				}
+			} else if len(callExpr.Arguments) == 2 {
+				// range(start, stop) — 容量为 stop - start
+				if startLit, ok := callExpr.Arguments[0].(*ast.IntegerLiteral); ok {
+					if stopLit, ok := callExpr.Arguments[1].(*ast.IntegerLiteral); ok {
+						capacity := stopLit.Value - startLit.Value
+						if capacity > 0 && capacity <= 65535 {
+							c.emit(OpArrayPrealloc, int(capacity))
+						}
+					}
+				}
+			}
+		}
+	}
+
 	compilationScope := c.instructions
 	c.instructions = []byte{}
 	c.enterScope()
@@ -3399,7 +3424,7 @@ func (c *Compiler) compileListComprehension(node *ast.ListComprehension) error {
 	iterSymbol := c.symbolTable.Define("__iter__")
 	c.emit(OpGetGlobal, iterSymbol.Index)
 	c.emit1(OpCall, 0)
-	
+
 	loopStart := len(c.instructions)
 
 	c.emit(OpGetGlobal, iterSymbol.Index)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-py/go-python/pkg/compiler"
 	"github.com/go-py/go-python/pkg/gc"
+	"github.com/go-py/go-python/pkg/jit"
 	"github.com/go-py/go-python/pkg/objects"
 )
 
@@ -57,6 +58,32 @@ type AttrCacheEntry struct {
 	ClassName string
 }
 
+// IndexCacheKey 用于 OpIndex/OpSetIndex 的内联缓存
+type IndexCacheKey struct {
+	FrameIndex int
+	IP         int
+}
+
+// IndexCacheEntry 缓存索引操作的类型分派结果
+type IndexCacheEntry struct {
+	LeftType  objects.ObjectType
+	IndexType objects.ObjectType
+	Handler   int // 0=list+int, 1=tuple+int, 2=dict, 3=range+int, 4=string+int, 5=bytes+int, 6=dict_keys+int, 7=dict_values+int, 8=dict_items+int, 9=__getitem__
+}
+
+const (
+	IndexHandlerListInt      = 0
+	IndexHandlerTupleInt     = 1
+	IndexHandlerDict         = 2
+	IndexHandlerRangeInt     = 3
+	IndexHandlerStringInt    = 4
+	IndexHandlerBytesInt     = 5
+	IndexHandlerDictKeysInt  = 6
+	IndexHandlerDictValuesInt = 7
+	IndexHandlerDictItemsInt = 8
+	IndexHandlerGetItem      = 9
+)
+
 type GlobalCacheEntry struct {
 	Value   objects.Object
 	Version uint64
@@ -87,6 +114,8 @@ type VM struct {
 	attrCache      map[AttrCacheKey]AttrCacheEntry
 	globalCache    []GlobalCacheEntry
 	globalVersions []uint64
+	indexCache     map[IndexCacheKey]IndexCacheEntry
+	jitEngine      *jit.JIT
 
 	useRegisterVM bool
 	regVM         *RegisterVM
@@ -118,6 +147,8 @@ func New(bytecode *compiler.Bytecode) *VM {
 		attrCache:      make(map[AttrCacheKey]AttrCacheEntry),
 		globalCache:    make([]GlobalCacheEntry, GlobalSize),
 		globalVersions: make([]uint64, GlobalSize),
+		indexCache:     make(map[IndexCacheKey]IndexCacheEntry),
+		jitEngine:      jit.New(),
 	}
 
 	// Register callback for calling Python functions from Go code (e.g., re.sub with callable repl)
@@ -299,10 +330,62 @@ func (vm *VM) Run() error {
 			}
 
 		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower, compiler.OpBitOr, compiler.OpBitAnd, compiler.OpBitXor:
-			err := vm.executeBinaryOperation(op)
-			if err != nil {
-				return err
+			var binaryErr error
+			// 快速整数算术路径：避免函数调用开销
+			right := vm.stack[vm.sp-1]
+			left := vm.stack[vm.sp-2]
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					vm.sp--
+					var result int64
+					switch op {
+					case compiler.OpAdd:
+						result = leftInt.Value + rightInt.Value
+					case compiler.OpSub:
+						result = leftInt.Value - rightInt.Value
+					case compiler.OpMul:
+						result = leftInt.Value * rightInt.Value
+					case compiler.OpDiv:
+						if rightInt.Value == 0 {
+							vm.push(objects.NewError("division by zero"))
+							goto checkBinaryError
+						}
+						vm.stack[vm.sp-1] = &objects.Float{Value: float64(leftInt.Value) / float64(rightInt.Value)}
+						continue
+					case compiler.OpMod:
+						if rightInt.Value == 0 {
+							vm.push(objects.NewError("modulo by zero"))
+							goto checkBinaryError
+						}
+						result = leftInt.Value % rightInt.Value
+					case compiler.OpFloorDiv:
+						if rightInt.Value == 0 {
+							vm.push(objects.NewError("integer division or modulo by zero"))
+							goto checkBinaryError
+						}
+						result = leftInt.Value / rightInt.Value
+					case compiler.OpPower:
+						result = int64(math.Pow(float64(leftInt.Value), float64(rightInt.Value)))
+					case compiler.OpBitOr:
+						result = leftInt.Value | rightInt.Value
+					case compiler.OpBitAnd:
+						result = leftInt.Value & rightInt.Value
+					case compiler.OpBitXor:
+						result = leftInt.Value ^ rightInt.Value
+					default:
+						vm.sp++
+						goto slowBinaryPath
+					}
+					vm.stack[vm.sp-1] = &objects.Integer{Value: result}
+					continue
+				}
 			}
+		slowBinaryPath:
+			binaryErr = vm.executeBinaryOperation(op)
+			if binaryErr != nil {
+				return binaryErr
+			}
+		checkBinaryError:
 			if vm.sp > 0 && vm.stack[vm.sp-1].Type() == objects.ERROR_OBJ {
 				errObj := vm.stack[vm.sp-1]
 				caught := vm.raiseException(errObj)
@@ -449,9 +532,69 @@ func (vm *VM) Run() error {
 			index := vm.pop()
 			left := vm.pop()
 
-			err := vm.executeIndexExpression(left, index)
-			if err != nil {
-				return err
+			// 内联缓存快速路径
+			cacheKey := IndexCacheKey{FrameIndex: vm.framesIndex - 1, IP: ip}
+			leftType := left.Type()
+			indexType := index.Type()
+			if entry, hit := vm.indexCache[cacheKey]; hit {
+				if entry.LeftType == leftType && entry.IndexType == indexType {
+					switch entry.Handler {
+					case IndexHandlerListInt:
+						vm.executeArrayIndex(left, index)
+						continue
+					case IndexHandlerTupleInt:
+						vm.executeTupleIndex(left, index)
+						continue
+					case IndexHandlerDict:
+						vm.executeHashIndex(left, index)
+						continue
+					case IndexHandlerStringInt:
+						vm.executeStringIndex(left, index)
+						continue
+					case IndexHandlerRangeInt:
+						vm.executeRangeIndex(left, index)
+						continue
+					case IndexHandlerBytesInt:
+						vm.executeBytesIndex(left, index)
+						continue
+					}
+				}
+			}
+
+			// 缓存未命中，走正常路径并填充缓存
+			handler := -1
+			switch {
+			case leftType == objects.LIST_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerListInt
+				vm.executeArrayIndex(left, index)
+			case leftType == objects.TUPLE_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerTupleInt
+				vm.executeTupleIndex(left, index)
+			case leftType == objects.DICT_OBJ:
+				handler = IndexHandlerDict
+				vm.executeHashIndex(left, index)
+			case leftType == objects.RANGE_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerRangeInt
+				vm.executeRangeIndex(left, index)
+			case leftType == objects.STRING_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerStringInt
+				vm.executeStringIndex(left, index)
+			case leftType == objects.BYTES_OBJ && indexType == objects.INTEGER_OBJ:
+				handler = IndexHandlerBytesInt
+				vm.executeBytesIndex(left, index)
+			default:
+				err := vm.executeIndexExpression(left, index)
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			if handler >= 0 {
+				vm.indexCache[cacheKey] = IndexCacheEntry{
+					LeftType:  leftType,
+					IndexType: indexType,
+					Handler:   handler,
+				}
 			}
 		case compiler.OpSetIndex:
 			value := vm.pop()
@@ -488,6 +631,45 @@ func (vm *VM) Run() error {
 			left := vm.pop()
 
 			err := vm.executeInPlaceOperation(op, left, right)
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpStringBuilderCreate:
+			sb := objects.NewStringBuilder()
+			err := vm.push(sb)
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpStringBuilderAppend:
+			value := vm.pop()
+			sb := vm.stack[vm.sp-1] // StringBuilder 在栈顶下方
+			if builder, ok := sb.(*objects.StringBuilder); ok {
+				var s string
+				if str, ok := value.(*objects.String); ok {
+					s = str.Value
+				} else {
+					s = value.Inspect()
+				}
+				builder.Builder.WriteString(s)
+			}
+
+		case compiler.OpStringBuilderBuild:
+			sb := vm.pop()
+			if builder, ok := sb.(*objects.StringBuilder); ok {
+				err := vm.push(&objects.String{Value: builder.Builder.String()})
+				if err != nil {
+					return err
+				}
+			}
+
+		case compiler.OpArrayPrealloc:
+			// 预分配列表容量，参数为预估元素数量
+			capacity := int(uint16(ins[ip+1])<<8 | uint16(ins[ip+2]))
+			vm.currentFrame().ip += 2
+			list := &objects.List{Elements: make([]objects.Object, 0, capacity)}
+			err := vm.push(list)
 			if err != nil {
 				return err
 			}
@@ -2380,6 +2562,9 @@ func (vm *VM) executeCall(numArgs int) error {
 			KwArgs:                closure.KwArgs,
 		}
 
+		// JIT 热点检测：记录闭包调用
+		vm.jitEngine.RecordCall(fn)
+
 		freeVarsCopy := make([]objects.Object, len(closure.Free))
 		copy(freeVarsCopy, closure.Free)
 
@@ -2401,6 +2586,9 @@ func (vm *VM) executeCall(numArgs int) error {
 		}
 		return fmt.Errorf("calling non-function: type %T", calleeObj)
 	}
+
+	// JIT 热点检测：记录函数调用
+	vm.jitEngine.RecordCall(callee)
 
 	if callee.IsGenerator {
 		gen := &objects.Generator{
@@ -2955,6 +3143,23 @@ func (vm *VM) executeInPlaceOperation(op compiler.Opcode, left, right objects.Ob
 		vm.push(left)
 		vm.push(right)
 		return vm.executeBinaryOperation(info.fallbackOp)
+	}
+
+	// 字符串 += 快速路径：使用 strings.Builder 避免重复分配
+	if op == compiler.OpInPlaceAdd {
+		if leftStr, ok := left.(*objects.String); ok {
+			var rightStr string
+			if rs, ok := right.(*objects.String); ok {
+				rightStr = rs.Value
+			} else {
+				rightStr = right.Inspect()
+			}
+			var builder strings.Builder
+			builder.Grow(len(leftStr.Value) + len(rightStr))
+			builder.WriteString(leftStr.Value)
+			builder.WriteString(rightStr)
+			return vm.push(&objects.String{Value: builder.String()})
+		}
 	}
 
 	// Try __ixxx__ method on left operand
@@ -3831,6 +4036,36 @@ func (vm *VM) findNextExceptStarHandler(afterOpcodeIP int) int {
 		}
 	}
 	return -1
+}
+
+// GetJITStats 返回JIT编译器的统计信息
+func (vm *VM) GetJITStats() map[string]interface{} {
+	if vm.jitEngine == nil {
+		return map[string]interface{}{"enabled": false}
+	}
+	return vm.jitEngine.GetStats()
+}
+
+// SetJITHotThreshold 设置JIT热点检测阈值
+func (vm *VM) SetJITHotThreshold(threshold int64) {
+	if vm.jitEngine != nil {
+		vm.jitEngine.SetHotThreshold(threshold)
+	}
+}
+
+// GetJITHotFunctions 返回热点函数列表
+func (vm *VM) GetJITHotFunctions() []*jit.CompiledCode {
+	if vm.jitEngine == nil {
+		return nil
+	}
+	return vm.jitEngine.GetHotFunctions()
+}
+
+// ClearJITCache 清除JIT缓存
+func (vm *VM) ClearJITCache() {
+	if vm.jitEngine != nil {
+		vm.jitEngine.ClearCache()
+	}
 }
 
 func splitExceptionGroup(eg *objects.ExceptionGroup, exceptionType string) ([]objects.Object, []objects.Object) {

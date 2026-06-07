@@ -236,6 +236,7 @@ type CompiledFunction struct {
 	Constants             []objects.Object
 	VarArgs               bool
 	KwArgs                bool
+	NonEscapingLocals     []bool // 标记哪些局部变量不逃逸（不被闭包捕获、不被返回、不被赋值给全局/实例属性）
 }
 
 func (cf *CompiledFunction) Type() objects.ObjectType {

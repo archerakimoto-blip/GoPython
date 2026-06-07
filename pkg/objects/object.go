@@ -54,6 +54,7 @@ const (
 	DICT_ITEMS_OBJ      ObjectType = "DICT_ITEMS"
 	REGEX_PATTERN_OBJ   ObjectType = "REGEX_PATTERN"
 	REGEX_MATCH_OBJ     ObjectType = "REGEX_MATCH"
+	STRING_BUILDER_OBJ  ObjectType = "STRING_BUILDER"
 )
 
 type Object interface {
@@ -1780,6 +1781,57 @@ func (eg *ExceptionGroup) Inspect() string {
 }
 
 type BuiltinFunction func(args ...Object) Object
+
+// StringBuilder 用于高效字符串拼接优化
+type StringBuilder struct {
+	Builder *strings.Builder
+}
+
+func NewStringBuilder() *StringBuilder {
+	return &StringBuilder{Builder: &strings.Builder{}}
+}
+
+func (sb *StringBuilder) Type() ObjectType { return STRING_BUILDER_OBJ }
+func (sb *StringBuilder) Inspect() string  { return "<string_builder>" }
+
+func (sb *StringBuilder) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "append":
+		return &Builtin{
+			Name: "string_builder.append",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("append() takes at least 1 argument")
+				}
+				for _, arg := range args {
+					var s string
+					if str, ok := arg.(*String); ok {
+						s = str.Value
+					} else {
+						s = arg.Inspect()
+					}
+					sb.Builder.WriteString(s)
+				}
+				return None_
+			},
+		}, true
+	case "build":
+		return &Builtin{
+			Name: "string_builder.build",
+			Fn: func(args ...Object) Object {
+				return &String{Value: sb.Builder.String()}
+			},
+		}, true
+	case "__len__":
+		return &Builtin{
+			Name: "string_builder.__len__",
+			Fn: func(args ...Object) Object {
+				return &Integer{Value: int64(sb.Builder.Len())}
+			},
+		}, true
+	}
+	return nil, false
+}
 
 type Builtin struct {
 	Name string

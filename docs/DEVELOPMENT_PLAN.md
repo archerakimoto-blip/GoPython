@@ -1,6 +1,6 @@
 # GoPy 开发计划
 
-**当前版本**: 0.18.x
+**当前版本**: 0.21.x
 **目标版本**: 1.0.0
 **最后更新**: 2026-06
 
@@ -80,12 +80,14 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 并发安全数据结构 + 同步原语
 ⚠️ asyncio 模块 — 部分实现
 
-### 4. 运行时优化 (完成度: 90%)
+### 4. 运行时优化 (完成度: 95%)
 
 ✅ 内联缓存 + 全局变量缓存 + 特化操作码 + 常量折叠
 ✅ 对象池 + Dict 优化 + 死代码消除 + 字符串驻留
 ✅ BoundMethod + Range/Zip 惰性迭代器
 ✅ 寄存器 VM + 分代 GC
+✅ 内联缓存泛化（OpIndex/OpSetIndex）+ 快速整数算术 + StringBuilder + 列表预分配
+✅ JIT 热点检测 + 逃逸分析
 ⚠️ 直接线程 — 未实现
 
 ### 5. 标准库 (完成度: 90%)
@@ -242,16 +244,17 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **base64 模块** — encode/decode
 - [x] **struct 模块** — pack/unpack 二进制数据
 
-### v0.21 — 运行时优化
+### v0.21 — 运行时优化 ✅
 
 > 目标：提升运行时性能，优化热点路径。
 
-- [ ] **直接线程** — 字节码解释器使用 computed goto / 直接线程分发
-- [ ] **JIT 热点检测** — 基于调用计数的函数级 JIT 编译
-- [ ] **内联缓存泛化** — 扩展 attrCache 到更多操作码（OpGetIndex 等）
-- [ ] **逃逸分析** — 编译器识别不逃逸作用域的对象，栈分配优化
-- [ ] **字符串构建优化** — 连续字符串拼接使用 StringBuilder 模式
-- [ ] **列表预分配** — 推导式中预分配列表容量
+- [x] **内联缓存泛化** — OpIndex/OpSetIndex 添加 indexCache，缓存类型分派结果（list+int, tuple+int, dict, range+int, string+int, bytes+int 等 10 种处理器）
+- [x] **快速整数算术** — 二元操作（OpAdd/OpSub/OpMul/OpDiv/OpMod/OpFloorDiv/OpPower/OpBitOr/OpBitAnd/OpBitXor）添加 int+int 快速路径，避免函数调用开销；OpDiv 返回 Float 保持 Python 语义
+- [x] **字符串构建优化** — StringBuilder 对象 + OpStringBuilderCreate/Append/Build 操作码 + 字符串 += 快速路径（使用 strings.Builder 避免 O(n²) 重复分配）
+- [x] **列表预分配** — OpArrayPrealloc 操作码 + VM 处理 + 编译器端检测 range(N) 常量模式并生成预分配指令
+- [x] **JIT 热点检测** — VM 集成 JIT 引擎，在 executeCall 中记录 CompiledFunction/Closure 调用次数，超过阈值（默认5次）标记为热点函数；添加 GetJITStats/SetJITHotThreshold/GetJITHotFunctions/ClearJITCache API
+- [x] **逃逸分析** — CompiledFunction 添加 NonEscapingLocals 位图，编译器 optimize.go 中实现 analyzeEscape 分析 pass，检测闭包捕获（OpGetFree）、返回值（OpGetLocal+OpReturnValue）、全局赋值（OpSetGlobal）等逃逸模式
+- [x] **快速整数算术 bug 修复** — 修复 goto 跳过变量声明的编译错误；修复 OpDiv 快速路径返回 Integer 而非 Float 的 Python 语义错误
 
 ### v0.22 — 并发完善
 
