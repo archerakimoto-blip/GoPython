@@ -1263,8 +1263,8 @@ func (rvm *RegisterVM) RunReg() error {
 			left := rvm.regGet(leftReg)
 			start := rvm.regGet(startReg)
 			end := rvm.regGet(endReg)
-			_ = rvm.regGet(stepReg) // step not yet fully implemented
-			result, err := rvm.sliceOp(left, start, end)
+			step := rvm.regGet(stepReg)
+			result, err := rvm.sliceOpWithStep(left, start, end, step)
 			if err != nil {
 				return err
 			}
@@ -1283,7 +1283,12 @@ func (rvm *RegisterVM) RunReg() error {
 			}
 
 		case RegOpDictUnpack:
-			// No-op placeholder
+			// Dict is already in a register; when RegOpCall pushes args onto the stack,
+			// the dict will be the last argument. executeCall detects a Dict as the last
+			// argument and treats it as **kwargs. We just need to ensure the dict register
+			// is included in the call's argument list.
+			// No additional action needed here - the dict stays in its register and
+			// will be pushed by RegOpCall as part of the arguments.
 
 		case RegOpGetAttr:
 			dst := inst.Operands[0]
@@ -2053,6 +2058,238 @@ func (rvm *RegisterVM) indexOp(left, index objects.Object) (objects.Object, erro
 }
 
 // sliceOp performs a slice operation.
+func (rvm *RegisterVM) sliceOpWithStep(left, start, end, step objects.Object) (objects.Object, error) {
+	// Parse step value
+	var stepVal int64 = 1
+	if step != nil && step != objects.None_ {
+		if s, ok := step.(*objects.Integer); ok {
+			stepVal = s.Value
+		}
+	}
+	if stepVal == 0 {
+		return nil, fmt.Errorf("slice step cannot be zero")
+	}
+
+	switch {
+	case left.Type() == objects.LIST_OBJ:
+		return rvm.listSliceWithStep(left, start, end, stepVal)
+	case left.Type() == objects.STRING_OBJ:
+		return rvm.stringSliceWithStep(left, start, end, stepVal)
+	case left.Type() == objects.BYTES_OBJ:
+		return rvm.bytesSliceWithStep(left, start, end, stepVal)
+	case left.Type() == objects.TUPLE_OBJ:
+		return rvm.tupleSliceWithStep(left, start, end, stepVal)
+	default:
+		return nil, fmt.Errorf("slice operator not supported: %s", left.Type())
+	}
+}
+
+func normalizeIndex(idx, length int64) int64 {
+	if idx < 0 {
+		idx += length
+		if idx < 0 {
+			idx = 0
+		}
+	}
+	if idx > length {
+		idx = length
+	}
+	return idx
+}
+
+func sliceBounds(length, startIdx, endIdx, step int64) (int64, int64) {
+	if step > 0 {
+		startIdx = normalizeIndex(startIdx, length)
+		endIdx = normalizeIndex(endIdx, length)
+		if startIdx > endIdx {
+			endIdx = startIdx
+		}
+	} else {
+		startIdx = normalizeIndex(startIdx, length)
+		endIdx = normalizeIndex(endIdx, length)
+		if startIdx >= length {
+			startIdx = length - 1
+		}
+		if endIdx < -1 {
+			endIdx = -1
+		}
+	}
+	return startIdx, endIdx
+}
+
+func (rvm *RegisterVM) listSliceWithStep(left, start, end objects.Object, step int64) (objects.Object, error) {
+	list := left.(*objects.List)
+	length := int64(len(list.Elements))
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+	default:
+		if step > 0 {
+			startIdx = 0
+		} else {
+			startIdx = length - 1
+		}
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		endIdx = e.Value
+	default:
+		if step > 0 {
+			endIdx = length
+		} else {
+			endIdx = -1
+		}
+	}
+
+	startIdx, endIdx = sliceBounds(length, startIdx, endIdx, step)
+
+	var elements []objects.Object
+	if step > 0 {
+		for i := startIdx; i < endIdx; i += step {
+			elements = append(elements, list.Elements[i])
+		}
+	} else {
+		for i := startIdx; i > endIdx; i += step {
+			elements = append(elements, list.Elements[i])
+		}
+	}
+	return &objects.List{Elements: elements}, nil
+}
+
+func (rvm *RegisterVM) stringSliceWithStep(left, start, end objects.Object, step int64) (objects.Object, error) {
+	str := left.(*objects.String)
+	length := int64(len(str.Value))
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+	default:
+		if step > 0 {
+			startIdx = 0
+		} else {
+			startIdx = length - 1
+		}
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		endIdx = e.Value
+	default:
+		if step > 0 {
+			endIdx = length
+		} else {
+			endIdx = -1
+		}
+	}
+
+	startIdx, endIdx = sliceBounds(length, startIdx, endIdx, step)
+
+	var result []rune
+	runes := []rune(str.Value)
+	if step > 0 {
+		for i := startIdx; i < endIdx; i += step {
+			result = append(result, runes[i])
+		}
+	} else {
+		for i := startIdx; i > endIdx; i += step {
+			result = append(result, runes[i])
+		}
+	}
+	return &objects.String{Value: string(result)}, nil
+}
+
+func (rvm *RegisterVM) bytesSliceWithStep(left, start, end objects.Object, step int64) (objects.Object, error) {
+	b := left.(*objects.Bytes)
+	length := int64(len(b.Value))
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+	default:
+		if step > 0 {
+			startIdx = 0
+		} else {
+			startIdx = length - 1
+		}
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		endIdx = e.Value
+	default:
+		if step > 0 {
+			endIdx = length
+		} else {
+			endIdx = -1
+		}
+	}
+
+	startIdx, endIdx = sliceBounds(length, startIdx, endIdx, step)
+
+	var result []byte
+	if step > 0 {
+		for i := startIdx; i < endIdx; i += step {
+			result = append(result, b.Value[i])
+		}
+	} else {
+		for i := startIdx; i > endIdx; i += step {
+			result = append(result, b.Value[i])
+		}
+	}
+	return &objects.Bytes{Value: result}, nil
+}
+
+func (rvm *RegisterVM) tupleSliceWithStep(left, start, end objects.Object, step int64) (objects.Object, error) {
+	tuple := left.(*objects.Tuple)
+	length := int64(len(tuple.Elements))
+
+	var startIdx int64
+	switch s := start.(type) {
+	case *objects.Integer:
+		startIdx = s.Value
+	default:
+		if step > 0 {
+			startIdx = 0
+		} else {
+			startIdx = length - 1
+		}
+	}
+
+	var endIdx int64
+	switch e := end.(type) {
+	case *objects.Integer:
+		endIdx = e.Value
+	default:
+		if step > 0 {
+			endIdx = length
+		} else {
+			endIdx = -1
+		}
+	}
+
+	startIdx, endIdx = sliceBounds(length, startIdx, endIdx, step)
+
+	var elements []objects.Object
+	if step > 0 {
+		for i := startIdx; i < endIdx; i += step {
+			elements = append(elements, tuple.Elements[i])
+		}
+	} else {
+		for i := startIdx; i > endIdx; i += step {
+			elements = append(elements, tuple.Elements[i])
+		}
+	}
+	return &objects.Tuple{Elements: elements}, nil
+}
+
 func (rvm *RegisterVM) sliceOp(left, start, end objects.Object) (objects.Object, error) {
 	switch {
 	case left.Type() == objects.LIST_OBJ:

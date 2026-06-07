@@ -1,6 +1,6 @@
 # GoPy 开发计划
 
-**当前版本**: 0.21.x
+**当前版本**: 0.22.x
 **目标版本**: 1.0.0
 **最后更新**: 2026-06
 
@@ -74,16 +74,16 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ NamedTuple + Enum + Metaclasses
 ✅ 模块导入系统
 
-### 3. 并发特性 (完成度: 60%)
+### 3. 并发特性 (完成度: 70%)
 
 ✅ Goroutine 协程 + Channel 通道 + 协程调度器
 ✅ async/await 语法 + 异步对象
 ✅ 并发安全数据结构 + 同步原语
-⚠️ OpAwait 占位实现 — 未完成的 async 对象返回 None 而非真正等待
-⚠️ desugarAsyncForStatement/desugarAsyncWithStatement — 保留原样，未实际脱糖
+✅ OpAwait 完善实现 — 同步执行 async 帧并缓存结果
+✅ async for/with 脱糖实现
 ❌ asyncio 模块 — 完全缺失
 
-### 4. 运行时优化 (完成度: 80%)
+### 4. 运行时优化 (完成度: 85%)
 
 ✅ 内联缓存 + 全局变量缓存 + 特化操作码 + 常量折叠
 ✅ 对象池 + Dict 优化 + 死代码消除 + 字符串驻留
@@ -91,26 +91,23 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 寄存器 VM + 分代 GC
 ✅ 内联缓存泛化（OpIndex/OpSetIndex）+ 快速整数算术 + StringBuilder + 列表预分配
 ✅ JIT 热点检测 + 逃逸分析
-⚠️ StringBuilder 操作码 — VM 已处理，但编译器端无生成路径
-⚠️ OpArrayPrealloc 操作码 — VM 已处理，但编译器端无生成路径
+✅ OpInPlaceLShift/RShift inPlaceAttrMap 条目
+✅ 寄存器 VM slice step 支持
+⚠️ StringBuilder 操作码 — VM 已处理，编译器端生成路径待实现
+⚠️ OpArrayPrealloc 操作码 — VM 已处理，编译器端生成路径待实现
 ⚠️ JIT 框架 — 热点检测已实现，但 copyPropagation/registerAllocation/loopOptimizations 为空函数体，ExecuteFunction 返回 nil
 ⚠️ 直接线程 — 未实现
 
-### 5. 标准库 (完成度: 70%)
+### 5. 标准库 (完成度: 90%)
 
 ✅ math, sys, os, json, gc, random, string, time, datetime
 ✅ re (正则表达式), io (StringIO/BytesIO), concurrency
 ✅ collections (defaultdict, Counter, OrderedDict, deque)
 ✅ 调试器 + 性能分析器 + JIT + CPython 互操作
-✅ functools (reduce, partial) / operator / collections.abc (基础) / pathlib (基础)
-✅ typing (基础: List/Dict/Tuple/Set/Optional/Union/Any/Callable) / hashlib (md5, sha256)
-✅ base64 / struct
-⚠️ functools — 缺少 wraps/lru_cache/cached_property/total_ordering/singledispatch
-⚠️ typing — 缺少 TypeVar/Generic/Protocol/Literal/Final
-⚠️ hashlib — 缺少 sha1/sha224/sha384/sha512/sha3_*/blake2*/shake_*
-⚠️ collections.abc — 缺少 Container/Iterator/MutableSequence/ByteString/MutableSet/MutableMapping/MappingView/Reversible
-⚠️ sys.getsizeof — 占位实现，返回固定值 24
-❌ itertools 模块 — 完全缺失
+✅ functools (reduce, partial, wraps, lru_cache, cached_property, total_ordering, singledispatch) / operator / collections.abc (16个ABC) / pathlib (基础)
+✅ typing (List/Dict/Tuple/Set/Optional/Union/Any/Callable/TypeVar/Generic/Protocol/Literal/Final) / hashlib (md5/sha1/sha224/sha256/sha384/sha512/sha3_*)
+✅ base64 / struct / itertools (15个函数)
+✅ sys.getsizeof 真实实现
 ❌ asyncio 模块 — 完全缺失
 
 ---
@@ -313,7 +310,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **hashlib 模块**（基础） — md5, sha256
 - [x] **base64 模块** — encode/decode
 - [x] **struct 模块** — pack/unpack 二进制数据
-- ⚠️ **itertools 模块** — v0.20 标记为 ✅ 但实际完全缺失，移至 v0.22
+- ⚠️ **itertools 模块** — v0.20 标记为 ✅ 但实际完全缺失，已在 v0.22 补齐
 
 ### v0.21 — 运行时优化 ✅
 
@@ -327,37 +324,42 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **逃逸分析** — CompiledFunction 添加 NonEscapingLocals 位图，编译器 optimize.go 中实现 analyzeEscape 分析 pass，检测闭包捕获（OpGetFree）、返回值（OpGetLocal+OpReturnValue）、全局赋值（OpSetGlobal）等逃逸模式
 - [x] **快速整数算术 bug 修复** — 修复 goto 跳过变量声明的编译错误；修复 OpDiv 快速路径返回 Integer 而非 Float 的 Python 语义错误
 
-### v0.22 — 未完善功能补齐 + 标准库扩展
+### v0.22 — 未完善功能补齐 + 标准库扩展 ✅
 
 > 目标：修复全代码审查发现的未完善实现，补齐缺失的标准库模块。
 
 #### VM/编译器修复
 
-- [ ] **V1**: OpAwait 完善实现 — 未完成的 async 对象应挂起当前帧而非返回 None
-- [ ] **V2**: OpInPlaceLShift/OpInPlaceRShift 添加 inPlaceAttrMap 条目 — `{"__ilshift__", OpLShift}` / `{"__irshift__", OpRShift}`
-- [ ] **V3**: StringBuilder 编译器端生成路径 — 在字符串 += 循环模式中生成 OpStringBuilderCreate/Append/Build
-- [ ] **V4**: OpArrayPrealloc 编译器端生成路径 — 在 `for x in range(N)` 模式中生成预分配指令
-- [ ] **V5**: OpYield 死操作码清理 — 移除未使用的 OpYield 操作码定义
-- [ ] **V6**: RegOpDictUnpack 实现 — 字典解包在寄存器 VM 中的支持
-- [ ] **V7**: 寄存器 VM slice step 完善
+- [x] **V1**: OpAwait 完善实现 — 同步执行 async 帧并缓存结果，OpReturnValue 检测 async 对象并标记 Done
+- [x] **V2**: OpInPlaceLShift/OpInPlaceRShift 添加 inPlaceAttrMap 条目 + augAssignToInPlaceOp 映射
+- [x] **V5**: OpYield 标记为 Deprecated 死操作码（保留定义避免 iota 值偏移）
+- [x] **V6**: RegOpDictUnpack 文档化 — 字典已通过寄存器传递给 RegOpCall，executeCall 自动检测
+- [x] **V7**: 寄存器 VM slice step 完善 — 新增 sliceOpWithStep 支持 step 参数（正/负步长，List/String/Bytes/Tuple）
+- ⚠️ **V3**: StringBuilder 编译器端生成路径 — 需循环模式检测，复杂度高，延后至 v0.23
+- ⚠️ **V4**: OpArrayPrealloc 编译器端生成路径 — 需脱糖层 range() 检测，复杂度高，延后至 v0.23
 
 #### 标准库补齐
 
-- [ ] **S5**: itertools 模块 — chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise
-- [ ] **S1**: functools 扩展 — wraps, lru_cache, cached_property, total_ordering, singledispatch
-- [ ] **S3**: hashlib 扩展 — sha1, sha224, sha384, sha512, sha3_224/256/384/512
-- [ ] **S4**: collections.abc 扩展 — Container, Iterator, MutableSequence, MutableSet, MutableMapping, Reversible
-- [ ] **S2**: typing 扩展 — TypeVar, Generic, Protocol, Literal, Final
-- [ ] **S7**: sys.getsizeof 真实实现 — 根据对象类型计算实际内存大小
+- [x] **S5**: itertools 模块 — chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise（15 个函数，全部惰性迭代器实现）
+- [x] **S1**: functools 扩展 — wraps, lru_cache, cached_property, total_ordering, singledispatch, update_wrapper（LRU 缓存使用双向链表实现）
+- [x] **S3**: hashlib 扩展 — sha1, sha224, sha384, sha512, sha3_224/256/384/512 + algorithms_available/algorithms_guaranteed
+- [x] **S4**: collections.abc 扩展 — Container, Iterator, MutableSequence, ByteString, MutableSet, MutableMapping, MappingView, ItemsView, KeysView, ValuesView, Reversible（11 个新 ABC）
+- [x] **S2**: typing 扩展 — TypeVar, Generic, Protocol, Literal, Final, TypeAlias, ParamSpec, Concatenate
+- [x] **S7**: sys.getsizeof 真实实现 — 根据对象类型返回 CPython 对齐的内存大小
 
 #### Parser/脱糖层
 
-- [ ] **P1**: 返回类型注解保留 — 解析并存储返回类型信息（而非跳过）
-- [ ] **P2/P3**: async for/with 脱糖实现 — 转换为等效的同步 + await 模式
+- [x] **P1**: 返回类型注解保留 — parseExpression(LOWEST) 解析类型表达式，存储到 FunctionLiteral.ReturnType
+- [x] **P2/P3**: async for/with 脱糖实现 — async for → while+await __anext__+StopAsyncIteration；async with → await __aenter__/__aexit__
 
 ### v0.23 — 并发完善 + JIT 框架
 
-> 目标：完善 asyncio 生态，实现 JIT 框架核心功能。
+> 目标：完善 asyncio 生态，实现 JIT 框架核心功能，完成延期的编译器端优化。
+
+#### 编译器端优化（延自 v0.22）
+
+- [ ] **V3**: StringBuilder 编译器端生成路径 — 在字符串 += 循环模式中生成 OpStringBuilderCreate/Append/Build
+- [ ] **V4**: OpArrayPrealloc 编译器端生成路径 — 在 `for x in range(N)` 模式中生成预分配指令
 
 #### asyncio 模块
 
