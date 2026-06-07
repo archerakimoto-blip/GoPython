@@ -11,11 +11,12 @@
 1. [设计理念](#设计理念)
 2. [当前实现状态](#当前实现状态)
 3. [全量 Code Review (v0.18)](#全量-code-review-v018)
-4. [路线图](#路线图)
-5. [架构约束](#架构约束)
-6. [测试策略](#测试策略)
-7. [风险评估](#风险评估)
-8. [开发历史](#开发历史)
+4. [全代码未完善功能审查 (v0.21)](#全代码未完善功能审查-v021)
+5. [路线图](#路线图)
+6. [架构约束](#架构约束)
+7. [测试策略](#测试策略)
+8. [风险评估](#风险评估)
+9. [开发历史](#开发历史)
 
 ---
 
@@ -73,14 +74,16 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ NamedTuple + Enum + Metaclasses
 ✅ 模块导入系统
 
-### 3. 并发特性 (完成度: 75%)
+### 3. 并发特性 (完成度: 60%)
 
 ✅ Goroutine 协程 + Channel 通道 + 协程调度器
 ✅ async/await 语法 + 异步对象
 ✅ 并发安全数据结构 + 同步原语
-⚠️ asyncio 模块 — 部分实现
+⚠️ OpAwait 占位实现 — 未完成的 async 对象返回 None 而非真正等待
+⚠️ desugarAsyncForStatement/desugarAsyncWithStatement — 保留原样，未实际脱糖
+❌ asyncio 模块 — 完全缺失
 
-### 4. 运行时优化 (完成度: 95%)
+### 4. 运行时优化 (完成度: 80%)
 
 ✅ 内联缓存 + 全局变量缓存 + 特化操作码 + 常量折叠
 ✅ 对象池 + Dict 优化 + 死代码消除 + 字符串驻留
@@ -88,14 +91,27 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ 寄存器 VM + 分代 GC
 ✅ 内联缓存泛化（OpIndex/OpSetIndex）+ 快速整数算术 + StringBuilder + 列表预分配
 ✅ JIT 热点检测 + 逃逸分析
+⚠️ StringBuilder 操作码 — VM 已处理，但编译器端无生成路径
+⚠️ OpArrayPrealloc 操作码 — VM 已处理，但编译器端无生成路径
+⚠️ JIT 框架 — 热点检测已实现，但 copyPropagation/registerAllocation/loopOptimizations 为空函数体，ExecuteFunction 返回 nil
 ⚠️ 直接线程 — 未实现
 
-### 5. 标准库 (完成度: 90%)
+### 5. 标准库 (完成度: 70%)
 
 ✅ math, sys, os, json, gc, random, string, time, datetime
 ✅ re (正则表达式), io (StringIO/BytesIO), concurrency
 ✅ collections (defaultdict, Counter, OrderedDict, deque)
 ✅ 调试器 + 性能分析器 + JIT + CPython 互操作
+✅ functools (reduce, partial) / operator / collections.abc (基础) / pathlib (基础)
+✅ typing (基础: List/Dict/Tuple/Set/Optional/Union/Any/Callable) / hashlib (md5, sha256)
+✅ base64 / struct
+⚠️ functools — 缺少 wraps/lru_cache/cached_property/total_ordering/singledispatch
+⚠️ typing — 缺少 TypeVar/Generic/Protocol/Literal/Final
+⚠️ hashlib — 缺少 sha1/sha224/sha384/sha512/sha3_*/blake2*/shake_*
+⚠️ collections.abc — 缺少 Container/Iterator/MutableSequence/ByteString/MutableSet/MutableMapping/MappingView/Reversible
+⚠️ sys.getsizeof — 占位实现，返回固定值 24
+❌ itertools 模块 — 完全缺失
+❌ asyncio 模块 — 完全缺失
 
 ---
 
@@ -156,6 +172,61 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | L14 | compiler | `Compile` 对 `ForStatement` 直接报错，依赖脱糖层保证不出现，但缺少保护 |
 | L15 | compiler | `HashLiteral` 元素处理顺序不确定 |
 | L16 | 全局 | 新增代码中中英文注释混用，应统一 |
+
+---
+
+## 全代码未完善功能审查 (v0.21)
+
+> 基于 2026-06 对 `pkg/` 全代码的未完善功能审查，覆盖 VM/编译器/对象系统/标准库/脱糖层/JIT 框架。
+
+### 🔴 严重问题 (状态标记错误)
+
+| # | 模块 | 位置 | 问题 | 影响 |
+|---|------|------|------|------|
+| I1 | stdlib | itertools | **itertools 模块完全缺失** — v0.20 开发计划标记为 ✅，但代码库中无任何 itertools 相关文件 | `import itertools` 将失败；开发计划状态与实际不符 |
+
+### 🟡 VM/编译器未完善实现
+
+| # | 模块 | 位置 | 问题 | 影响 |
+|---|------|------|------|------|
+| V1 | vm | `vm.go:1304-1326` | **OpAwait 占位实现** — async 对象未完成时返回 None 而非真正等待 | `await` 语义不正确，异步代码无法正确执行 |
+| V2 | vm | `vm.go:3183-3197` | **OpInPlaceLShift/OpInPlaceRShift 缺少 inPlaceAttrMap 条目** — 操作码已定义，编译器有 `augAssignToInPlaceOp` 映射，但 VM 的 `inPlaceAttrMap` 中无对应条目 | `x <<= 1` / `x >>= 1` 原地操作走 fallback 路径，不会调用 `__ilshift__`/`__irshift__` |
+| V3 | compiler | `compiler.go:116-118` | **OpStringBuilderCreate/Append/Build 编译器端无生成路径** — 操作码已定义，VM 已处理，但编译器中无任何代码生成这些操作码 | StringBuilder 优化功能实际未启用 |
+| V4 | compiler | `compiler.go:119` | **OpArrayPrealloc 编译器端无生成路径** — 操作码已定义，VM 已处理，但编译器中无代码生成此操作码（从 compileListComprehension 中移除后无替代） | 列表预分配功能实际未启用 |
+| V5 | compiler/vm | `compiler.go:75` | **OpYield 死操作码** — 操作码已定义，但编译器从不发射（全部使用 OpYieldValue），VM 也不处理 | 死代码，应清理或移除 |
+| V6 | register_vm | `register_vm.go:86,1286` | **RegOpDictUnpack 是 no-op placeholder** | 字典解包在寄存器 VM 中不工作 |
+| V7 | register_vm | `register_vm.go:1266` | **slice step "not yet fully implemented"** | 切片步长在寄存器 VM 中不完整 |
+
+### 🟡 JIT 框架未完善实现
+
+| # | 模块 | 位置 | 问题 | 影响 |
+|---|------|------|------|------|
+| J1 | jit | `enhanced.go:353-354` | **copyPropagation()** — 空函数体 | 优化 pass 未实现 |
+| J2 | jit | `enhanced.go:356-357` | **registerAllocation()** — 空函数体 | 优化 pass 未实现 |
+| J3 | jit | `enhanced.go:359-360` | **loopOptimizations()** — 空函数体 | 优化 pass 未实现 |
+| J4 | jit | `enhanced.go:576-578` | **findTargetFunction()** — 返回 nil | 内联优化无法找到目标函数 |
+| J5 | jit | `enhanced.go:208` | **ExecuteFunction()** — 返回 `nil, nil` | JIT 编译后的函数无法实际执行 |
+| J6 | jit | `jit.go` | **Compile()** — 返回 nil | JIT 编译为占位实现 |
+
+### 🟡 标准库模块不完整
+
+| # | 模块 | 已实现 | 缺失 |
+|---|------|--------|------|
+| S1 | functools | reduce, partial | wraps, lru_cache, cached_property, total_ordering, singledispatch, update_wrapper |
+| S2 | typing | List, Dict, Tuple, Set, Optional, Union, Any, Callable | TypeVar, Generic, Protocol, Literal, Final, TypeAlias, ParamSpec, Concatenate |
+| S3 | hashlib | md5, sha256 | sha1, sha224, sha384, sha512, sha3_224/256/384/512, blake2b, blake2s, shake_128/256 |
+| S4 | collections.abc | Iterable, Sequence, Mapping, Set, Callable | Container, Iterator, MutableSequence, ByteString, MutableSet, MutableMapping, MappingView, ItemsView, KeysView, ValuesView, Reversible |
+| S5 | itertools | ❌ 完全缺失 | chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise, batched |
+| S6 | asyncio | ❌ 完全缺失 | 事件循环, gather, sleep, create_task, run, Future, Task |
+| S7 | sys | getsizeof 占位 | 返回固定值 24，未计算实际对象大小 |
+
+### 🟢 Parser/脱糖层未完善
+
+| # | 模块 | 位置 | 问题 |
+|---|------|------|------|
+| P1 | parser | `parser.go:1161` | 返回类型注解 "简单实现：跳过直到遇到冒号"，不保留类型信息 |
+| P2 | desugar | `desugar.go:1303-1316` | `desugarAsyncForStatement` 保留原样，未实际脱糖 |
+| P3 | desugar | `desugar.go:1318-1320` | `desugarAsyncWithStatement` 保留原样，未实际脱糖 |
 
 ---
 
@@ -234,7 +305,6 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 
 > 目标：扩展标准库覆盖面，补齐高频使用的模块。
 
-- [x] **itertools 模块** — chain, count, cycle, islice, repeat, accumulate
 - [x] **functools 模块** — reduce, partial
 - [x] **operator 模块** — itemgetter, attrgetter, methodcaller
 - [x] **collections.abc 模块** — Iterable, Sequence, Mapping, Set 抽象基类
@@ -243,6 +313,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **hashlib 模块**（基础） — md5, sha256
 - [x] **base64 模块** — encode/decode
 - [x] **struct 模块** — pack/unpack 二进制数据
+- ⚠️ **itertools 模块** — v0.20 标记为 ✅ 但实际完全缺失，移至 v0.22
 
 ### v0.21 — 运行时优化 ✅
 
@@ -256,9 +327,39 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **逃逸分析** — CompiledFunction 添加 NonEscapingLocals 位图，编译器 optimize.go 中实现 analyzeEscape 分析 pass，检测闭包捕获（OpGetFree）、返回值（OpGetLocal+OpReturnValue）、全局赋值（OpSetGlobal）等逃逸模式
 - [x] **快速整数算术 bug 修复** — 修复 goto 跳过变量声明的编译错误；修复 OpDiv 快速路径返回 Integer 而非 Float 的 Python 语义错误
 
-### v0.22 — 并发完善
+### v0.22 — 未完善功能补齐 + 标准库扩展
 
-> 目标：完善 asyncio 生态，支持异步 I/O 模式。
+> 目标：修复全代码审查发现的未完善实现，补齐缺失的标准库模块。
+
+#### VM/编译器修复
+
+- [ ] **V1**: OpAwait 完善实现 — 未完成的 async 对象应挂起当前帧而非返回 None
+- [ ] **V2**: OpInPlaceLShift/OpInPlaceRShift 添加 inPlaceAttrMap 条目 — `{"__ilshift__", OpLShift}` / `{"__irshift__", OpRShift}`
+- [ ] **V3**: StringBuilder 编译器端生成路径 — 在字符串 += 循环模式中生成 OpStringBuilderCreate/Append/Build
+- [ ] **V4**: OpArrayPrealloc 编译器端生成路径 — 在 `for x in range(N)` 模式中生成预分配指令
+- [ ] **V5**: OpYield 死操作码清理 — 移除未使用的 OpYield 操作码定义
+- [ ] **V6**: RegOpDictUnpack 实现 — 字典解包在寄存器 VM 中的支持
+- [ ] **V7**: 寄存器 VM slice step 完善
+
+#### 标准库补齐
+
+- [ ] **S5**: itertools 模块 — chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise
+- [ ] **S1**: functools 扩展 — wraps, lru_cache, cached_property, total_ordering, singledispatch
+- [ ] **S3**: hashlib 扩展 — sha1, sha224, sha384, sha512, sha3_224/256/384/512
+- [ ] **S4**: collections.abc 扩展 — Container, Iterator, MutableSequence, MutableSet, MutableMapping, Reversible
+- [ ] **S2**: typing 扩展 — TypeVar, Generic, Protocol, Literal, Final
+- [ ] **S7**: sys.getsizeof 真实实现 — 根据对象类型计算实际内存大小
+
+#### Parser/脱糖层
+
+- [ ] **P1**: 返回类型注解保留 — 解析并存储返回类型信息（而非跳过）
+- [ ] **P2/P3**: async for/with 脱糖实现 — 转换为等效的同步 + await 模式
+
+### v0.23 — 并发完善 + JIT 框架
+
+> 目标：完善 asyncio 生态，实现 JIT 框架核心功能。
+
+#### asyncio 模块
 
 - [ ] **asyncio 事件循环** — 基础事件循环实现
 - [ ] **asyncio.gather** — 并发执行多个协程
@@ -268,9 +369,17 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] **异步文件 I/O** — 基于协程的文件操作
 - [ ] **异步网络** — 基于协程的 TCP/UDP
 
+#### JIT 框架实现
+
+- [ ] **J1**: copyPropagation 实现 — 复写传播优化 pass
+- [ ] **J2**: registerAllocation 实现 — 寄存器分配优化 pass
+- [ ] **J3**: loopOptimizations 实现 — 循环优化 pass（循环不变量外提、强度削减）
+- [ ] **J4**: findTargetFunction 实现 — 内联优化目标函数查找
+- [ ] **J5/J6**: ExecuteFunction/Compile 实现 — JIT 编译后函数的实际执行
+
 ### v1.0.0 — Production Ready
 
-- [ ] 所有 v0.18-v0.22 里程碑完成
+- [ ] 所有 v0.18-v0.23 里程碑完成
 - [ ] 性能基准测试达标（CPython 80%+）
 - [ ] 测试覆盖率 > 80%
 - [ ] 关键路径测试覆盖率 > 95%
@@ -327,6 +436,9 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 | 并发模块线程安全 | 中 | 中 | 竞态检测 + 压力测试 |
 | JIT 优化引入正确性回归 | 高 | 低 | 优化前后结果对比测试 |
 | asyncio 实现复杂度 | 高 | 中 | 分阶段实现，对标 CPython 子集 |
+| itertools 完全缺失但计划标记已完成 | 高 | 低 | 已修正计划状态，v0.22 补齐 |
+| StringBuilder/ArrayPrealloc 操作码 VM 已处理但编译器未生成 | 中 | 低 | v0.22 添加编译器端生成路径 |
+| JIT 框架大量空函数体 | 中 | 高 | v0.23 分阶段实现核心优化 pass |
 
 ---
 
