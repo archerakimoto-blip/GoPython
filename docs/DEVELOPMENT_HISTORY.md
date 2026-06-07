@@ -1,6 +1,6 @@
 # GoPy 开发历史
 
-> 本文档归档了 v0.3 ~ v0.17.x 的完整开发路径。当前开发计划见 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)。
+> 本文档归档了 v0.3 ~ v0.22 的完整开发路径。当前开发计划见 [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)。
 
 ---
 
@@ -264,3 +264,126 @@
 - [x] 索引增强赋值 `d['a'] += 1` — `AugAssignStatement` 扩展 + 脱糖
 - [x] 集合增强赋值 `|=` `&=` `^=` — Parser + Desugar
 - [x] collections 类型 `__setitem__`/`__getitem__` — defaultdict, Counter, OrderedDict
+
+## v0.18 — Code Review Bug 修复 + 稳定性 ✅
+
+> 目标：修复全量 Code Review 发现的所有严重和中等问题，提升运行时稳定性。
+
+### 🔴 严重 Bug 修复
+
+- [x] **B1**: `executeSetIndex` List 越界错误返回方式修复 — `vm.push(NewIndexError(...))` → `fmt.Errorf(...)`
+- [x] **B2**: `OpListUnpack` 中 `unpackExtraArgs` 使用后重置 — 已存在重置逻辑（误报）
+- [x] **B3**: `sweepYoung` 晋升年龄检查逻辑修正 — 逻辑正确（误报）
+- [x] **B4**: `binaryFloatOp` 浮点除零检查 — 添加 `rightValue == 0` 检查
+- [x] **B5**: `StringIO.read`/`BytesIO.read` size=0 处理 — 添加 `size == 0` 快速返回
+- [x] **B6**: `BytesIO.seek` 负位置处理 — 已正确处理（误报）
+
+### 🟡 中等问题修复
+
+- [x] **M2**: `deque` 添加 `__getitem__`/`__setitem__` 支持 — 支持负索引和越界检查
+- [x] **M3**: `deque.insert` 负索引行为与 CPython 对齐 — `insert(-1, x)` 插入到末尾元素前
+- [x] **M4**: `deque.rotate` 负旋转逻辑修正 — 使用高效的 slice 旋转替代循环
+- [x] **M5**: `OrderedDict.update` 顺序保持修复 — 已有键不重复添加到 KeyOrder
+- [x] **M6**: `scheduler.Go` nil closure 检查 — 添加 `fn == nil` 返回 nil
+- [x] **M7**: `sleep` 负数参数验证 — 返回 `ValueError`
+- [x] **M8**: DCE `OpFinally` 跳转目标重写 — 添加 OpFinally 可达性分析和目标重写
+- [x] **M10**: `getAttrOp` slots/字段访问行为统一 — slot 存在但值为 nil 时返回 None_
+- [x] **M12**: `re.sub`/`subn` callable 替换参数验证 — 已有 `IsCallable` 检查（误报）
+- [x] **M13/M14**: `StringIO.write`/`BytesIO.write` 参数类型验证 — 返回 TypeError + 返回写入字节数
+- [x] **M15**: 整数除零使用 `NewZeroDivisionError` — 已使用（误报）
+- [x] **M17**: Profiler 并发保护 — 添加 `sync.Mutex` 到 RecordInstruction/EnterFunction/ExitFunction
+
+### 🟢 代码质量改进
+
+- [x] **L3**: 提取 `augAssignOperator(tokenType) (string, bool)` 消除重复映射
+- [x] **L16**: 统一注释语言为英文 — 范围过大，延后到后续版本
+
+## v0.19 — Python 语义完善 ✅
+
+> 目标：补齐剩余的 Python 语义偏差，提升 CPython 兼容性。
+
+- [x] **集合差集运算符** `s - other` — OpSub 已支持 Set 类型（已存在）
+- [x] **切片赋值** `lst[1:3] = [4,5]` — 新增 `SliceAssignStatement` AST 节点 + `OpSetSlice` 操作码 + VM `executeSetSlice`
+- [x] **多目标索引赋值** `d['a'] = d['b'] = 1` — 验证通过，当前实现正确
+- [x] **Tuple 索引赋值禁用** — `t[0] = 1` 抛出 TypeError
+- [x] **String 索引赋值禁用** — `s[0] = 'a'` 抛出 TypeError
+- [x] **`dict.update()` 接受关键字参数** — 支持 Dict/List[Tuple]/Tuple[Tuple] + kwargs
+- [x] **`dict | other` 合并运算符** — `d1 | d2` 创建新 dict（右覆盖左）
+- [x] **`dict.setdefault()`** — `d.setdefault('a', 0)` 方法
+- [x] **`dict.popitem()`** — LIFO 顺序弹出，返回 (key, value) 元组
+- [x] **`dict.pop()`** — 按键弹出，支持默认值
+- [x] **`dict.get()`** — 按键获取，支持默认值
+- [x] **`dict.clear()`** / **`dict.copy()`** — 清空/浅拷贝
+- [x] **`dict.keys()`** / **`dict.values()`** / **`dict.items()`** — 视图对象
+- [x] **`Counter.most_common()`** — 返回最常见元素（已存在）
+- [x] **`Counter.elements()`** — 返回迭代器（已存在）
+- [x] **`OrderedDict.popitem(last=True)`** — 支持 FIFO/LIFO 弹出
+- [x] **`OrderedDict.move_to_end(last=True)`** — 移动键到末尾/开头
+- [x] **`deque.__getitem__`/`__setitem__`** — 索引访问支持（v0.18 已完成）
+- [x] **`deque.maxlen`** — 最大长度属性（已存在，返回 None）
+- [x] **`deque.remove()`** — 按值删除（已存在）
+- [x] **`deque.__contains__`** — `in` 运算符
+- [x] **`deque.index()`** — 查找元素位置（已存在）
+- [x] **`deque.reverse()`** — 原地反转（已存在）
+- [x] **`deque.copy()`** — 浅拷贝
+- [x] **`deque.clear()`** — 清空（已存在）
+- [x] **`deque.count()`** — 计数（已存在）
+- [x] **`deque.extendleft()`** — 左侧扩展（已存在）
+- [x] **`deque.rotate(n)`** — 旋转修正（v0.18 已完成）
+- [x] **`set.__isub__`** — `s -= other` 原地差集
+- [x] **`list.__imul__`** — `lst *= 3` 原地重复
+- [x] **`deque.sort()`** — CPython deque 不支持 sort，移除
+
+## v0.20 — 标准库扩展 ✅
+
+> 目标：扩展标准库覆盖面，补齐高频使用的模块。
+
+- [x] **functools 模块** — reduce, partial
+- [x] **operator 模块** — itemgetter, attrgetter, methodcaller
+- [x] **collections.abc 模块** — Iterable, Sequence, Mapping, Set 抽象基类
+- [x] **pathlib 模块**（基础） — Path 对象, exists/is_file/is_dir
+- [x] **typing 模块**（基础） — List, Dict, Tuple, Optional, Union 类型别名
+- [x] **hashlib 模块**（基础） — md5, sha256
+- [x] **base64 模块** — encode/decode
+- [x] **struct 模块** — pack/unpack 二进制数据
+- ⚠️ **itertools 模块** — v0.20 标记为 ✅ 但实际完全缺失，已在 v0.22 补齐
+
+## v0.21 — 运行时优化 ✅
+
+> 目标：提升运行时性能，优化热点路径。
+
+- [x] **内联缓存泛化** — OpIndex/OpSetIndex 添加 indexCache，缓存类型分派结果（list+int, tuple+int, dict, range+int, string+int, bytes+int 等 10 种处理器）
+- [x] **快速整数算术** — 二元操作（OpAdd/OpSub/OpMul/OpDiv/OpMod/OpFloorDiv/OpPower/OpBitOr/OpBitAnd/OpBitXor）添加 int+int 快速路径，避免函数调用开销；OpDiv 返回 Float 保持 Python 语义
+- [x] **字符串构建优化** — StringBuilder 对象 + OpStringBuilderCreate/Append/Build 操作码 + 字符串 += 快速路径（使用 strings.Builder 避免 O(n²) 重复分配）
+- [x] **列表预分配** — OpArrayPrealloc 操作码 + VM 处理 + 编译器端检测 range(N) 常量模式并生成预分配指令
+- [x] **JIT 热点检测** — VM 集成 JIT 引擎，在 executeCall 中记录 CompiledFunction/Closure 调用次数，超过阈值（默认5次）标记为热点函数；添加 GetJITStats/SetJITHotThreshold/GetJITHotFunctions/ClearJITCache API
+- [x] **逃逸分析** — CompiledFunction 添加 NonEscapingLocals 位图，编译器 optimize.go 中实现 analyzeEscape 分析 pass，检测闭包捕获（OpGetFree）、返回值（OpGetLocal+OpReturnValue）、全局赋值（OpSetGlobal）等逃逸模式
+- [x] **快速整数算术 bug 修复** — 修复 goto 跳过变量声明的编译错误；修复 OpDiv 快速路径返回 Integer 而非 Float 的 Python 语义错误
+
+## v0.22 — 未完善功能补齐 + 标准库扩展 ✅
+
+> 目标：修复全代码审查发现的未完善实现，补齐缺失的标准库模块。
+
+### VM/编译器修复
+
+- [x] **V1**: OpAwait 完善实现 — 同步执行 async 帧并缓存结果，OpReturnValue 检测 async 对象并标记 Done
+- [x] **V2**: OpInPlaceLShift/OpInPlaceRShift 添加 inPlaceAttrMap 条目 + augAssignToInPlaceOp 映射
+- [x] **V3**: StringBuilder 编译器端生成路径 — WhileStatement 循环体扫描 s += expr 模式，生成 OpStringBuilderCreate/Append/Build
+- [x] **V4**: OpArrayPrealloc 编译器端生成路径 — 脱糖 for 循环 range(N) 常量模式检测，生成 OpArrayPrealloc
+- [x] **V5**: OpYield 标记为 Deprecated 死操作码（保留定义避免 iota 值偏移）
+- [x] **V6**: RegOpDictUnpack 文档化 — 字典已通过寄存器传递给 RegOpCall，executeCall 自动检测
+- [x] **V7**: 寄存器 VM slice step 完善 — 新增 sliceOpWithStep 支持 step 参数（正/负步长，List/String/Bytes/Tuple）
+
+### 标准库补齐
+
+- [x] **S1**: functools 扩展 — wraps, lru_cache, cached_property, total_ordering, singledispatch, update_wrapper（LRU 缓存使用双向链表实现）
+- [x] **S2**: typing 扩展 — TypeVar, Generic, Protocol, Literal, Final, TypeAlias, ParamSpec, Concatenate
+- [x] **S3**: hashlib 扩展 — sha1, sha224, sha384, sha512, sha3_224/256/384/512 + algorithms_available/algorithms_guaranteed
+- [x] **S4**: collections.abc 扩展 — Container, Iterator, MutableSequence, ByteString, MutableSet, MutableMapping, MappingView, ItemsView, KeysView, ValuesView, Reversible（11 个新 ABC）
+- [x] **S5**: itertools 模块 — chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise（15 个函数，全部惰性迭代器实现）
+- [x] **S7**: sys.getsizeof 真实实现 — 根据对象类型返回 CPython 对齐的内存大小
+
+### Parser/脱糖层
+
+- [x] **P1**: 返回类型注解保留 — parseExpression(LOWEST) 解析类型表达式，存储到 FunctionLiteral.ReturnType
+- [x] **P2/P3**: async for/with 脱糖实现 — async for → while+await __anext__+StopAsyncIteration；async with → await __aenter__/__aexit__

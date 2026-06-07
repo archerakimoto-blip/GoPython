@@ -4,6 +4,87 @@
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-06
+
+### VM/编译器修复
+
+- **OpAwait 完善实现**：同步执行 async 帧并缓存结果，OpReturnValue 检测 async 对象并标记 Done
+- **OpInPlaceLShift/OpInPlaceRShift**：添加 inPlaceAttrMap 条目 + augAssignToInPlaceOp 映射
+- **StringBuilder 编译器端生成路径**：WhileStatement 循环体扫描 `s += expr` 模式，生成 OpStringBuilderCreate/Append/Build
+- **OpArrayPrealloc 编译器端生成路径**：脱糖 for 循环 range(N) 常量模式检测，生成 OpArrayPrealloc
+- **OpYield 标记为 Deprecated**：保留定义避免 iota 值偏移
+- **RegOpDictUnpack 文档化**：字典已通过寄存器传递给 RegOpCall，executeCall 自动检测
+- **寄存器 VM slice step 完善**：新增 sliceOpWithStep 支持 step 参数（正/负步长，List/String/Bytes/Tuple）
+
+### 标准库补齐
+
+- **functools 扩展**：wraps, lru_cache, cached_property, total_ordering, singledispatch, update_wrapper（LRU 缓存使用双向链表实现）
+- **typing 扩展**：TypeVar, Generic, Protocol, Literal, Final, TypeAlias, ParamSpec, Concatenate
+- **hashlib 扩展**：sha1, sha224, sha384, sha512, sha3_224/256/384/512 + algorithms_available/algorithms_guaranteed
+- **collections.abc 扩展**：Container, Iterator, MutableSequence, ByteString, MutableSet, MutableMapping, MappingView, ItemsView, KeysView, ValuesView, Reversible（11 个新 ABC）
+- **itertools 模块**：chain, count, cycle, islice, repeat, accumulate, product, permutations, combinations, groupby, starmap, filterfalse, zip_longest, tee, pairwise（15 个函数，全部惰性迭代器实现）
+- **sys.getsizeof 真实实现**：根据对象类型返回 CPython 对齐的内存大小
+
+### Parser/脱糖层
+
+- **返回类型注解保留**：parseExpression(LOWEST) 解析类型表达式，存储到 FunctionLiteral.ReturnType
+- **async for/with 脱糖实现**：async for → while+await __anext__+StopAsyncIteration；async with → await __aenter__/__aexit__
+
+## [0.21.0] - 2026-06
+
+### 运行时优化
+
+- **内联缓存泛化**：OpIndex/OpSetIndex 添加 indexCache，缓存类型分派结果（10 种处理器）
+- **快速整数算术**：二元操作添加 int+int 快速路径，避免函数调用开销；OpDiv 返回 Float 保持 Python 语义
+- **字符串构建优化**：StringBuilder 对象 + OpStringBuilderCreate/Append/Build 操作码 + 字符串 += 快速路径
+- **列表预分配**：OpArrayPrealloc 操作码 + VM 处理 + 编译器端检测 range(N) 常量模式
+- **JIT 热点检测**：VM 集成 JIT 引擎，调用次数超阈值标记为热点函数
+- **逃逸分析**：CompiledFunction 添加 NonEscapingLocals 位图，检测闭包捕获/返回值/全局赋值等逃逸模式
+
+## [0.20.0] - 2026-06
+
+### 标准库扩展
+
+- **functools 模块**：reduce, partial
+- **operator 模块**：itemgetter, attrgetter, methodcaller
+- **collections.abc 模块**：Iterable, Sequence, Mapping, Set 抽象基类
+- **pathlib 模块**（基础）：Path 对象, exists/is_file/is_dir
+- **typing 模块**（基础）：List, Dict, Tuple, Optional, Union 类型别名
+- **hashlib 模块**（基础）：md5, sha256
+- **base64 模块**：encode/decode
+- **struct 模块**：pack/unpack 二进制数据
+
+## [0.19.0] - 2026-06
+
+### Python 语义完善
+
+- **切片赋值**：`lst[1:3] = [4,5]` — SliceAssignStatement AST 节点 + OpSetSlice 操作码
+- **dict 合并运算符**：`d1 | d2` 创建新 dict（右覆盖左）
+- **dict 方法补齐**：setdefault, popitem, pop, get, clear, copy, keys, values, items
+- **OrderedDict 方法**：popitem(last=True), move_to_end(last=True)
+- **deque 方法**：__getitem__/__setitem__, __contains__, copy, count
+- **集合原地操作**：`s -= other` 原地差集
+- **列表原地操作**：`lst *= 3` 原地重复
+- **Tuple/String 索引赋值禁用**：抛出 TypeError
+
+## [0.18.0] - 2026-06
+
+### Bug 修复
+
+- **executeSetIndex List 越界错误修复**：`vm.push(NewIndexError(...))` → `fmt.Errorf(...)`
+- **binaryFloatOp 浮点除零检查**：添加 `rightValue == 0` 检查
+- **StringIO.read/BytesIO.read**：size=0 快速返回
+- **deque 添加 __getitem__/__setitem__**：支持负索引和越界检查
+- **deque.insert 负索引行为对齐 CPython**
+- **deque.rotate 负旋转逻辑修正**
+- **OrderedDict.update 顺序保持修复**
+- **scheduler.Go nil closure 检查**
+- **sleep 负数参数验证**
+- **DCE OpFinally 跳转目标重写**
+- **getAttrOp slots/字段访问行为统一**
+- **StringIO.write/BytesIO.write 参数类型验证**
+- **Profiler 并发保护**：添加 sync.Mutex
+
 ## [0.16.0] - 2026-06-05
 
 ### 新增内置函数 (24 个)
