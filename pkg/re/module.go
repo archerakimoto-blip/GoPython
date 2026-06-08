@@ -370,7 +370,11 @@ func CreateReModule() *objects.Module {
 				}
 				resultStr := result.(*objects.String).Value
 				// Count the number of substitutions
-				locs := p.Regexp.FindAllStringIndex(s.Value, count)
+				findN := count
+				if findN <= 0 {
+					findN = -1
+				}
+				locs := p.Regexp.FindAllStringIndex(s.Value, findN)
 				n := 0
 				if locs != nil {
 					n = len(locs)
