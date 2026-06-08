@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"github.com/go-py/go-python/pkg/ast"
