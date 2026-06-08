@@ -477,3 +477,74 @@
 - [x] **compilerToVMOpcode 映射**：编译器和 VM 操作码排序不同，通过显式映射表转换
 - [x] **FunctionLiteral 未绑定函数名**：编译后添加符号定义和 ROpSetGlobal/ROpSetLocal
 - [x] **registerBuiltins stub 修复**：print/len 使用实际实现替代返回 None 的 stub
+
+---
+
+## v0.26 — 测试覆盖率基础建设
+
+> 目标：关键路径测试率全覆盖，从 0% 建立测试基础设施。
+
+### 新增测试文件
+
+- [x] **lexer_test.go** — 10 个测试，覆盖主要 token 类型
+- [x] **parser_test.go** — 21 个测试，覆盖主要语句和表达式类型
+- [x] **desugar_test.go** — 64 个测试，覆盖所有脱糖变换
+- [x] **object_test.go** — 56 个测试，覆盖主要对象类型
+- [x] **compiler_test.go** — 20 个测试，覆盖基础编译
+- [x] **register_compiler_test.go** — 20 个测试，覆盖寄存器编译器
+- [x] **vm_test.go** — 15 个测试，覆盖栈式 VM
+- [x] **register_vm_test.go** — 15 个测试，覆盖寄存器 VM
+
+### 覆盖率结果
+
+| 模块 | 覆盖率 |
+|------|--------|
+| Lexer | 67.4% |
+| Desugar | 74.9% |
+| Parser | 26.3% |
+| Objects | 20.7% |
+| Compiler | 27.2% |
+| VM (Stack) | 19.2% |
+| VM (Register) | 15.5% |
+
+---
+
+## v0.27 — 测试覆盖率大幅提升
+
+> 目标：测试覆盖率达到 90%+，修复发现的 Parser bug。
+
+### 测试覆盖率提升
+
+| 模块 | v0.26 | v0.27 | 提升 |
+|------|-------|-------|------|
+| Lexer | 67.4% | **97.9%** | +30.5% |
+| Desugar | 74.9% | **99.6%** | +24.7% |
+| Parser | 26.3% | **81.7%** | +55.4% |
+| Objects | 20.7% | **90.3%** | +69.6% |
+| Compiler | 27.2% | **78.3%** | +51.1% |
+| VM | 15.5% | **52.4%** | +36.9% |
+| GC | - | **93.3%** | 新增 |
+| RE | - | **95.0%** | 新增 |
+| Struct | - | **93.7%** | 新增 |
+
+### Parser Bug 修复
+
+- [x] **`yield from` 语句解析**：`from` 被词法分析为 FROM 关键字而非 IDENT，导致 `yield from` 语句无法识别。修复：在 `parseYieldStatement` 中添加 `p.curTokenIs(lexer.FROM)` 检查
+- [x] **`match/case` 语句解析**：三个 bug 修复：
+  1. `parseMatchStatement` 未 advance past MATCH 关键字，导致 `parseExpression(LOWEST)` 尝试解析 MATCH 作为表达式
+  2. `parseMatchStatement` 中 `parseExpression` 返回后 curToken 不在 COLON 上，需要检查 peekToken
+  3. `parseCaseClause` 中同样需要处理 curToken/peekToken 与 COLON 的关系
+- [x] **`break`/`continue` 语句**：在 `parseStatement` 的 IDENT case 中添加 break/continue 检查，确保在 while/for 循环体内正确解析
+
+### 新增测试文件
+
+- [x] **lexer_test.go** — 50 个测试，覆盖所有 token 类型、字面量、运算符、关键字
+- [x] **desugar_test.go** — 75 个测试，覆盖所有 15 种脱糖变换
+- [x] **parser_test.go** — 150+ 个测试，覆盖所有语句和表达式类型
+- [x] **object_test.go** — 100+ 个测试，覆盖所有对象类型和模块创建
+- [x] **compiler_test.go** — 90+ 个测试，覆盖编译器、符号表、寄存器编译器、序列化
+- [x] **gc_test.go** — 30+ 个测试，覆盖 GC 收集、写屏障、finalizer
+- [x] **re/module_test.go** — 30+ 个测试，覆盖正则表达式所有操作
+- [x] **struct/module_test.go** — 30+ 个测试，覆盖所有格式码和字节序
+- [x] **vm/vm_test_new_test.go** — 200+ 个测试，覆盖栈式 VM 操作码
+- [x] **vm/vm_coverage_boost_test.go** — 200+ 个测试，覆盖 VM 内部函数和寄存器 VM

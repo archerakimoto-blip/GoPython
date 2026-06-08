@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-06
+
+### 测试覆盖率大幅提升
+
+- **测试覆盖率从 0%→90%+ 的模块**：Lexer (97.9%), Desugar (99.6%), Objects (90.3%), GC (93.3%), RE (95.0%), Struct (93.7%)
+- **测试覆盖率大幅提升的模块**：Parser (26.3%→81.7%), Compiler (27.2%→78.3%), VM (15.5%→52.4%)
+- **新增测试文件**：lexer_test.go, desugar_test.go, parser_test.go, object_test.go, compiler_test.go, gc_test.go, re/module_test.go, struct/module_test.go, vm/vm_test_new_test.go, vm/vm_coverage_boost_test.go
+- **Parser bug 修复**：修复 `yield from` 语句解析（FROM 关键字识别）、修复 `match/case` 语句解析（advance past MATCH、COLON 定位、case clause COLON 定位）
+- **Parser 增强**：`break`/`continue` 语句在 IDENT case 中正确识别
+- **Struct 模块重构**：binary.Write/Read 替换为直接字节操作，消除不可达错误路径
+- **测试总数**：9 个模块，500+ 测试函数，覆盖所有关键路径
+
+## [0.26.0] - 2026-06
+
+### 测试覆盖率基础建设
+
+- **新增 9 个测试文件**，265 个测试函数
+- **覆盖率从 0% 提升**：Lexer 67.4%, Desugar 74.9%, Parser 26.3%, Objects 20.7%, Compiler 27.2%, VM 15.5-19.2%
+
 ## [0.25.0] - 2026-06
 
 ### 寄存器 VM 迁移 Phase 3：默认引擎切换

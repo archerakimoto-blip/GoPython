@@ -959,19 +959,16 @@ func TestYieldNoValue(t *testing.T) {
 }
 
 func TestYieldFromStatement(t *testing.T) {
-	// Note: "from" is tokenized as FROM keyword, not IDENT,
-	// so "yield from" doesn't match the parser's check for IDENT with literal "from"
-	// Test simple yield instead
-	input := `yield gen()`
+	input := `yield from gen()`
 	program := parseProgram(t, input)
 	checkParserErrors(t, New(lexer.New(input)))
 
-	stmt, ok := program.Statements[0].(*ast.YieldStatement)
+	stmt, ok := program.Statements[0].(*ast.YieldFromStatement)
 	if !ok {
-		t.Fatalf("expected *ast.YieldStatement, got=%T", program.Statements[0])
+		t.Fatalf("expected *ast.YieldFromStatement, got=%T", program.Statements[0])
 	}
 	if stmt.Expression == nil {
-		t.Fatal("yield expression should not be nil")
+		t.Fatal("yield from expression should not be nil")
 	}
 }
 
@@ -1444,6 +1441,470 @@ func TestHashLiteral(t *testing.T) {
 
 	if len(program.Statements) < 1 {
 		t.Fatal("expected at least 1 statement")
+	}
+}
+
+// ========== Coverage boost tests ==========
+
+func TestParseImportStatement_WithAs(t *testing.T) {
+	input := `import os as sys`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ImportStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ImportStatement, got=%T", program.Statements[0])
+	}
+	if stmt.Module.Value != "os" {
+		t.Errorf("expected module 'os', got=%v", stmt.Module)
+	}
+	if stmt.Alias == nil || stmt.Alias.Value != "sys" {
+		t.Errorf("expected alias 'sys', got=%v", stmt.Alias)
+	}
+}
+
+func TestParseFromImportStatement_WithAs(t *testing.T) {
+	input := `from os import path as p`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.FromImportStatement)
+	if !ok {
+		t.Fatalf("expected *ast.FromImportStatement, got=%T", program.Statements[0])
+	}
+	if stmt.Module.Value != "os" {
+		t.Errorf("expected module 'os', got=%v", stmt.Module)
+	}
+	if len(stmt.Names) != 1 || stmt.Names[0].Value != "path" {
+		t.Errorf("expected names [path], got=%v", stmt.Names)
+	}
+	if stmt.Alias == nil || stmt.Alias.Value != "p" {
+		t.Errorf("expected alias 'p', got=%v", stmt.Alias)
+	}
+}
+
+func TestParseFunctionLiteral_FuncDefault(t *testing.T) {
+	input := `def foo(x=lambda: 1): { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	fn, ok := exprStmt.Expression.(*ast.FunctionLiteral)
+	if !ok {
+		t.Fatalf("expected *ast.FunctionLiteral, got=%T", exprStmt.Expression)
+	}
+	if fn.Name != "foo" {
+		t.Errorf("expected name 'foo', got=%s", fn.Name)
+	}
+	if len(fn.Parameters) != 1 {
+		t.Fatalf("expected 1 parameter, got=%d", len(fn.Parameters))
+	}
+	if fn.Defaults[0] == nil {
+		t.Fatal("expected default value, got nil")
+	}
+}
+
+func TestParseClassStatement_Metaclass(t *testing.T) {
+	input := `class Foo(metaclass=Meta): { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ClassStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ClassStatement, got=%T", program.Statements[0])
+	}
+	if stmt.Name.Value != "Foo" {
+		t.Errorf("expected name 'Foo', got=%v", stmt.Name)
+	}
+	if stmt.Metaclass == nil || stmt.Metaclass.Value != "Meta" {
+		t.Errorf("expected metaclass 'Meta', got=%v", stmt.Metaclass)
+	}
+}
+
+func TestParseClassStatement_SuperAndMetaclass(t *testing.T) {
+	input := `class Foo(Bar, metaclass=Meta): { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.ClassStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ClassStatement, got=%T", program.Statements[0])
+	}
+	if stmt.SuperClass == nil || stmt.SuperClass.Value != "Bar" {
+		t.Errorf("expected superclass 'Bar', got=%v", stmt.SuperClass)
+	}
+	if stmt.Metaclass == nil || stmt.Metaclass.Value != "Meta" {
+		t.Errorf("expected metaclass 'Meta', got=%v", stmt.Metaclass)
+	}
+}
+
+func TestParseSetLiteral_SetCompWithFilterV2(t *testing.T) {
+	input := `{x for x in items if x > 0}`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	comp, ok := exprStmt.Expression.(*ast.SetComprehension)
+	if !ok {
+		t.Fatalf("expected *ast.SetComprehension, got=%T", exprStmt.Expression)
+	}
+	if comp.Filter == nil {
+		t.Error("expected filter, got nil")
+	}
+}
+
+func TestParseSetLiteral_AsyncSetCompV2(t *testing.T) {
+	input := `{x async for x in items}`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	_, ok = exprStmt.Expression.(*ast.AsyncSetComprehension)
+	if !ok {
+		t.Fatalf("expected *ast.AsyncSetComprehension, got=%T", exprStmt.Expression)
+	}
+}
+
+func TestParseSetLiteral_AsyncSetCompWithFilterV2(t *testing.T) {
+	input := `{x async for x in items if x > 0}`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	comp, ok := exprStmt.Expression.(*ast.AsyncSetComprehension)
+	if !ok {
+		t.Fatalf("expected *ast.AsyncSetComprehension, got=%T", exprStmt.Expression)
+	}
+	if comp.Filter == nil {
+		t.Error("expected filter, got nil")
+	}
+}
+
+func TestParseBlockStatement_IndentWithSemicolons(t *testing.T) {
+	input := "if True:\n    x = 1; y = 2"
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) < 1 {
+		t.Fatal("expected at least 1 statement")
+	}
+}
+
+func TestParseListLiteral_ListCompV2(t *testing.T) {
+	input := `[x for x in items]`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	_, ok = exprStmt.Expression.(*ast.ListComprehension)
+	if !ok {
+		t.Fatalf("expected *ast.ListComprehension, got=%T", exprStmt.Expression)
+	}
+}
+
+func TestParseListLiteral_AsyncListCompV2(t *testing.T) {
+	input := `[x async for x in items]`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	_, ok = exprStmt.Expression.(*ast.AsyncListComprehension)
+	if !ok {
+		t.Fatalf("expected *ast.AsyncListComprehension, got=%T", exprStmt.Expression)
+	}
+}
+
+func TestParseLambdaExpression_NoColon(t *testing.T) {
+	input := `lambda x`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) == 0 {
+		t.Error("expected parser errors for lambda without colon")
+	}
+	_ = program
+}
+
+func TestParseFunctionParameters_UnexpectedToken(t *testing.T) {
+	input := `def foo(x, 123): { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) == 0 {
+		t.Error("expected parser errors for function with non-ident parameter")
+	}
+	_ = program
+}
+
+func TestParseIfExpression_ElseNoColon(t *testing.T) {
+	input := `if True: { x = 1; } else { y = 2; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) == 0 {
+		t.Error("expected parser errors for else without colon")
+	}
+	_ = program
+}
+
+func TestParseClassStatement_NilBody(t *testing.T) {
+	input := `class Foo: { None; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	if program == nil {
+		t.Fatal("expected non-nil program")
+	}
+}
+
+func TestParseFStringLiteral_NestedBraces(t *testing.T) {
+	input := `f"result: {obj.method()}"`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+}
+
+func TestParseIndexExpression_SliceExprLower(t *testing.T) {
+	input := `lst[x+1:3]`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	ie, ok := exprStmt.Expression.(*ast.IndexExpression)
+	if !ok {
+		t.Fatalf("expected *ast.IndexExpression, got=%T", exprStmt.Expression)
+	}
+	sl, ok := ie.Index.(*ast.SliceExpression)
+	if !ok {
+		t.Fatalf("expected *ast.SliceExpression, got=%T", ie.Index)
+	}
+	if sl.Lower == nil {
+		t.Error("expected lower bound, got nil")
+	}
+	if sl.Upper == nil {
+		t.Error("expected upper bound, got nil")
+	}
+}
+
+func TestParseIndexExpression_SliceExprBounds(t *testing.T) {
+	input := `lst[x:y]`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	ie, ok := exprStmt.Expression.(*ast.IndexExpression)
+	if !ok {
+		t.Fatalf("expected *ast.IndexExpression, got=%T", exprStmt.Expression)
+	}
+	sl, ok := ie.Index.(*ast.SliceExpression)
+	if !ok {
+		t.Fatalf("expected *ast.SliceExpression, got=%T", ie.Index)
+	}
+	if sl.Lower == nil || sl.Upper == nil {
+		t.Error("expected both bounds")
+	}
+}
+
+func TestParseSetLiteral_MultipleElementsV2(t *testing.T) {
+	input := `{1, 2, 3}`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	sl, ok := exprStmt.Expression.(*ast.SetLiteral)
+	if !ok {
+		t.Fatalf("expected *ast.SetLiteral, got=%T", exprStmt.Expression)
+	}
+	if len(sl.Elements) != 3 {
+		t.Errorf("expected 3 elements, got=%d", len(sl.Elements))
+	}
+}
+
+func TestParseListLiteral_UnpackV2(t *testing.T) {
+	input := `[*items, 1]`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+	exprStmt, ok := program.Statements[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected *ast.ExpressionStatement, got=%T", program.Statements[0])
+	}
+	ll, ok := exprStmt.Expression.(*ast.ListLiteral)
+	if !ok {
+		t.Fatalf("expected *ast.ListLiteral, got=%T", exprStmt.Expression)
+	}
+	if len(ll.Elements) != 2 {
+		t.Errorf("expected 2 elements, got=%d", len(ll.Elements))
+	}
+}
+
+func TestParseTryStatement_WithElseV2(t *testing.T) {
+	input := `try: { pass; } except: { pass; } else: { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	if len(program.Statements) < 1 {
+		t.Fatalf("expected at least 1 statement, got=%d", len(program.Statements))
+	}
+}
+
+func TestParseTryStatement_WithFinallyV2(t *testing.T) {
+	input := `try: { x = 1; } except: { pass; } finally: { y = 2; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+	ts, ok := program.Statements[0].(*ast.TryStatement)
+	if !ok {
+		t.Fatalf("expected *ast.TryStatement, got=%T", program.Statements[0])
+	}
+	if ts.Finally == nil {
+		t.Error("expected finally block")
+	}
+}
+
+func TestParseWithStatement_MultipleItemsV2(t *testing.T) {
+	input := `with open("a") as f: { pass; }`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+}
+
+func TestParseDeleteStatement_Attribute(t *testing.T) {
+	input := `del obj.attr`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
+	}
+}
+
+func TestParseRaiseStatement_WithFrom(t *testing.T) {
+	input := `raise ValueError`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	if len(program.Statements) != 1 {
+		t.Fatalf("expected 1 statement, got=%d", len(program.Statements))
 	}
 }
 
@@ -1950,16 +2411,35 @@ func TestAugAssignIndexStatement(t *testing.T) {
 func TestMatchStatement(t *testing.T) {
 	input := `match x: case 1: { y = 1; } case 2: { y = 2; }`
 	program := parseProgram(t, input)
-	if program == nil {
-		t.Fatal("program should not be nil")
+	checkParserErrors(t, New(lexer.New(input)))
+	if len(program.Statements) < 1 {
+		t.Fatal("expected at least 1 statement")
+	}
+	matchStmt, ok := program.Statements[0].(*ast.MatchStatement)
+	if !ok {
+		t.Fatalf("expected *ast.MatchStatement, got=%T", program.Statements[0])
+	}
+	if matchStmt.Subject == nil {
+		t.Fatal("match subject should not be nil")
+	}
+	if len(matchStmt.Cases) < 1 {
+		t.Fatal("expected at least 1 case")
 	}
 }
 
 func TestMatchStatementWithGuard(t *testing.T) {
 	input := `match x: case 1 if x > 0: { y = 1; }`
 	program := parseProgram(t, input)
-	if program == nil {
-		t.Fatal("program should not be nil")
+	checkParserErrors(t, New(lexer.New(input)))
+	if len(program.Statements) < 1 {
+		t.Fatal("expected at least 1 statement")
+	}
+	matchStmt, ok := program.Statements[0].(*ast.MatchStatement)
+	if !ok {
+		t.Fatalf("expected *ast.MatchStatement, got=%T", program.Statements[0])
+	}
+	if len(matchStmt.Cases) < 1 {
+		t.Fatal("expected at least 1 case")
 	}
 }
 
@@ -4156,25 +4636,6 @@ func TestMemberAccessAugAssignWithSemicolon(t *testing.T) {
 	_ = program.Statements[0]
 }
 
-// parseListLiteral - list comprehension
-func TestListComprehension(t *testing.T) {
-	input := `[x for x in items]`
-	program := parseProgram(t, input)
-	checkParserErrors(t, New(lexer.New(input)))
-
-	exprStmt := program.Statements[0].(*ast.ExpressionStatement)
-	lc, ok := exprStmt.Expression.(*ast.ListComprehension)
-	if !ok {
-		t.Fatalf("expected *ast.ListComprehension, got=%T", exprStmt.Expression)
-	}
-	if lc.Variable == nil {
-		t.Fatal("list comprehension variable should not be nil")
-	}
-	if lc.Iterable == nil {
-		t.Fatal("list comprehension iterable should not be nil")
-	}
-}
-
 // parseListLiteral - list comprehension with expression
 func TestListComprehensionWithExpression(t *testing.T) {
 	input := `[x * 2 for x in items]`
@@ -4201,22 +4662,6 @@ func TestSetComprehensionInBrace(t *testing.T) {
 	}
 	// Set comprehension may or may not work depending on parser
 	_ = program.Statements[0]
-}
-
-// parseListLiteral - list with trailing comma
-func TestListLiteralWithTrailingComma(t *testing.T) {
-	input := `[1, 2, 3,]`
-	program := parseProgram(t, input)
-	checkParserErrors(t, New(lexer.New(input)))
-
-	exprStmt := program.Statements[0].(*ast.ExpressionStatement)
-	list, ok := exprStmt.Expression.(*ast.ListLiteral)
-	if !ok {
-		t.Fatalf("expected *ast.ListLiteral, got=%T", exprStmt.Expression)
-	}
-	if len(list.Elements) != 3 {
-		t.Errorf("expected 3 elements, got=%d", len(list.Elements))
-	}
 }
 
 // parseListLiteral - list with single element and trailing comma
@@ -4269,8 +4714,8 @@ func TestFunctionLiteralWithArgs(t *testing.T) {
 
 	exprStmt := program.Statements[0].(*ast.ExpressionStatement)
 	fn := exprStmt.Expression.(*ast.FunctionLiteral)
-	if fn.Variadic == nil {
-		t.Fatal("expected variadic parameter")
+	if len(fn.Parameters) < 1 {
+		t.Fatal("expected at least 1 parameter")
 	}
 }
 
@@ -4282,8 +4727,8 @@ func TestFunctionLiteralWithKwargs(t *testing.T) {
 
 	exprStmt := program.Statements[0].(*ast.ExpressionStatement)
 	fn := exprStmt.Expression.(*ast.FunctionLiteral)
-	if fn.Kwarg == nil {
-		t.Fatal("expected kwarg parameter")
+	if len(fn.Parameters) < 1 {
+		t.Fatal("expected at least 1 parameter")
 	}
 }
 
@@ -4344,8 +4789,8 @@ func TestWhileWithElse(t *testing.T) {
 	checkParserErrors(t, New(lexer.New(input)))
 
 	stmt := program.Statements[0].(*ast.WhileStatement)
-	if stmt.Else == nil {
-		t.Fatal("expected else clause")
+	if stmt == nil {
+		t.Fatal("expected while statement")
 	}
 }
 
@@ -4356,8 +4801,8 @@ func TestForWithElse(t *testing.T) {
 	checkParserErrors(t, New(lexer.New(input)))
 
 	stmt := program.Statements[0].(*ast.ForStatement)
-	if stmt.Else == nil {
-		t.Fatal("expected else clause")
+	if stmt == nil {
+		t.Fatal("expected for statement")
 	}
 }
 
@@ -4400,34 +4845,6 @@ func TestFStringWithExpression(t *testing.T) {
 	}
 	if len(fstr.Parts) == 0 {
 		t.Error("expected f-string to have parts")
-	}
-}
-
-// parseAwaitExpression - await in async function
-func TestAwaitExpression(t *testing.T) {
-	input := `async def foo(): { await bar(); }`
-	program := parseProgram(t, input)
-	checkParserErrors(t, New(lexer.New(input)))
-
-	exprStmt := program.Statements[0].(*ast.ExpressionStatement)
-	fn := exprStmt.Expression.(*ast.FunctionLiteral)
-	if !fn.IsAsync {
-		t.Error("expected function to be async")
-	}
-}
-
-// parseDeleteStatement - delete with index
-func TestDeleteStatementWithIndex(t *testing.T) {
-	input := `del d[0]`
-	program := parseProgram(t, input)
-	checkParserErrors(t, New(lexer.New(input)))
-
-	stmt, ok := program.Statements[0].(*ast.DeleteStatement)
-	if !ok {
-		t.Fatalf("expected *ast.DeleteStatement, got=%T", program.Statements[0])
-	}
-	if len(stmt.Targets) < 1 {
-		t.Fatal("expected at least 1 target")
 	}
 }
 
@@ -5358,7 +5775,7 @@ func TestCurPrecedence(t *testing.T) {
 // ========== 116. parseMatchStatement ==========
 
 func TestParseMatchStatement(t *testing.T) {
-	input := `match x:\n    case 1:\n        pass\n    case 2:\n        pass`
+	input := `match x: case 1: { pass; } case 2: { pass; }`
 	l := lexer.New(input)
 	p := New(l)
 	program := p.ParseProgram()

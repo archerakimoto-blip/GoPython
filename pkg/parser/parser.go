@@ -2386,12 +2386,21 @@ func (p *Parser) parseClassStatement() ast.Statement {
 func (p *Parser) parseMatchStatement() ast.Statement {
 	token := p.curToken
 
+	p.nextToken() // advance past MATCH keyword
 	subject := p.parseExpression(LOWEST)
 	if subject == nil {
 		return nil
 	}
 
-	if !p.expectPeek(lexer.COLON) {
+	// After parseExpression, curToken is still on the last token of the expression.
+	// We need to advance to the colon.
+	if p.curTokenIs(lexer.COLON) {
+		// Already on colon, proceed
+	} else if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // advance to colon
+	} else {
+		msg := fmt.Sprintf("expected next token to be :, got %s instead", p.curToken.Type)
+		p.errors = append(p.errors, msg)
 		return nil
 	}
 
@@ -2407,6 +2416,8 @@ func (p *Parser) parseMatchStatement() ast.Statement {
 			break
 		}
 	}
+
+	p.lastStmtAdvanced = true
 
 	return &ast.MatchStatement{
 		Token:   token.Literal,
@@ -2429,9 +2440,20 @@ func (p *Parser) parseCaseClause() *ast.CaseClause {
 	if p.curTokenIs(lexer.IF) {
 		p.nextToken()
 		guard = p.parseExpression(LOWEST)
+	} else if p.peekTokenIs(lexer.IF) {
+		p.nextToken() // advance to IF
+		p.nextToken() // advance past IF
+		guard = p.parseExpression(LOWEST)
 	}
 
-	if !p.expectPeek(lexer.COLON) {
+	// After parseExpression, curToken may not be on COLON yet
+	if p.curTokenIs(lexer.COLON) {
+		// Already on colon, proceed
+	} else if p.peekTokenIs(lexer.COLON) {
+		p.nextToken() // advance to colon
+	} else {
+		msg := fmt.Sprintf("expected next token to be :, got %s instead", p.curToken.Type)
+		p.errors = append(p.errors, msg)
 		return nil
 	}
 
@@ -2589,7 +2611,7 @@ func (p *Parser) parseYieldStatement() ast.Statement {
 	p.nextToken()
 
 	// 检查是否是 yield from
-	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "from" {
+	if p.curTokenIs(lexer.IDENT) && p.curToken.Literal == "from" || p.curTokenIs(lexer.FROM) {
 		p.nextToken()
 		expr := p.parseExpression(LOWEST)
 		return &ast.YieldFromStatement{

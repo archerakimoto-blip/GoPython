@@ -1,9 +1,6 @@
 package compiler
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/go-py/go-python/pkg/ast"
@@ -904,6 +901,2831 @@ func TestCompilePassStatement(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// 141. Additional coverage: registerBuiltins - exercise builtin function closures
+// =============================================================================
+
+func getBuiltinFn(c *Compiler, name string) func(...objects.Object) objects.Object {
+	sym, ok := c.symbolTable.Resolve(name)
+	if !ok || sym.Scope != BuiltinScope {
+		return nil
+	}
+	builtin, ok := c.constants[sym.Index].(*objects.Builtin)
+	if !ok {
+		return nil
+	}
+	return builtin.Fn
+}
+
+func TestBuiltinLen(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "len")
+	if fn == nil {
+		t.Fatal("len builtin not found")
+	}
+	// Test with List
+	result := fn(&objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}, &objects.Integer{Value: 2}}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 2 {
+		t.Errorf("expected len=2, got %v", result)
+	}
+	// Test with String
+	result = fn(&objects.String{Value: "hello"})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 5 {
+		t.Errorf("expected len=5, got %v", result)
+	}
+	// Test with Tuple
+	result = fn(&objects.Tuple{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 1 {
+		t.Errorf("expected len=1, got %v", result)
+	}
+	// Test with Dict
+	result = fn(&objects.Dict{Pairs: map[string]objects.Object{"a": &objects.Integer{Value: 1}}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 1 {
+		t.Errorf("expected len=1, got %v", result)
+	}
+	// Test with Set
+	result = fn(objects.NewSet())
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected len=0, got %v", result)
+	}
+	// Test with Range
+	result = fn(objects.NewRange(0, 5, 1))
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 5 {
+		t.Errorf("expected len=5, got %v", result)
+	}
+	// Test with Bytes
+	result = fn(&objects.Bytes{Value: []byte{1, 2, 3}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 3 {
+		t.Errorf("expected len=3, got %v", result)
+	}
+	// Test wrong arg count
+	result = fn()
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected error for wrong arg count, got %v", result)
+	}
+	// Test unsupported type
+	result = fn(&objects.Integer{Value: 1})
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected error for unsupported type, got %v", result)
+	}
+}
+
+func TestBuiltinPrint(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "print")
+	if fn == nil {
+		t.Fatal("print builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 42})
+	if result != objects.None_ {
+		t.Errorf("expected None from print, got %v", result)
+	}
+}
+
+func TestBuiltinInt(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "int")
+	if fn == nil {
+		t.Fatal("int builtin not found")
+	}
+	// From Integer
+	result := fn(&objects.Integer{Value: 42})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 42 {
+		t.Errorf("expected 42, got %v", result)
+	}
+	// From Float
+	result = fn(&objects.Float{Value: 3.7})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 3 {
+		t.Errorf("expected 3, got %v", result)
+	}
+	// From String
+	result = fn(&objects.String{Value: "123"})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 123 {
+		t.Errorf("expected 123, got %v", result)
+	}
+	// From Boolean
+	result = fn(&objects.Boolean{Value: true})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 1 {
+		t.Errorf("expected 1, got %v", result)
+	}
+	result = fn(&objects.Boolean{Value: false})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected 0, got %v", result)
+	}
+	// No args
+	result = fn()
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected 0, got %v", result)
+	}
+	// From Complex - error
+	result = fn(objects.NewComplex(1, 2))
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected TypeError for complex, got %v", result)
+	}
+}
+
+func TestBuiltinFloat(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "float")
+	if fn == nil {
+		t.Fatal("float builtin not found")
+	}
+	// From Float
+	result := fn(&objects.Float{Value: 3.14})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 3.14 {
+		t.Errorf("expected 3.14, got %v", result)
+	}
+	// From Integer
+	result = fn(&objects.Integer{Value: 42})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 42.0 {
+		t.Errorf("expected 42.0, got %v", result)
+	}
+	// From String
+	result = fn(&objects.String{Value: "3.14"})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 3.14 {
+		t.Errorf("expected 3.14, got %v", result)
+	}
+	// From Boolean
+	result = fn(&objects.Boolean{Value: true})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 1.0 {
+		t.Errorf("expected 1.0, got %v", result)
+	}
+	// From Complex - error
+	result = fn(objects.NewComplex(1, 2))
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected TypeError for complex, got %v", result)
+	}
+}
+
+func TestBuiltinBool(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "bool")
+	if fn == nil {
+		t.Fatal("bool builtin not found")
+	}
+	// From Boolean
+	result := fn(&objects.Boolean{Value: true})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	// From Integer
+	result = fn(&objects.Integer{Value: 1})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	result = fn(&objects.Integer{Value: 0})
+	if r, ok := result.(*objects.Boolean); !ok || r.Value {
+		t.Errorf("expected false, got %v", result)
+	}
+	// From Float
+	result = fn(&objects.Float{Value: 1.5})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	// From String
+	result = fn(&objects.String{Value: "hello"})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	result = fn(&objects.String{Value: ""})
+	if r, ok := result.(*objects.Boolean); !ok || r.Value {
+		t.Errorf("expected false, got %v", result)
+	}
+	// From List
+	result = fn(&objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	// From Dict
+	result = fn(&objects.Dict{Pairs: map[string]objects.Object{"a": &objects.Integer{Value: 1}}})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	// From Bytes
+	result = fn(&objects.Bytes{Value: []byte{1}})
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+	// From None
+	result = fn(objects.None_)
+	if r, ok := result.(*objects.Boolean); !ok || r.Value {
+		t.Errorf("expected false, got %v", result)
+	}
+	// From Complex
+	result = fn(objects.NewComplex(1, 0))
+	if r, ok := result.(*objects.Boolean); !ok || !r.Value {
+		t.Errorf("expected true, got %v", result)
+	}
+}
+
+func TestBuiltinAbs(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "abs")
+	if fn == nil {
+		t.Fatal("abs builtin not found")
+	}
+	// Integer positive
+	result := fn(&objects.Integer{Value: 5})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 5 {
+		t.Errorf("expected 5, got %v", result)
+	}
+	// Integer negative
+	result = fn(&objects.Integer{Value: -5})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 5 {
+		t.Errorf("expected 5, got %v", result)
+	}
+	// Float negative
+	result = fn(&objects.Float{Value: -3.14})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 3.14 {
+		t.Errorf("expected 3.14, got %v", result)
+	}
+	// Complex
+	result = fn(objects.NewComplex(3, 4))
+	if r, ok := result.(*objects.Float); !ok || r.Value != 5.0 {
+		t.Errorf("expected 5.0, got %v", result)
+	}
+}
+
+func TestBuiltinRange(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "range")
+	if fn == nil {
+		t.Fatal("range builtin not found")
+	}
+	// 1 arg
+	result := fn(&objects.Integer{Value: 5})
+	if _, ok := result.(*objects.Range); !ok {
+		t.Errorf("expected Range, got %v", result)
+	}
+	// 2 args
+	result = fn(&objects.Integer{Value: 1}, &objects.Integer{Value: 5})
+	if _, ok := result.(*objects.Range); !ok {
+		t.Errorf("expected Range, got %v", result)
+	}
+	// 3 args
+	result = fn(&objects.Integer{Value: 0}, &objects.Integer{Value: 10}, &objects.Integer{Value: 2})
+	if _, ok := result.(*objects.Range); !ok {
+		t.Errorf("expected Range, got %v", result)
+	}
+	// Step 0 error
+	result = fn(&objects.Integer{Value: 0}, &objects.Integer{Value: 10}, &objects.Integer{Value: 0})
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected ValueError for step=0, got %v", result)
+	}
+}
+
+func TestBuiltinComplex(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "complex")
+	if fn == nil {
+		t.Fatal("complex builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 1}, &objects.Integer{Value: 2})
+	if _, ok := result.(*objects.Complex); !ok {
+		t.Errorf("expected Complex, got %v", result)
+	}
+}
+
+func TestBuiltinSet(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "set")
+	if fn == nil {
+		t.Fatal("set builtin not found")
+	}
+	// No args
+	result := fn()
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// From List
+	result = fn(&objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}, &objects.Integer{Value: 2}}})
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// From Tuple
+	result = fn(&objects.Tuple{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// From Set
+	result = fn(func() *objects.Set { s := objects.NewSet(); s.Add(&objects.Integer{Value: 1}); return s }())
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// From Dict
+	result = fn(&objects.Dict{Pairs: map[string]objects.Object{"a": &objects.Integer{Value: 1}}})
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// From String
+	result = fn(&objects.String{Value: "abc"})
+	if _, ok := result.(*objects.Set); !ok {
+		t.Errorf("expected Set, got %v", result)
+	}
+	// Too many args
+	result = fn(&objects.Integer{Value: 1}, &objects.Integer{Value: 2})
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected TypeError, got %v", result)
+	}
+}
+
+func TestBuiltinList(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "list")
+	if fn == nil {
+		t.Fatal("list builtin not found")
+	}
+	// From List
+	result := fn(&objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+	// From Tuple
+	result = fn(&objects.Tuple{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+	// From String
+	result = fn(&objects.String{Value: "hi"})
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+	// From Range
+	result = fn(objects.NewRange(0, 3, 1))
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+	// From Dict
+	result = fn(&objects.Dict{Pairs: map[string]objects.Object{"a": &objects.Integer{Value: 1}}})
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+	// From Set
+	result = fn(func() *objects.Set { s := objects.NewSet(); s.Add(&objects.Integer{Value: 1}); return s }())
+	if _, ok := result.(*objects.List); !ok {
+		t.Errorf("expected List, got %v", result)
+	}
+}
+
+func TestBuiltinMin(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "min")
+	if fn == nil {
+		t.Fatal("min builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 3}, &objects.Integer{Value: 1}, &objects.Integer{Value: 2})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 1 {
+		t.Errorf("expected 1, got %v", result)
+	}
+	// With float
+	result = fn(&objects.Integer{Value: 3}, &objects.Float{Value: 0.5})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 0.5 {
+		t.Errorf("expected 0.5, got %v", result)
+	}
+}
+
+func TestBuiltinMax(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "max")
+	if fn == nil {
+		t.Fatal("max builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 3}, &objects.Integer{Value: 1}, &objects.Integer{Value: 2})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 3 {
+		t.Errorf("expected 3, got %v", result)
+	}
+	// With float
+	result = fn(&objects.Integer{Value: 3}, &objects.Float{Value: 5.5})
+	if r, ok := result.(*objects.Float); !ok || r.Value != 5.5 {
+		t.Errorf("expected 5.5, got %v", result)
+	}
+}
+
+func TestBuiltinAppend(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "append")
+	if fn == nil {
+		t.Fatal("append builtin not found")
+	}
+	lst := &objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}}}
+	result := fn(lst, &objects.Integer{Value: 2})
+	if result != objects.None_ {
+		t.Errorf("expected None, got %v", result)
+	}
+	if len(lst.Elements) != 2 {
+		t.Errorf("expected 2 elements, got %d", len(lst.Elements))
+	}
+}
+
+func TestBuiltinSetitem(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "setitem")
+	if fn == nil {
+		t.Fatal("setitem builtin not found")
+	}
+	dict := objects.NewDict()
+	result := fn(dict, &objects.String{Value: "key"}, &objects.Integer{Value: 42})
+	if result != objects.None_ {
+		t.Errorf("expected None, got %v", result)
+	}
+}
+
+func TestBuiltinSetadd(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "setadd")
+	if fn == nil {
+		t.Fatal("setadd builtin not found")
+	}
+	set := objects.NewSet()
+	result := fn(set, &objects.Integer{Value: 42})
+	if result != objects.None_ {
+		t.Errorf("expected None, got %v", result)
+	}
+}
+
+func TestBuiltinType(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "type")
+	if fn == nil {
+		t.Fatal("type builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 42})
+	if r, ok := result.(*objects.String); !ok || r.Value != "INTEGER" {
+		t.Errorf("expected 'INTEGER', got %v", result)
+	}
+}
+
+func TestBuiltinStr(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "str")
+	if fn == nil {
+		t.Fatal("str builtin not found")
+	}
+	result := fn(&objects.Integer{Value: 42})
+	if _, ok := result.(*objects.String); !ok {
+		t.Errorf("expected String, got %v", result)
+	}
+}
+
+func TestBuiltinNext(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "next")
+	if fn == nil {
+		t.Fatal("next builtin not found")
+	}
+	// With a generator
+	gen := &objects.Generator{Done: false}
+	result := fn(gen)
+	if _, ok := result.(*objects.Generator); !ok {
+		t.Errorf("expected Generator, got %v", result)
+	}
+	// With a done generator
+	genDone := &objects.Generator{Done: true}
+	result = fn(genDone)
+	if _, ok := result.(*objects.Error); !ok {
+		t.Errorf("expected Error, got %v", result)
+	}
+}
+
+func TestBuiltinOpen(t *testing.T) {
+	c := newTestCompiler()
+	fn := getBuiltinFn(c, "open")
+	if fn == nil {
+		t.Fatal("open builtin not found")
+	}
+	result := fn(&objects.String{Value: "test.txt"})
+	if _, ok := result.(*objects.ContextManager); !ok {
+		t.Errorf("expected ContextManager, got %v", result)
+	}
+	// With mode
+	result = fn(&objects.String{Value: "test.txt"}, &objects.String{Value: "w"})
+	if _, ok := result.(*objects.ContextManager); !ok {
+		t.Errorf("expected ContextManager, got %v", result)
+	}
+}
+
+// =============================================================================
+// 142. Additional coverage: Register compiler registerBuiltins - exercise builtin closures
+// =============================================================================
+
+func getRegBuiltinFn(rc *RegisterCompiler, name string) func(...objects.Object) objects.Object {
+	sym, ok := rc.symbolTable.Resolve(name)
+	if !ok || sym.Scope != BuiltinScope {
+		return nil
+	}
+	builtin, ok := rc.constants[sym.Index].(*objects.Builtin)
+	if !ok {
+		return nil
+	}
+	return builtin.Fn
+}
+
+func TestRegBuiltinLen(t *testing.T) {
+	rc := newTestRegCompiler()
+	fn := getRegBuiltinFn(rc, "len")
+	if fn == nil {
+		t.Fatal("len builtin not found in reg compiler")
+	}
+	result := fn(&objects.String{Value: "hello"})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 5 {
+		t.Errorf("expected len=5, got %v", result)
+	}
+	result = fn(&objects.List{Elements: []objects.Object{&objects.Integer{Value: 1}}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 1 {
+		t.Errorf("expected len=1, got %v", result)
+	}
+	result = fn(&objects.Dict{Pairs: map[string]objects.Object{}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected len=0, got %v", result)
+	}
+	result = fn(&objects.Tuple{Elements: []objects.Object{}})
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected len=0, got %v", result)
+	}
+	result = fn(objects.NewSet())
+	if r, ok := result.(*objects.Integer); !ok || r.Value != 0 {
+		t.Errorf("expected len=0, got %v", result)
+	}
+}
+
+func TestRegBuiltinPrint(t *testing.T) {
+	rc := newTestRegCompiler()
+	fn := getRegBuiltinFn(rc, "print")
+	if fn == nil {
+		t.Fatal("print builtin not found in reg compiler")
+	}
+	result := fn(&objects.Integer{Value: 42})
+	if result != objects.None_ {
+		t.Errorf("expected None, got %v", result)
+	}
+}
+
+// =============================================================================
+// 58. Additional coverage: compileMemberAccess and compileMethodCall
+// =============================================================================
+
+func TestCompileMemberAccessV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("obj")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.MemberAccess{
+			Object: &ast.Identifier{Value: "obj"},
+			Member: &ast.Identifier{Value: "attr"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpGetAttribute) {
+		t.Error("expected OpGetAttribute in instructions")
+	}
+}
+
+func TestCompileMethodCallV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("obj")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.MethodCall{
+			Object:   &ast.Identifier{Value: "obj"},
+			Method:   &ast.Identifier{Value: "method"},
+			Arguments: []ast.Expression{&ast.IntegerLiteral{Value: 1}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpGetAttribute) {
+		t.Error("expected OpGetAttribute in instructions")
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpCall) {
+		t.Error("expected OpCall in instructions")
+	}
+}
+
+// =============================================================================
+// 59. Additional coverage: compileSetComprehension without filter
+// =============================================================================
+
+func TestCompileSetComprehensionWithoutFilter(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("x")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.SetComprehension{
+			Token:    "{",
+			Element:  &ast.Identifier{Value: "x"},
+			Variable: &ast.Identifier{Value: "x"},
+			Iterable: &ast.Identifier{Value: "items"},
+			Filter:   nil,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 60. Additional coverage: compileAsyncListComprehension with free vars (closure path)
+// =============================================================================
+
+func TestCompileAsyncListComprehensionWithFreeVars(t *testing.T) {
+	c := newTestCompiler()
+	// Define outer_var in an enclosed scope so inner function sees it as Free
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("outer_var")
+	c.symbolTable = outer
+	c.symbolTable.Define("x")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncListComprehension{
+			Token:    "[",
+			Element:  &ast.Identifier{Value: "outer_var"},
+			Variable: &ast.Identifier{Value: "x"},
+			Iterable: &ast.Identifier{Value: "items"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 61. Additional coverage: compileAsyncDictComprehension with free vars (closure path)
+// =============================================================================
+
+func TestCompileAsyncDictComprehensionWithFreeVars(t *testing.T) {
+	c := newTestCompiler()
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("outer_var")
+	c.symbolTable = outer
+	c.symbolTable.Define("k")
+	c.symbolTable.Define("v")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncDictComprehension{
+			Token:    "{",
+			Key:      &ast.Identifier{Value: "outer_var"},
+			Value:    &ast.Identifier{Value: "v"},
+			Variable: &ast.Identifier{Value: "k"},
+			Iterable: &ast.Identifier{Value: "items"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 62. Additional coverage: compileAsyncGeneratorExpression with free vars (closure path)
+// =============================================================================
+
+func TestCompileAsyncGeneratorExpressionWithFreeVars(t *testing.T) {
+	c := newTestCompiler()
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("outer_var")
+	c.symbolTable = outer
+	c.symbolTable.Define("x")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncGeneratorExpression{
+			Element:  &ast.Identifier{Value: "outer_var"},
+			Variable: &ast.Identifier{Value: "x"},
+			Iterable: &ast.Identifier{Value: "items"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 63. Additional coverage: compileAsyncListComprehension without filter
+// =============================================================================
+
+func TestCompileAsyncListComprehensionWithoutFilter(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("x")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncListComprehension{
+			Token:    "[",
+			Element:  &ast.Identifier{Value: "x"},
+			Variable: &ast.Identifier{Value: "x"},
+			Iterable: &ast.Identifier{Value: "items"},
+			Filter:   nil,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 64. Additional coverage: compileAsyncDictComprehension without filter
+// =============================================================================
+
+func TestCompileAsyncDictComprehensionWithoutFilter(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("k")
+	c.symbolTable.Define("v")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncDictComprehension{
+			Token:    "{",
+			Key:      &ast.Identifier{Value: "k"},
+			Value:    &ast.Identifier{Value: "v"},
+			Variable: &ast.Identifier{Value: "k"},
+			Iterable: &ast.Identifier{Value: "items"},
+			Filter:   nil,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 65. Additional coverage: compileAsyncGeneratorExpression without filter
+// =============================================================================
+
+func TestCompileAsyncGeneratorExpressionWithoutFilter(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("x")
+	c.symbolTable.Define("items")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AsyncGeneratorExpression{
+			Element:  &ast.Identifier{Value: "x"},
+			Variable: &ast.Identifier{Value: "x"},
+			Iterable: &ast.Identifier{Value: "items"},
+			Filter:   nil,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync in instructions")
+	}
+}
+
+// =============================================================================
+// 66. Additional coverage: findArrayPreallocCandidate more cases
+// =============================================================================
+
+func TestFindArrayPreallocCandidateNotInfix(t *testing.T) {
+	c := newTestCompiler()
+	// Condition is not an InfixExpression
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.IntegerLiteral{Value: 1},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil for non-infix condition")
+	}
+}
+
+func TestFindArrayPreallocCandidateNotLessThan(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: ">", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.IntegerLiteral{Value: 10}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil for non-< operator")
+	}
+}
+
+func TestFindArrayPreallocCandidateLeftNotIdentifier(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.IntegerLiteral{Value: 0}, Right: &ast.IntegerLiteral{Value: 10}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil when left is not identifier")
+	}
+}
+
+func TestFindArrayPreallocCandidateLeftNotLoopCounter(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "i"}, Right: &ast.IntegerLiteral{Value: 10}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil when left is not _i_ prefix")
+	}
+}
+
+func TestFindArrayPreallocCandidateRightIsCall(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.CallExpression{Function: &ast.Identifier{Value: "len"}}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil when right is a call expression")
+	}
+}
+
+func TestFindArrayPreallocCandidateRightNotIntOrCall(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.Identifier{Value: "n"}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil when right is neither integer nor call")
+	}
+}
+
+func TestFindArrayPreallocCandidateCapacityTooLarge(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.IntegerLiteral{Value: 2000000}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.ExpressionStatement{Expression: &ast.CallExpression{
+				Function: &ast.MemberAccess{Object: &ast.Identifier{Value: "lst"}, Member: &ast.Identifier{Value: "append"}},
+				Arguments: []ast.Expression{&ast.IntegerLiteral{Value: 1}},
+			}},
+		}},
+	})
+	if result != nil {
+		t.Error("expected nil for capacity > 1000000")
+	}
+}
+
+func TestFindArrayPreallocCandidateNoAppend(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.IntegerLiteral{Value: 10}},
+		Body:      &ast.BlockStatement{},
+	})
+	if result != nil {
+		t.Error("expected nil when no append calls found")
+	}
+}
+
+func TestFindArrayPreallocCandidateValid(t *testing.T) {
+	c := newTestCompiler()
+	result := c.findArrayPreallocCandidate(&ast.WhileStatement{
+		Condition: &ast.InfixExpression{Operator: "<", Left: &ast.Identifier{Value: "_i_0"}, Right: &ast.IntegerLiteral{Value: 100}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.ExpressionStatement{Expression: &ast.CallExpression{
+				Function: &ast.MemberAccess{Object: &ast.Identifier{Value: "lst"}, Member: &ast.Identifier{Value: "append"}},
+				Arguments: []ast.Expression{&ast.IntegerLiteral{Value: 1}},
+			}},
+		}},
+	})
+	if result == nil {
+		t.Fatal("expected non-nil result for valid pattern")
+	}
+	if result.varName != "lst" {
+		t.Errorf("expected varName 'lst', got %q", result.varName)
+	}
+	if result.capacity != 100 {
+		t.Errorf("expected capacity 100, got %d", result.capacity)
+	}
+}
+
+// =============================================================================
+// 67. Additional coverage: Compile - AwaitExpression
+// =============================================================================
+
+func TestCompileAwaitExpressionV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("coro")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.AwaitExpression{
+			Value: &ast.Identifier{Value: "coro"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpAwait) {
+		t.Error("expected OpAwait in instructions")
+	}
+}
+
+// =============================================================================
+// 68. Additional coverage: Compile - YieldStatement with expression
+// =============================================================================
+
+func TestCompileYieldStatementWithExpression(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.YieldStatement{
+		Expression: &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpYieldValue) {
+		t.Error("expected OpYieldValue in instructions")
+	}
+}
+
+func TestCompileYieldStatementWithoutExpression(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.YieldStatement{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpYieldValue) {
+		t.Error("expected OpYieldValue in instructions")
+	}
+}
+
+// =============================================================================
+// 69. Additional coverage: Compile - ComplexLiteral
+// =============================================================================
+
+func TestCompileComplexLiteralV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.ComplexLiteral{Value: "3.14j"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 70. Additional coverage: Compile - ByteStringLiteral
+// =============================================================================
+
+func TestCompileByteStringLiteralV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.ByteStringLiteral{Value: "hello"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 71. Additional coverage: Compile - EllipsisLiteral
+// =============================================================================
+
+func TestCompileEllipsisLiteralV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.EllipsisLiteral{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpEllipsis) {
+		t.Error("expected OpEllipsis in instructions")
+	}
+}
+
+// =============================================================================
+// 72. Additional coverage: Compile - FStringLiteral
+// =============================================================================
+
+func TestCompileFStringLiteralV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("name")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FStringLiteral{
+			Parts: []ast.Expression{
+				&ast.StringLiteral{Value: "hello "},
+				&ast.Identifier{Value: "name"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpFormatString) {
+		t.Error("expected OpFormatString in instructions")
+	}
+}
+
+// =============================================================================
+// 73. Additional coverage: Compile - DictionaryUnpack
+// =============================================================================
+
+func TestCompileDictionaryUnpackV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("d")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.DictionaryUnpack{
+			Value: &ast.Identifier{Value: "d"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpDictUnpack) {
+		t.Error("expected OpDictUnpack in instructions")
+	}
+}
+
+// =============================================================================
+// 74. Additional coverage: Compile - ListUnpack
+// =============================================================================
+
+func TestCompileListUnpackV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("lst")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.ListUnpack{
+			Value: &ast.Identifier{Value: "lst"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpListUnpack) {
+		t.Error("expected OpListUnpack in instructions")
+	}
+}
+
+// =============================================================================
+// 75. Additional coverage: Compile - AttributeAssignStatement
+// =============================================================================
+
+func TestCompileAttributeAssignStatementV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("obj")
+	err := c.Compile(&ast.AttributeAssignStatement{
+		Object: &ast.Identifier{Value: "obj"},
+		Attr:   &ast.Identifier{Value: "x"},
+		Value:  &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSetAttribute) {
+		t.Error("expected OpSetAttribute in instructions")
+	}
+}
+
+// =============================================================================
+// 76. Additional coverage: Compile - SliceAssignStatement
+// =============================================================================
+
+func TestCompileSliceAssignStatementV2(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("lst")
+	err := c.Compile(&ast.SliceAssignStatement{
+		Left:  &ast.Identifier{Value: "lst"},
+		Lower: &ast.IntegerLiteral{Value: 0},
+		Upper: &ast.IntegerLiteral{Value: 3},
+		Value: &ast.ListLiteral{Elements: []ast.Expression{&ast.IntegerLiteral{Value: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSetSlice) {
+		t.Error("expected OpSetSlice in instructions")
+	}
+}
+
+func TestCompileSliceAssignStatementWithStep(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("lst")
+	err := c.Compile(&ast.SliceAssignStatement{
+		Left:  &ast.Identifier{Value: "lst"},
+		Lower: &ast.IntegerLiteral{Value: 0},
+		Upper: &ast.IntegerLiteral{Value: 3},
+		Step:  &ast.IntegerLiteral{Value: 2},
+		Value: &ast.ListLiteral{Elements: []ast.Expression{&ast.IntegerLiteral{Value: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSetSlice) {
+		t.Error("expected OpSetSlice in instructions")
+	}
+}
+
+func TestCompileSliceAssignStatementNilBounds(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("lst")
+	err := c.Compile(&ast.SliceAssignStatement{
+		Left:  &ast.Identifier{Value: "lst"},
+		Lower: nil,
+		Upper: nil,
+		Step:  nil,
+		Value: &ast.ListLiteral{Elements: []ast.Expression{&ast.IntegerLiteral{Value: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSetSlice) {
+		t.Error("expected OpSetSlice in instructions")
+	}
+}
+
+// =============================================================================
+// 77. Additional coverage: Compile - WithStatement
+// =============================================================================
+
+func TestCompileWithStatement(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("ctx")
+	err := c.Compile(&ast.WithStatement{
+		Items: []*ast.ContextManagerItem{{
+			Expr: &ast.Identifier{Value: "ctx"},
+			Name: &ast.Identifier{Value: "f"},
+		}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.PassStatement{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpEnterContext) {
+		t.Error("expected OpEnterContext in instructions")
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpExitContext) {
+		t.Error("expected OpExitContext in instructions")
+	}
+}
+
+func TestCompileWithStatementNoName(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("ctx")
+	err := c.Compile(&ast.WithStatement{
+		Items: []*ast.ContextManagerItem{{
+			Expr: &ast.Identifier{Value: "ctx"},
+			Name: nil,
+		}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.PassStatement{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpEnterContext) {
+		t.Error("expected OpEnterContext in instructions")
+	}
+}
+
+// =============================================================================
+// 78. Additional coverage: Compile - RaiseStatement
+// =============================================================================
+
+func TestCompileRaiseStatementWithExpression(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.RaiseStatement{
+		Expression: &ast.Identifier{Value: "ValueError"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpRaise) {
+		t.Error("expected OpRaise in instructions")
+	}
+}
+
+func TestCompileRaiseStatementWithoutExpression(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.RaiseStatement{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpRaise) {
+		t.Error("expected OpRaise in instructions")
+	}
+}
+
+// =============================================================================
+// 79. Additional coverage: Compile - DeleteStatement with MemberAccess and Identifier
+// =============================================================================
+
+func TestCompileDeleteStatementMemberAccess(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("obj")
+	err := c.Compile(&ast.DeleteStatement{
+		Targets: []ast.Expression{
+			&ast.MemberAccess{Object: &ast.Identifier{Value: "obj"}, Member: &ast.Identifier{Value: "attr"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpDelAttribute) {
+		t.Error("expected OpDelAttribute in instructions")
+	}
+}
+
+func TestCompileDeleteStatementIdentifier(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("x")
+	err := c.Compile(&ast.DeleteStatement{
+		Targets: []ast.Expression{
+			&ast.Identifier{Value: "x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 80. Additional coverage: Compile - FunctionLiteral with free vars (closure path)
+// =============================================================================
+
+func TestCompileFunctionLiteralWithFreeVars(t *testing.T) {
+	c := newTestCompiler()
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("outer_var")
+	c.symbolTable = outer
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "inner", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ExpressionStatement{Expression: &ast.Identifier{Value: "outer_var"}},
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpClosure) {
+		t.Error("expected OpClosure for function with free variables")
+	}
+}
+
+// =============================================================================
+// 81. Additional coverage: Compile - FunctionLiteral with IsAsync
+// =============================================================================
+
+func TestCompileFunctionLiteralAsync(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "async_func", Parameters: []*ast.Identifier{},
+			IsAsync: true,
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeAsync) {
+		t.Error("expected OpMakeAsync for async function")
+	}
+}
+
+// =============================================================================
+// 82. Additional coverage: Compile - FunctionLiteral with VarArgs/KwArgs
+// =============================================================================
+
+func TestCompileFunctionLiteralWithVarArgs(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name:       "varfunc",
+			Parameters: []*ast.Identifier{{Value: "args"}},
+			VarArgs:    &ast.Identifier{Value: "args"},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCompileFunctionLiteralWithKwArgs(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name:       "kwfunc",
+			Parameters: []*ast.Identifier{{Value: "kwargs"}},
+			KwArgs:     &ast.Identifier{Value: "kwargs"},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 83. Additional coverage: Compile - FunctionLiteral with generator (yield)
+// =============================================================================
+
+func TestCompileFunctionLiteralGenerator(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "gen", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.YieldStatement{Expression: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpMakeGenerator) {
+		t.Error("expected OpMakeGenerator for generator function")
+	}
+}
+
+// =============================================================================
+// 84. Additional coverage: Compile - FunctionLiteral with GlobalStatement/NonlocalStatement
+// =============================================================================
+
+func TestCompileFunctionLiteralWithGlobalStatement(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "f", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.GlobalStatement{Names: []*ast.Identifier{{Value: "x"}}},
+				&ast.AssignStatement{Names: []*ast.Identifier{{Value: "x"}}, Value: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCompileFunctionLiteralWithNonlocalStatement(t *testing.T) {
+	c := newTestCompiler()
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("x")
+	c.symbolTable = outer
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "f", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.NonlocalStatement{Names: []*ast.Identifier{{Value: "x"}}},
+				&ast.AssignStatement{Names: []*ast.Identifier{{Value: "x"}}, Value: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 85. Additional coverage: Compile - Identifier Ellipsis
+// =============================================================================
+
+func TestCompileIdentifierEllipsis(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.Identifier{Value: "Ellipsis"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpEllipsis) {
+		t.Error("expected OpEllipsis for Ellipsis identifier")
+	}
+}
+
+// =============================================================================
+// 86. Additional coverage: Compile - SetLiteral
+// =============================================================================
+
+func TestCompileSetLiteralV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.SetLiteral{
+			Elements: []ast.Expression{
+				&ast.IntegerLiteral{Value: 1},
+				&ast.IntegerLiteral{Value: 2},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSet) {
+		t.Error("expected OpSet in instructions")
+	}
+}
+
+// =============================================================================
+// 87. Additional coverage: Compile - LambdaExpression
+// =============================================================================
+
+func TestCompileLambdaExpressionV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.LambdaExpression{
+			Parameters: []*ast.Identifier{{Value: "x"}},
+			Body:       &ast.Identifier{Value: "x"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 88. Additional coverage: Compile - CallExpression with keyword arguments
+// =============================================================================
+
+func TestCompileCallExpressionWithKwargs(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("f")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.CallExpression{
+			Function: &ast.Identifier{Value: "f"},
+			Arguments: []ast.Expression{
+				&ast.IntegerLiteral{Value: 1},
+				&ast.KeywordArgument{Name: &ast.Identifier{Value: "key"}, Value: &ast.IntegerLiteral{Value: 2}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpHash) {
+		t.Error("expected OpHash for keyword arguments")
+	}
+}
+
+// =============================================================================
+// 89. Additional coverage: Compile - NamedExpression (walrus operator)
+// =============================================================================
+
+func TestCompileNamedExpressionV2(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.NamedExpression{
+			Name:  &ast.Identifier{Value: "x"},
+			Value: &ast.IntegerLiteral{Value: 42},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpDupTop) {
+		t.Error("expected OpDupTop for named expression")
+	}
+}
+
+// =============================================================================
+// 90. Additional coverage: Compile - IndexExpression with slice
+// =============================================================================
+
+func TestCompileIndexExpressionWithSliceNilBounds(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("lst")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.IndexExpression{
+			Left: &ast.Identifier{Value: "lst"},
+			Index: &ast.SliceExpression{
+				Lower: nil,
+				Upper: nil,
+				Step:  nil,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpSlice) {
+		t.Error("expected OpSlice in instructions")
+	}
+}
+
+// =============================================================================
+// 91. Additional coverage: Compile - InfixExpression more operators
+// =============================================================================
+
+func TestCompileInfixExpressionBitwise(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	ops := []string{"|", "&", "^"}
+	for _, op := range ops {
+		c2 := newTestCompiler()
+		c2.symbolTable.Define("a")
+		c2.symbolTable.Define("b")
+		err := c2.Compile(&ast.ExpressionStatement{
+			Expression: &ast.InfixExpression{
+				Left:     &ast.Identifier{Value: "a"},
+				Operator: op,
+				Right:    &ast.Identifier{Value: "b"},
+			},
+		})
+		if err != nil {
+			t.Errorf("unexpected error for operator %s: %v", op, err)
+		}
+	}
+}
+
+func TestCompileInfixExpressionFloorDiv(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.InfixExpression{
+			Left:     &ast.Identifier{Value: "a"},
+			Operator: "//",
+			Right:    &ast.Identifier{Value: "b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCompileInfixExpressionPower(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.InfixExpression{
+			Left:     &ast.Identifier{Value: "a"},
+			Operator: "**",
+			Right:    &ast.Identifier{Value: "b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 92. Additional coverage: Compile - AugAssignStatement with StringBuilder
+// =============================================================================
+
+func TestCompileAugAssignStringBuilderOptimization(t *testing.T) {
+	c := newTestCompiler()
+	// StringBuilder optimization requires s to be a local variable in an enclosed scope
+	outer := NewEnclosedSymbolTable(c.symbolTable)
+	outer.Define("s")
+	c.symbolTable = outer
+	// Create a while loop with string builder optimization
+	err := c.Compile(&ast.WhileStatement{
+		Condition: &ast.Boolean{Value: true},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.AugAssignStatement{Name: &ast.Identifier{Value: "s"}, Operator: "+", Value: &ast.StringLiteral{Value: "x"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 93. Additional coverage: Register compiler - TernaryExpression
+// =============================================================================
+
+func TestRegCompilerTernaryExpression(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("x")
+	_, err := rc.compileExpr(&ast.TernaryExpression{
+		Condition:  &ast.Boolean{Value: true},
+		Consequence: &ast.IntegerLiteral{Value: 1},
+		Alternative: &ast.IntegerLiteral{Value: 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 94. Additional coverage: Register compiler - AwaitExpression
+// =============================================================================
+
+func TestRegCompilerAwaitExpression(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("coro")
+	_, err := rc.compileExpr(&ast.AwaitExpression{
+		Value: &ast.Identifier{Value: "coro"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpAwait) {
+		t.Error("expected ROpAwait in instructions")
+	}
+}
+
+// =============================================================================
+// 95. Additional coverage: Register compiler - DictionaryUnpack
+// =============================================================================
+
+func TestRegCompilerDictionaryUnpack(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("d")
+	_, err := rc.compileExpr(&ast.DictionaryUnpack{
+		Value: &ast.Identifier{Value: "d"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 96. Additional coverage: Register compiler - ListUnpack
+// =============================================================================
+
+func TestRegCompilerListUnpack(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("lst")
+	_, err := rc.compileExpr(&ast.ListUnpack{
+		Value: &ast.Identifier{Value: "lst"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 97. Additional coverage: Register compiler - SpreadItem
+// =============================================================================
+
+func TestRegCompilerSpreadItem(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("items")
+	_, err := rc.compileExpr(&ast.SpreadItem{
+		Value: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 98. Additional coverage: Register compiler - YieldStatement in compileExpr
+// =============================================================================
+
+func TestRegCompilerYieldStatementInExpr(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.YieldStatement{
+		Expression: &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpYieldValue) {
+		t.Error("expected ROpYieldValue in instructions")
+	}
+}
+
+func TestRegCompilerYieldStatementNilInExpr(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.YieldStatement{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpYieldValue) {
+		t.Error("expected ROpYieldValue in instructions")
+	}
+}
+
+// =============================================================================
+// 99. Additional coverage: Register compiler - ComplexLiteral
+// =============================================================================
+
+func TestRegCompilerComplexLiteral(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.ComplexLiteral{Value: "2.5j"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 100. Additional coverage: Register compiler - ByteStringLiteral
+// =============================================================================
+
+func TestRegCompilerByteStringLiteral(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.ByteStringLiteral{Value: "hello"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 101. Additional coverage: Register compiler - FStringLiteral
+// =============================================================================
+
+func TestRegCompilerFStringLiteral(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("name")
+	_, err := rc.compileExpr(&ast.FStringLiteral{
+		Parts: []ast.Expression{
+			&ast.StringLiteral{Value: "hello "},
+			&ast.Identifier{Value: "name"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpFormatString) {
+		t.Error("expected ROpFormatString in instructions")
+	}
+}
+
+// =============================================================================
+// 102. Additional coverage: Register compiler - EllipsisLiteral
+// =============================================================================
+
+func TestRegCompilerEllipsisLiteral(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.EllipsisLiteral{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpEllipsis) {
+		t.Error("expected ROpEllipsis in instructions")
+	}
+}
+
+// =============================================================================
+// 103. Additional coverage: Register compiler - KeywordArgument
+// =============================================================================
+
+func TestRegCompilerKeywordArgument(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.KeywordArgument{
+		Name:  &ast.Identifier{Value: "key"},
+		Value: &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 104. Additional coverage: Register compiler - Comprehension types
+// =============================================================================
+
+func TestRegCompilerListComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.ListComprehension{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerSetComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.SetComprehension{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerDictComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.DictComprehension{
+		Key:      &ast.Identifier{Value: "k"},
+		Value:    &ast.Identifier{Value: "v"},
+		Variable: &ast.Identifier{Value: "k"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerGeneratorExpression(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.GeneratorExpression{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerAsyncListComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.AsyncListComprehension{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerAsyncSetComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.AsyncSetComprehension{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerAsyncDictComprehension(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.AsyncDictComprehension{
+		Key:      &ast.Identifier{Value: "k"},
+		Value:    &ast.Identifier{Value: "v"},
+		Variable: &ast.Identifier{Value: "k"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerAsyncGeneratorExpression(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.AsyncGeneratorExpression{
+		Element:  &ast.Identifier{Value: "x"},
+		Variable: &ast.Identifier{Value: "x"},
+		Iterable: &ast.Identifier{Value: "items"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 105. Additional coverage: Register compiler - compileStmt more cases
+// =============================================================================
+
+func TestRegCompilerWithStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("ctx")
+	err := rc.Compile(&ast.WithStatement{
+		Items: []*ast.ContextManagerItem{{
+			Expr: &ast.Identifier{Value: "ctx"},
+			Name: &ast.Identifier{Value: "f"},
+		}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.PassStatement{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpEnterContext) {
+		t.Error("expected ROpEnterContext in instructions")
+	}
+}
+
+func TestRegCompilerAsyncWithStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("ctx")
+	err := rc.Compile(&ast.AsyncWithStatement{
+		Items: []*ast.ContextManagerItem{{
+			Expr: &ast.Identifier{Value: "ctx"},
+			Name: &ast.Identifier{Value: "f"},
+		}},
+		Body: &ast.BlockStatement{Statements: []ast.Statement{
+			&ast.PassStatement{},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpEnterContext) {
+		t.Error("expected ROpEnterContext in instructions")
+	}
+}
+
+func TestRegCompilerYieldFromStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("gen")
+	err := rc.Compile(&ast.YieldFromStatement{
+		Expression: &ast.Identifier{Value: "gen"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpYieldValue) {
+		t.Error("expected ROpYieldValue in instructions")
+	}
+}
+
+func TestRegCompilerRaiseStatementWithExpr(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("ValueError")
+	err := rc.Compile(&ast.RaiseStatement{
+		Expression: &ast.Identifier{Value: "ValueError"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpRaise) {
+		t.Error("expected ROpRaise in instructions")
+	}
+}
+
+func TestRegCompilerRaiseStatementWithoutExpr(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.RaiseStatement{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpRaise) {
+		t.Error("expected ROpRaise in instructions")
+	}
+}
+
+func TestRegCompilerAttributeAssignStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("obj")
+	err := rc.Compile(&ast.AttributeAssignStatement{
+		Object: &ast.Identifier{Value: "obj"},
+		Attr:   &ast.Identifier{Value: "x"},
+		Value:  &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpSetAttr) {
+		t.Error("expected ROpSetAttr in instructions")
+	}
+}
+
+func TestRegCompilerIndexAssignStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("d")
+	err := rc.Compile(&ast.IndexAssignStatement{
+		Left:  &ast.Identifier{Value: "d"},
+		Index: &ast.StringLiteral{Value: "key"},
+		Value: &ast.IntegerLiteral{Value: 42},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpSetIndex) {
+		t.Error("expected ROpSetIndex in instructions")
+	}
+}
+
+func TestRegCompilerSliceAssignStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("lst")
+	err := rc.Compile(&ast.SliceAssignStatement{
+		Left:  &ast.Identifier{Value: "lst"},
+		Lower: &ast.IntegerLiteral{Value: 0},
+		Upper: &ast.IntegerLiteral{Value: 3},
+		Value: &ast.ListLiteral{Elements: []ast.Expression{&ast.IntegerLiteral{Value: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpSetSlice) {
+		t.Error("expected ROpSetSlice in instructions")
+	}
+}
+
+func TestRegCompilerSliceAssignStatementNilBounds(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("lst")
+	err := rc.Compile(&ast.SliceAssignStatement{
+		Left:  &ast.Identifier{Value: "lst"},
+		Lower: nil,
+		Upper: nil,
+		Step:  nil,
+		Value: &ast.ListLiteral{Elements: []ast.Expression{&ast.IntegerLiteral{Value: 1}}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpSetSlice) {
+		t.Error("expected ROpSetSlice in instructions")
+	}
+}
+
+func TestRegCompilerDeleteStatementMemberAccess(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("obj")
+	err := rc.Compile(&ast.DeleteStatement{
+		Targets: []ast.Expression{
+			&ast.MemberAccess{Object: &ast.Identifier{Value: "obj"}, Member: &ast.Identifier{Value: "attr"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpDelAttribute) {
+		t.Error("expected ROpDelAttribute in instructions")
+	}
+}
+
+// =============================================================================
+// 106. Additional coverage: Register compiler - ClassStatement with SuperClass
+// =============================================================================
+
+func TestRegCompilerClassStatementWithSuperClass(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("Base")
+	err := rc.Compile(&ast.ClassStatement{
+		Name:       &ast.Identifier{Value: "MyClass"},
+		SuperClass: &ast.Identifier{Value: "Base"},
+		Body:       &ast.BlockStatement{},
+		Methods:    []*ast.FunctionLiteral{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpCreateClassWithSuper) {
+		t.Error("expected ROpCreateClassWithSuper in instructions")
+	}
+}
+
+// =============================================================================
+// 107. Additional coverage: Register compiler - FromImportStatement
+// =============================================================================
+
+func TestRegCompilerFromImportStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.FromImportStatement{
+		Module: &ast.Identifier{Value: "math"},
+		Names:  []*ast.Identifier{{Value: "sqrt"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerFromImportStatementWithAlias(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.FromImportStatement{
+		Module: &ast.Identifier{Value: "math"},
+		Alias:  &ast.Identifier{Value: "m"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 108. Additional coverage: Register compiler - FunctionLiteral with GlobalStatement
+// =============================================================================
+
+func TestRegCompilerFunctionWithGlobalStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "f", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.GlobalStatement{Names: []*ast.Identifier{{Value: "x"}}},
+				&ast.AssignStatement{Names: []*ast.Identifier{{Value: "x"}}, Value: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegCompilerFunctionWithNonlocalStatement(t *testing.T) {
+	rc := newTestRegCompiler()
+	outer := NewEnclosedSymbolTable(rc.symbolTable)
+	outer.Define("x")
+	rc.symbolTable = outer
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "f", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.NonlocalStatement{Names: []*ast.Identifier{{Value: "x"}}},
+				&ast.AssignStatement{Names: []*ast.Identifier{{Value: "x"}}, Value: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 109. Additional coverage: Register compiler - FunctionLiteral with IsAsync and IsGenerator
+// =============================================================================
+
+func TestRegCompilerFunctionAsync(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "async_func", Parameters: []*ast.Identifier{},
+			IsAsync: true,
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpMakeAsync) {
+		t.Error("expected ROpMakeAsync for async function")
+	}
+}
+
+func TestRegCompilerFunctionGenerator(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name: "gen", Parameters: []*ast.Identifier{},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.YieldStatement{Expression: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpMakeGenerator) {
+		t.Error("expected ROpMakeGenerator for generator function")
+	}
+}
+
+// =============================================================================
+// 110. Additional coverage: Register compiler - LambdaExpression
+// =============================================================================
+
+func TestRegCompilerLambdaExpression(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.LambdaExpression{
+		Parameters: []*ast.Identifier{{Value: "x"}},
+		Body:       &ast.Identifier{Value: "x"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 111. Additional coverage: Register compiler - compileExpr nil node
+// =============================================================================
+
+func TestRegCompilerCompileExprNil(t *testing.T) {
+	rc := newTestRegCompiler()
+	reg, err := rc.compileExpr(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reg < 0 {
+		t.Errorf("expected non-negative register, got %d", reg)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpNull) {
+		t.Error("expected ROpNull for nil expression")
+	}
+}
+
+// =============================================================================
+// 112. Additional coverage: Register compiler - MethodCall
+// =============================================================================
+
+func TestRegCompilerMethodCall(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("obj")
+	_, err := rc.compileExpr(&ast.MethodCall{
+		Object:   &ast.Identifier{Value: "obj"},
+		Method:   &ast.Identifier{Value: "method"},
+		Arguments: []ast.Expression{&ast.IntegerLiteral{Value: 1}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 113. Additional coverage: Serialization - Float and Boolean constants
+// =============================================================================
+
+func TestSerializeDeserializeFloatConstant(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.Compile(&ast.ExpressionStatement{Expression: &ast.FloatLiteral{Value: 3.14}})
+	bc := rc.Bytecode()
+	data, err := SerializeRegBytecode(bc)
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	decoded, err := DeserializeRegBytecode(data)
+	if err != nil {
+		t.Fatalf("deserialization error: %v", err)
+	}
+	hasFloat := false
+	for _, c := range decoded.Constants {
+		if _, ok := c.(*objects.Float); ok {
+			hasFloat = true
+			break
+		}
+	}
+	if !hasFloat {
+		t.Error("expected Float constant in decoded bytecode")
+	}
+}
+
+func TestSerializeDeserializeBooleanConstants(t *testing.T) {
+	rc := newTestRegCompiler()
+	// Manually add boolean constants to test serialization
+	rc.addConstant(&objects.Boolean{Value: true})
+	rc.addConstant(&objects.Boolean{Value: false})
+	bc := rc.Bytecode()
+	data, err := SerializeRegBytecode(bc)
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	decoded, err := DeserializeRegBytecode(data)
+	if err != nil {
+		t.Fatalf("deserialization error: %v", err)
+	}
+	hasTrue := false
+	hasFalse := false
+	for _, c := range decoded.Constants {
+		if b, ok := c.(*objects.Boolean); ok {
+			if b.Value {
+				hasTrue = true
+			} else {
+				hasFalse = true
+			}
+		}
+	}
+	if !hasTrue {
+		t.Error("expected Boolean(true) constant in decoded bytecode")
+	}
+	if !hasFalse {
+		t.Error("expected Boolean(false) constant in decoded bytecode")
+	}
+}
+
+func TestSerializeDeserializeNullConstant(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.Compile(&ast.ExpressionStatement{Expression: &ast.Identifier{Value: "None"}})
+	bc := rc.Bytecode()
+	data, err := SerializeRegBytecode(bc)
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	decoded, err := DeserializeRegBytecode(data)
+	if err != nil {
+		t.Fatalf("deserialization error: %v", err)
+	}
+	hasNone := false
+	for _, c := range decoded.Constants {
+		if _, ok := c.(*objects.None); ok {
+			hasNone = true
+			break
+		}
+	}
+	if !hasNone {
+		t.Error("expected None constant in decoded bytecode")
+	}
+}
+
+// =============================================================================
+// 114. Additional coverage: Serialization - DeserializeRegBytecode errors
+// =============================================================================
+
+func TestDeserializeRegBytecodeInvalidMagic(t *testing.T) {
+	data := []byte("INVALID")
+	_, err := DeserializeRegBytecode(data)
+	if err == nil {
+		t.Error("expected error for invalid magic")
+	}
+}
+
+func TestDeserializeRegBytecodeInvalidVersion(t *testing.T) {
+	data := []byte("GPYC")
+	data = append(data, 0, 2) // version 2 (invalid)
+	_, err := DeserializeRegBytecode(data)
+	if err == nil {
+		t.Error("expected error for invalid version")
+	}
+}
+
+func TestDeserializeRegBytecodeTruncatedData(t *testing.T) {
+	data := []byte("GPYC")
+	data = append(data, 0, 1) // version 1
+	data = append(data, 0, 10) // numRegs
+	// Missing numConstants - truncated
+	_, err := DeserializeRegBytecode(data)
+	if err == nil {
+		t.Error("expected error for truncated data")
+	}
+}
+
+// =============================================================================
+// 115. Additional coverage: Serialization - round trip with instructions
+// =============================================================================
+
+func TestSerializeDeserializeWithInstructions(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.Compile(&ast.ExpressionStatement{Expression: &ast.IntegerLiteral{Value: 42}})
+	rc.Compile(&ast.ExpressionStatement{Expression: &ast.StringLiteral{Value: "hello"}})
+	bc := rc.Bytecode()
+	data, err := SerializeRegBytecode(bc)
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	decoded, err := DeserializeRegBytecode(data)
+	if err != nil {
+		t.Fatalf("deserialization error: %v", err)
+	}
+	if len(decoded.Instructions) == 0 {
+		t.Error("expected non-empty instructions in decoded bytecode")
+	}
+	if decoded.NumRegs <= 0 {
+		t.Error("expected positive NumRegs in decoded bytecode")
+	}
+}
+
+// =============================================================================
+// 116. Additional coverage: SymbolTable - Define with existing global
+// =============================================================================
+
+func TestSymbolTableDefineRedefinedGlobal(t *testing.T) {
+	st := NewSymbolTable()
+	st.Define("x") // first definition - global
+	sym := st.Define("x") // redefine - should return existing
+	if sym.Scope != GlobalScope {
+		t.Errorf("expected GlobalScope, got %v", sym.Scope)
+	}
+}
+
+func TestSymbolTableDefineInEnclosedScope(t *testing.T) {
+	global := NewSymbolTable()
+	inner := NewEnclosedSymbolTable(global)
+	sym := inner.Define("x")
+	if sym.Scope != LocalScope {
+		t.Errorf("expected LocalScope, got %v", sym.Scope)
+	}
+}
+
+// =============================================================================
+// 117. Additional coverage: Compile - MatchStatement error
+// =============================================================================
+
+func TestCompileMatchStatementError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.MatchStatement{})
+	if err == nil {
+		t.Error("expected error for match statement")
+	}
+}
+
+// =============================================================================
+// 118. Additional coverage: Compile - ForStatement/BreakStatement/ContinueStatement errors
+// =============================================================================
+
+func TestCompileForStatementError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ForStatement{})
+	if err == nil {
+		t.Error("expected error for for statement")
+	}
+}
+
+func TestCompileBreakStatementError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.BreakStatement{})
+	if err == nil {
+		t.Error("expected error for break statement")
+	}
+}
+
+func TestCompileContinueStatementError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ContinueStatement{})
+	if err == nil {
+		t.Error("expected error for continue statement")
+	}
+}
+
+// =============================================================================
+// 119. Additional coverage: Register compiler - ForStatement/BreakStatement/ContinueStatement errors
+// =============================================================================
+
+func TestRegCompilerForStatementError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ForStatement{})
+	if err == nil {
+		t.Error("expected error for for statement")
+	}
+}
+
+func TestRegCompilerBreakStatementError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.BreakStatement{})
+	if err == nil {
+		t.Error("expected error for break statement")
+	}
+}
+
+func TestRegCompilerContinueStatementError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ContinueStatement{})
+	if err == nil {
+		t.Error("expected error for continue statement")
+	}
+}
+
+func TestRegCompilerMatchStatementError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.MatchStatement{})
+	if err == nil {
+		t.Error("expected error for match statement")
+	}
+}
+
+func TestRegCompilerAsyncForStatementError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.AsyncForStatement{})
+	if err == nil {
+		t.Error("expected error for async for statement")
+	}
+}
+
+// =============================================================================
+// 120. Additional coverage: Compile - InfixExpression with < operator
+// =============================================================================
+
+func TestCompileInfixExpressionLessThan(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.InfixExpression{
+			Left:     &ast.Identifier{Value: "a"},
+			Operator: "<",
+			Right:    &ast.Identifier{Value: "b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasOpcode(c.Bytecode().Instructions, OpGreaterThan) {
+		t.Error("expected OpGreaterThan for < operator (swapped operands)")
+	}
+}
+
+// =============================================================================
+// 121. Additional coverage: Compile - InfixExpression with and/or error
+// =============================================================================
+
+func TestCompileInfixExpressionAndError(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.InfixExpression{
+			Left:     &ast.Identifier{Value: "a"},
+			Operator: "and",
+			Right:    &ast.Identifier{Value: "b"},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for 'and' operator")
+	}
+}
+
+// =============================================================================
+// 122. Additional coverage: Compile - Identifier undefined variable error
+// =============================================================================
+
+func TestCompileIdentifierUndefinedError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.Identifier{Value: "undefined_var"},
+	})
+	if err == nil {
+		t.Error("expected error for undefined variable")
+	}
+}
+
+// =============================================================================
+// 123. Additional coverage: Compile - DeleteStatement undefined variable error
+// =============================================================================
+
+func TestCompileDeleteStatementUndefinedError(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.DeleteStatement{
+		Targets: []ast.Expression{
+			&ast.Identifier{Value: "undefined_var"},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for undefined variable in delete")
+	}
+}
+
+// =============================================================================
+// 124. Additional coverage: Register compiler - DeleteStatement undefined error
+// =============================================================================
+
+func TestRegCompilerDeleteStatementUndefinedError(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.DeleteStatement{
+		Targets: []ast.Expression{
+			&ast.Identifier{Value: "undefined_var"},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for undefined variable in delete")
+	}
+}
+
+// =============================================================================
+// 125. Additional coverage: Register compiler - ImportStatement with existing builtin
+// =============================================================================
+
+func TestRegCompilerImportStatementExistingBuiltin(t *testing.T) {
+	rc := newTestRegCompiler()
+	// "math" is already registered as a builtin
+	err := rc.Compile(&ast.ImportStatement{
+		Module: &ast.Identifier{Value: "math"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 126. Additional coverage: Register compiler - ImportStatement module not found
+// =============================================================================
+
+func TestRegCompilerImportStatementModuleNotFound(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ImportStatement{
+		Module: &ast.Identifier{Value: "nonexistent_module"},
+	})
+	if err == nil {
+		t.Error("expected error for nonexistent module")
+	}
+}
+
+// =============================================================================
+// 127. Additional coverage: Register compiler - FromImportStatement module not found
+// =============================================================================
+
+func TestRegCompilerFromImportStatementModuleNotFound(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.FromImportStatement{
+		Module: &ast.Identifier{Value: "nonexistent_module"},
+		Names:  []*ast.Identifier{{Value: "foo"}},
+	})
+	if err == nil {
+		t.Error("expected error for nonexistent module")
+	}
+}
+
+// =============================================================================
+// 128. Additional coverage: Register compiler - FromImportStatement name not found
+// =============================================================================
+
+func TestRegCompilerFromImportStatementNameNotFound(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.FromImportStatement{
+		Module: &ast.Identifier{Value: "math"},
+		Names:  []*ast.Identifier{{Value: "nonexistent_name"}},
+	})
+	if err == nil {
+		t.Error("expected error for nonexistent name in module")
+	}
+}
+
+// =============================================================================
+// 129. Additional coverage: Compile - ImportStatement module not found
+// =============================================================================
+
+func TestCompileImportStatementModuleNotFound(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.ImportStatement{
+		Module: &ast.Identifier{Value: "nonexistent_module"},
+	})
+	if err == nil {
+		t.Error("expected error for nonexistent module")
+	}
+}
+
+// =============================================================================
+// 130. Additional coverage: Compile - FromImportStatement module not found
+// =============================================================================
+
+func TestCompileFromImportStatementModuleNotFound(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(&ast.FromImportStatement{
+		Module: &ast.Identifier{Value: "nonexistent_module"},
+		Names:  []*ast.Identifier{{Value: "foo"}},
+	})
+	if err == nil {
+		t.Error("expected error for nonexistent module")
+	}
+}
+
+// =============================================================================
+// 131. Additional coverage: Register compiler - Identifier undefined error
+// =============================================================================
+
+func TestRegCompilerIdentifierUndefinedError(t *testing.T) {
+	rc := newTestRegCompiler()
+	_, err := rc.compileExpr(&ast.Identifier{Value: "undefined_var"})
+	if err == nil {
+		t.Error("expected error for undefined variable")
+	}
+}
+
+// =============================================================================
+// 132. Additional coverage: Register compiler - InfixExpression unknown operator
+// =============================================================================
+
+func TestRegCompilerInfixExpressionUnknownOperator(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("a")
+	rc.symbolTable.Define("b")
+	_, err := rc.compileExpr(&ast.InfixExpression{
+		Left:     &ast.Identifier{Value: "a"},
+		Operator: "<<<",
+		Right:    &ast.Identifier{Value: "b"},
+	})
+	if err == nil {
+		t.Error("expected error for unknown operator")
+	}
+}
+
+// =============================================================================
+// 133. Additional coverage: Compile - InfixExpression unknown operator
+// =============================================================================
+
+func TestCompileInfixExpressionUnknownOperator(t *testing.T) {
+	c := newTestCompiler()
+	c.symbolTable.Define("a")
+	c.symbolTable.Define("b")
+	err := c.Compile(&ast.ExpressionStatement{
+		Expression: &ast.InfixExpression{
+			Left:     &ast.Identifier{Value: "a"},
+			Operator: "<<<",
+			Right:    &ast.Identifier{Value: "b"},
+		},
+	})
+	if err == nil {
+		t.Error("expected error for unknown operator")
+	}
+}
+
+// =============================================================================
+// 134. Additional coverage: Register compiler - compileStmt nil node
+// =============================================================================
+
+func TestRegCompilerCompileStmtNil(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.compileStmt(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 135. Additional coverage: Register compiler - compileStmt default case (expression as statement)
+// =============================================================================
+
+func TestRegCompilerCompileStmtDefaultCase(t *testing.T) {
+	rc := newTestRegCompiler()
+	// Use an AST node that falls through to the default case in compileStmt
+	err := rc.compileStmt(&ast.AwaitExpression{
+		Value: &ast.Identifier{Value: "None"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 136. Additional coverage: Compile - nil node
+// =============================================================================
+
+func TestCompileNilNode(t *testing.T) {
+	c := newTestCompiler()
+	err := c.Compile(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 137. Additional coverage: Register compiler - ClassStatement with Metaclass
+// =============================================================================
+
+func TestRegCompilerClassStatementWithMetaclass(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("Meta")
+	err := rc.Compile(&ast.ClassStatement{
+		Name:      &ast.Identifier{Value: "MyClass"},
+		Metaclass: &ast.Identifier{Value: "Meta"},
+		Body:      &ast.BlockStatement{},
+		Methods:   []*ast.FunctionLiteral{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpSetMetaclass) {
+		t.Error("expected ROpSetMetaclass in instructions")
+	}
+}
+
+// =============================================================================
+// 138. Additional coverage: Register compiler - ClassStatement with SuperClasses (multiple inheritance)
+// =============================================================================
+
+func TestRegCompilerClassStatementWithSuperClasses(t *testing.T) {
+	rc := newTestRegCompiler()
+	rc.symbolTable.Define("Base1")
+	rc.symbolTable.Define("Base2")
+	err := rc.Compile(&ast.ClassStatement{
+		Name:        &ast.Identifier{Value: "MyClass"},
+		SuperClass:  &ast.Identifier{Value: "Base1"},
+		SuperClasses: []*ast.Identifier{{Value: "Base1"}, {Value: "Base2"}},
+		Body:        &ast.BlockStatement{},
+		Methods:     []*ast.FunctionLiteral{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasRegOpcode(rc.Instructions(), ROpCreateClassWithMultiSuper) {
+		t.Error("expected ROpCreateClassWithMultiSuper in instructions")
+	}
+}
+
+// =============================================================================
+// 139. Additional coverage: Register compiler - FunctionLiteral with defaults and keyword-only
+// =============================================================================
+
+func TestRegCompilerFunctionWithDefaultsAndKeywordOnly(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name:       "f",
+			Parameters: []*ast.Identifier{{Value: "a"}, {Value: "b"}, {Value: "c"}},
+			Defaults:   []ast.Expression{nil, &ast.IntegerLiteral{Value: 2}, &ast.IntegerLiteral{Value: 3}},
+			KeywordOnly: []bool{false, false, true},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// =============================================================================
+// 140. Additional coverage: Register compiler - FunctionLiteral with PositionalOnly
+// =============================================================================
+
+func TestRegCompilerFunctionWithPositionalOnly(t *testing.T) {
+	rc := newTestRegCompiler()
+	err := rc.Compile(&ast.ExpressionStatement{
+		Expression: &ast.FunctionLiteral{
+			Name:          "f",
+			Parameters:    []*ast.Identifier{{Value: "a"}, {Value: "b"}},
+			PositionalOnly: []bool{true, false},
+			Body: &ast.BlockStatement{Statements: []ast.Statement{
+				&ast.ReturnStatement{ReturnValue: &ast.IntegerLiteral{Value: 1}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCompileRaiseStatement(t *testing.T) {
 	bc, err := compileProgram(&ast.RaiseStatement{Expression: &ast.Identifier{Value: "ValueError"}})
 	if err != nil {
@@ -924,7 +3746,7 @@ func TestCompileRaiseStatementNil(t *testing.T) {
 	}
 }
 
-func TestCompileDeleteStatementIdentifier(t *testing.T) {
+func TestCompileDeleteStatementIdentifierV2(t *testing.T) {
 	c := newTestCompiler()
 	c.symbolTable.Define("x")
 	err := c.Compile(&ast.DeleteStatement{Targets: []ast.Expression{&ast.Identifier{Value: "x"}}})
@@ -942,7 +3764,7 @@ func TestCompileDeleteStatementUndefined(t *testing.T) {
 	}
 }
 
-func TestCompileDeleteStatementMemberAccess(t *testing.T) {
+func TestCompileDeleteStatementMemberAccessV2(t *testing.T) {
 	c := newTestCompiler()
 	c.symbolTable.Define("obj")
 	err := c.Compile(&ast.DeleteStatement{
@@ -1024,7 +3846,7 @@ func TestCompileWhileStatement(t *testing.T) {
 	}
 }
 
-func TestCompileForStatementError(t *testing.T) {
+func TestCompileForStatementErrorV2(t *testing.T) {
 	err := newTestCompiler().Compile(&ast.ForStatement{
 		Value: &ast.Identifier{Value: "i"}, Iterable: &ast.Identifier{Value: "range"}, Body: &ast.BlockStatement{},
 	})
@@ -1033,21 +3855,21 @@ func TestCompileForStatementError(t *testing.T) {
 	}
 }
 
-func TestCompileBreakStatementError(t *testing.T) {
+func TestCompileBreakStatementErrorV2(t *testing.T) {
 	err := newTestCompiler().Compile(&ast.BreakStatement{})
 	if err == nil {
 		t.Fatal("expected error for break statement (should be desugared)")
 	}
 }
 
-func TestCompileContinueStatementError(t *testing.T) {
+func TestCompileContinueStatementErrorV2(t *testing.T) {
 	err := newTestCompiler().Compile(&ast.ContinueStatement{})
 	if err == nil {
 		t.Fatal("expected error for continue statement (should be desugared)")
 	}
 }
 
-func TestCompileMatchStatementError(t *testing.T) {
+func TestCompileMatchStatementErrorV2(t *testing.T) {
 	err := newTestCompiler().Compile(&ast.MatchStatement{
 		Subject: &ast.IntegerLiteral{Value: 1}, Cases: []*ast.CaseClause{},
 	})
@@ -1143,7 +3965,7 @@ func TestCompileFunctionLiteralWithGlobalNonlocal(t *testing.T) {
 	}
 }
 
-func TestCompileFunctionLiteralAsync(t *testing.T) {
+func TestCompileFunctionLiteralAsyncV2(t *testing.T) {
 	bc, err := compileProgram(&ast.ExpressionStatement{
 		Expression: &ast.FunctionLiteral{
 			Name: "asyncFunc", IsAsync: true, Parameters: []*ast.Identifier{},
@@ -1160,7 +3982,7 @@ func TestCompileFunctionLiteralAsync(t *testing.T) {
 	}
 }
 
-func TestCompileFunctionLiteralGenerator(t *testing.T) {
+func TestCompileFunctionLiteralGeneratorV2(t *testing.T) {
 	bc, err := compileProgram(&ast.ExpressionStatement{
 		Expression: &ast.FunctionLiteral{
 			Name: "gen", Parameters: []*ast.Identifier{},
@@ -1226,7 +4048,7 @@ func TestCompileTryStatementWithStarExcept(t *testing.T) {
 	}
 }
 
-func TestCompileWithStatement(t *testing.T) {
+func TestCompileWithStatementV2(t *testing.T) {
 	bc, err := compileProgram(&ast.WithStatement{
 		Items: []*ast.ContextManagerItem{{Expr: &ast.Identifier{Value: "open"}, Name: &ast.Identifier{Value: "f"}}},
 		Body: &ast.BlockStatement{Statements: []ast.Statement{&ast.PassStatement{}}},
@@ -1242,7 +4064,7 @@ func TestCompileWithStatement(t *testing.T) {
 	}
 }
 
-func TestCompileWithStatementNoName(t *testing.T) {
+func TestCompileWithStatementNoNameV2(t *testing.T) {
 	bc, err := compileProgram(&ast.WithStatement{
 		Items: []*ast.ContextManagerItem{{Expr: &ast.Identifier{Value: "open"}, Name: nil}},
 		Body: &ast.BlockStatement{Statements: []ast.Statement{&ast.PassStatement{}}},
@@ -1404,7 +4226,7 @@ func TestCompileFromImportStatementWithAlias(t *testing.T) {
 	}
 }
 
-func TestCompileNilNode(t *testing.T) {
+func TestCompileNilNodeV2(t *testing.T) {
 	err := newTestCompiler().Compile(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2082,7 +4904,7 @@ func TestRegCompilerMemberAccess(t *testing.T) {
 	}
 }
 
-func TestRegCompilerMethodCall(t *testing.T) {
+func TestRegCompilerMethodCallV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("lst")
 	err := rc.Compile(&ast.ExpressionStatement{
@@ -2099,7 +4921,7 @@ func TestRegCompilerMethodCall(t *testing.T) {
 	}
 }
 
-func TestRegCompilerComplexLiteral(t *testing.T) {
+func TestRegCompilerComplexLiteralV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{Expression: &ast.ComplexLiteral{Value: "2.5j"}})
 	if err != nil {
@@ -2107,7 +4929,7 @@ func TestRegCompilerComplexLiteral(t *testing.T) {
 	}
 }
 
-func TestRegCompilerByteStringLiteral(t *testing.T) {
+func TestRegCompilerByteStringLiteralV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{Expression: &ast.ByteStringLiteral{Value: "hello"}})
 	if err != nil {
@@ -2115,7 +4937,7 @@ func TestRegCompilerByteStringLiteral(t *testing.T) {
 	}
 }
 
-func TestRegCompilerFStringLiteral(t *testing.T) {
+func TestRegCompilerFStringLiteralV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{
 		Expression: &ast.FStringLiteral{Parts: []ast.Expression{&ast.StringLiteral{Value: "hello "}}},
@@ -2128,7 +4950,7 @@ func TestRegCompilerFStringLiteral(t *testing.T) {
 	}
 }
 
-func TestRegCompilerTernaryExpression(t *testing.T) {
+func TestRegCompilerTernaryExpressionV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{
 		Expression: &ast.TernaryExpression{
@@ -2157,7 +4979,7 @@ func TestRegCompilerNamedExpression(t *testing.T) {
 	}
 }
 
-func TestRegCompilerAwaitExpression(t *testing.T) {
+func TestRegCompilerAwaitExpressionV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("coro")
 	err := rc.Compile(&ast.ExpressionStatement{
@@ -2171,7 +4993,7 @@ func TestRegCompilerAwaitExpression(t *testing.T) {
 	}
 }
 
-func TestRegCompilerDictionaryUnpack(t *testing.T) {
+func TestRegCompilerDictionaryUnpackV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("d")
 	err := rc.Compile(&ast.ExpressionStatement{
@@ -2185,7 +5007,7 @@ func TestRegCompilerDictionaryUnpack(t *testing.T) {
 	}
 }
 
-func TestRegCompilerListUnpack(t *testing.T) {
+func TestRegCompilerListUnpackV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("lst")
 	err := rc.Compile(&ast.ExpressionStatement{
@@ -2231,7 +5053,7 @@ func TestRegCompilerComprehensionsReturnNull(t *testing.T) {
 	}
 }
 
-func TestRegCompilerKeywordArgument(t *testing.T) {
+func TestRegCompilerKeywordArgumentV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{
 		Expression: &ast.KeywordArgument{Name: &ast.Identifier{Value: "key"}, Value: &ast.IntegerLiteral{Value: 1}},
@@ -2241,7 +5063,7 @@ func TestRegCompilerKeywordArgument(t *testing.T) {
 	}
 }
 
-func TestRegCompilerSpreadItem(t *testing.T) {
+func TestRegCompilerSpreadItemV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("lst")
 	err := rc.Compile(&ast.ExpressionStatement{
@@ -2358,7 +5180,7 @@ func TestRegCompilerDeleteStatementUndefined(t *testing.T) {
 	}
 }
 
-func TestRegCompilerDeleteStatementMemberAccess(t *testing.T) {
+func TestRegCompilerDeleteStatementMemberAccessV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("obj")
 	err := rc.Compile(&ast.DeleteStatement{
@@ -2443,7 +5265,7 @@ func TestRegCompilerTryStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerWithStatement(t *testing.T) {
+func TestRegCompilerWithStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("open")
 	err := rc.Compile(&ast.WithStatement{
@@ -2478,7 +5300,7 @@ func TestRegCompilerGlobalNonlocalStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerForStatementError(t *testing.T) {
+func TestRegCompilerForStatementErrorV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ForStatement{
 		Value: &ast.Identifier{Value: "i"}, Iterable: &ast.Identifier{Value: "range"}, Body: &ast.BlockStatement{},
@@ -2498,7 +5320,7 @@ func TestRegCompilerBreakContinueError(t *testing.T) {
 	}
 }
 
-func TestRegCompilerMatchStatementError(t *testing.T) {
+func TestRegCompilerMatchStatementErrorV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.MatchStatement{Subject: &ast.IntegerLiteral{Value: 1}})
 	if err == nil {
@@ -2522,7 +5344,7 @@ func TestRegCompilerImportStatementNotFound(t *testing.T) {
 	}
 }
 
-func TestRegCompilerFromImportStatement(t *testing.T) {
+func TestRegCompilerFromImportStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.FromImportStatement{Module: &ast.Identifier{Value: "math"}, Names: []*ast.Identifier{{Value: "pi"}}})
 	if err != nil {
@@ -2538,7 +5360,7 @@ func TestRegCompilerFromImportStatementNotFound(t *testing.T) {
 	}
 }
 
-func TestRegCompilerFromImportStatementNameNotFound(t *testing.T) {
+func TestRegCompilerFromImportStatementNameNotFoundV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.FromImportStatement{Module: &ast.Identifier{Value: "math"}, Names: []*ast.Identifier{{Value: "nonexistent_name"}}})
 	if err == nil {
@@ -2546,7 +5368,7 @@ func TestRegCompilerFromImportStatementNameNotFound(t *testing.T) {
 	}
 }
 
-func TestRegCompilerYieldFromStatement(t *testing.T) {
+func TestRegCompilerYieldFromStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("gen")
 	err := rc.Compile(&ast.YieldFromStatement{Expression: &ast.Identifier{Value: "gen"}})
@@ -2555,7 +5377,7 @@ func TestRegCompilerYieldFromStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerAsyncForStatementError(t *testing.T) {
+func TestRegCompilerAsyncForStatementErrorV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.AsyncForStatement{
 		Value: &ast.Identifier{Value: "i"}, Iterable: &ast.Identifier{Value: "aiter"}, Body: &ast.BlockStatement{},
@@ -2565,7 +5387,7 @@ func TestRegCompilerAsyncForStatementError(t *testing.T) {
 	}
 }
 
-func TestRegCompilerAsyncWithStatement(t *testing.T) {
+func TestRegCompilerAsyncWithStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("cm")
 	err := rc.Compile(&ast.AsyncWithStatement{
@@ -2577,7 +5399,7 @@ func TestRegCompilerAsyncWithStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerAttributeAssignStatement(t *testing.T) {
+func TestRegCompilerAttributeAssignStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("obj")
 	err := rc.Compile(&ast.AttributeAssignStatement{
@@ -2591,7 +5413,7 @@ func TestRegCompilerAttributeAssignStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerIndexAssignStatement(t *testing.T) {
+func TestRegCompilerIndexAssignStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("d")
 	err := rc.Compile(&ast.IndexAssignStatement{
@@ -2605,7 +5427,7 @@ func TestRegCompilerIndexAssignStatement(t *testing.T) {
 	}
 }
 
-func TestRegCompilerSliceAssignStatement(t *testing.T) {
+func TestRegCompilerSliceAssignStatementV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("lst")
 	err := rc.Compile(&ast.SliceAssignStatement{
@@ -2687,7 +5509,7 @@ func TestRegCompilerFunctionLiteralGenerator(t *testing.T) {
 	}
 }
 
-func TestRegCompilerLambdaExpression(t *testing.T) {
+func TestRegCompilerLambdaExpressionV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	err := rc.Compile(&ast.ExpressionStatement{
 		Expression: &ast.LambdaExpression{Parameters: []*ast.Identifier{{Value: "x"}}, Body: &ast.Identifier{Value: "x"}},
@@ -3251,7 +6073,7 @@ func TestRegCompilerFunctionWithGlobalNonlocal(t *testing.T) {
 // 17. RegCompiler ClassStatement with metaclass and multi-super
 // =============================================================================
 
-func TestRegCompilerClassStatementWithMetaclass(t *testing.T) {
+func TestRegCompilerClassStatementWithMetaclassV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	rc.symbolTable.Define("Meta")
 	err := rc.Compile(&ast.ClassStatement{
@@ -3322,7 +6144,7 @@ func TestRegCompilerFromImportWithAlias(t *testing.T) {
 // 20. RegCompiler compileExpr nil node
 // =============================================================================
 
-func TestRegCompilerCompileExprNil(t *testing.T) {
+func TestRegCompilerCompileExprNilV2(t *testing.T) {
 	rc := newTestRegCompiler()
 	reg, err := rc.compileExpr(nil)
 	if err != nil {
