@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"math/cmplx"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
@@ -26,6 +28,7 @@ const (
 	LIST_OBJ         ObjectType = "LIST"
 	TUPLE_OBJ        ObjectType = "TUPLE"
 	SET_OBJ          ObjectType = "SET"
+	FROZENSET_OBJ    ObjectType = "FROZENSET"
 	DICT_OBJ         ObjectType = "DICT"
 	FUNCTION_OBJ     ObjectType = "FUNCTION"
 	BUILTIN_OBJ      ObjectType = "BUILTIN"
@@ -101,6 +104,93 @@ func GetCachedInteger(v int64) *Integer {
 	return &Integer{Value: v}
 }
 
+func (i *Integer) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "bit_length":
+		return &Builtin{
+			Name: "int.bit_length",
+			Fn: func(args ...Object) Object {
+				bits := 0
+				v := i.Value
+				if v < 0 {
+					v = -v
+				}
+				for v > 0 {
+					bits++
+					v >>= 1
+				}
+				if bits == 0 {
+					bits = 1
+				}
+				return &Integer{Value: int64(bits)}
+			},
+		}, true
+	case "bit_count":
+		return &Builtin{
+			Name: "int.bit_count",
+			Fn: func(args ...Object) Object {
+				v := i.Value
+				if v < 0 {
+					v = -v
+				}
+				cnt := 0
+				for v > 0 {
+					if v&1 == 1 {
+						cnt++
+					}
+					v >>= 1
+				}
+				return &Integer{Value: int64(cnt)}
+			},
+		}, true
+	case "to_bytes":
+		return &Builtin{
+			Name: "int.to_bytes",
+			Fn: func(args ...Object) Object {
+				if len(args) < 2 {
+					return NewTypeError("to_bytes() takes at least 2 arguments (%d given)", len(args))
+				}
+				length, ok := args[0].(*Integer)
+				if !ok {
+					return NewTypeError("to_bytes() first argument must be an integer")
+				}
+				byteorder, ok := args[1].(*String)
+				if !ok {
+					return NewTypeError("to_bytes() second argument must be a string")
+				}
+				signed := false
+				if len(args) >= 3 {
+					if b, ok := args[2].(*Boolean); ok {
+						signed = b.Value
+					}
+				}
+				n := int(length.Value)
+				if n < 0 {
+					return NewValueError("length must be non-negative")
+				}
+				result := make([]byte, n)
+				v := i.Value
+				if byteorder.Value == "big" {
+					for j := n - 1; j >= 0; j-- {
+						result[j] = byte(v & 0xFF)
+						v >>= 8
+					}
+				} else {
+					for j := 0; j < n; j++ {
+						result[j] = byte(v & 0xFF)
+						v >>= 8
+					}
+				}
+				_ = signed
+				return &Bytes{Value: result}
+			},
+		}, true
+	case "__class__":
+		return &String{Value: "int"}, true
+	}
+	return nil, false
+}
+
 var stringPool map[string]*String
 var stringPoolReady bool
 
@@ -132,6 +222,44 @@ type Float struct {
 
 func (f *Float) Type() ObjectType { return FLOAT_OBJ }
 func (f *Float) Inspect() string  { return fmt.Sprintf("%g", f.Value) }
+
+func (f *Float) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "is_integer":
+		return &Builtin{
+			Name: "float.is_integer",
+			Fn: func(args ...Object) Object {
+				return &Boolean{Value: f.Value == math.Trunc(f.Value)}
+			},
+		}, true
+	case "hex":
+		return &Builtin{
+			Name: "float.hex",
+			Fn: func(args ...Object) Object {
+				return &String{Value: fmt.Sprintf("%x", math.Float64bits(f.Value))}
+			},
+		}, true
+	case "as_integer_ratio":
+		return &Builtin{
+			Name: "float.as_integer_ratio",
+			Fn: func(args ...Object) Object {
+				if math.IsNaN(f.Value) || math.IsInf(f.Value, 0) {
+					return NewValueError("cannot convert float to integer ratio")
+				}
+				if f.Value == 0 {
+					return &Tuple{Elements: []Object{&Integer{Value: 0}, &Integer{Value: 1}}}
+				}
+				ratio := new(big.Rat).SetFloat64(f.Value)
+				num := ratio.Num().Int64()
+				den := ratio.Denom().Int64()
+				return &Tuple{Elements: []Object{&Integer{Value: num}, &Integer{Value: den}}}
+			},
+		}, true
+	case "__class__":
+		return &String{Value: "float"}, true
+	}
+	return nil, false
+}
 
 type Complex struct {
 	Real float64
@@ -666,6 +794,489 @@ func (s *String) GetAttr(name string) (Object, bool) {
 			}
 			return &String{Value: result}
 		}}, true
+	case "find":
+		return &Builtin{
+			Name: "str.find",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("find() takes at least 1 argument")
+				}
+				sub, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("find() argument must be a string")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start >= end {
+					return &Integer{Value: -1}
+				}
+				idx := strings.Index(s.Value[start:end], sub.Value)
+				if idx == -1 {
+					return &Integer{Value: -1}
+				}
+				return &Integer{Value: int64(start + idx)}
+			},
+		}, true
+	case "index":
+		return &Builtin{
+			Name: "str.index",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("index() takes at least 1 argument")
+				}
+				sub, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("index() argument must be a string")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start >= end {
+					return NewValueError("substring not found")
+				}
+				idx := strings.Index(s.Value[start:end], sub.Value)
+				if idx == -1 {
+					return NewValueError("substring not found")
+				}
+				return &Integer{Value: int64(start + idx)}
+			},
+		}, true
+	case "replace":
+		return &Builtin{
+			Name: "str.replace",
+			Fn: func(args ...Object) Object {
+				if len(args) < 2 {
+					return NewTypeError("replace() takes at least 2 arguments")
+				}
+				old, ok1 := args[0].(*String)
+				newStr, ok2 := args[1].(*String)
+				if !ok1 || !ok2 {
+					return NewTypeError("replace() arguments must be strings")
+				}
+				if len(args) >= 3 {
+					if count, ok := args[2].(*Integer); ok {
+						return &String{Value: strings.Replace(s.Value, old.Value, newStr.Value, int(count.Value))}
+					}
+				}
+				return &String{Value: strings.ReplaceAll(s.Value, old.Value, newStr.Value)}
+			},
+		}, true
+	case "split":
+		return &Builtin{
+			Name: "str.split",
+			Fn: func(args ...Object) Object {
+				if len(args) == 0 {
+					// No args: split on whitespace
+					parts := strings.Fields(s.Value)
+					elements := make([]Object, len(parts))
+					for i, p := range parts {
+						elements[i] = &String{Value: p}
+					}
+					return &List{Elements: elements}
+				}
+				sep, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("split() argument must be a string or None")
+				}
+				if sep.Value == "" {
+					return NewValueError("empty separator")
+				}
+				var parts []string
+				if len(args) >= 2 {
+					if maxsplit, ok := args[1].(*Integer); ok && maxsplit.Value >= 0 {
+						parts = strings.SplitN(s.Value, sep.Value, int(maxsplit.Value)+1)
+					} else {
+						parts = strings.Split(s.Value, sep.Value)
+					}
+				} else {
+					parts = strings.Split(s.Value, sep.Value)
+				}
+				elements := make([]Object, len(parts))
+				for i, p := range parts {
+					elements[i] = &String{Value: p}
+				}
+				return &List{Elements: elements}
+			},
+		}, true
+	case "rsplit":
+		return &Builtin{
+			Name: "str.rsplit",
+			Fn: func(args ...Object) Object {
+				if len(args) == 0 {
+					// No args: split on whitespace
+					parts := strings.Fields(s.Value)
+					elements := make([]Object, len(parts))
+					for i, p := range parts {
+						elements[i] = &String{Value: p}
+					}
+					return &List{Elements: elements}
+				}
+				sep, ok := args[0].(*String)
+				if !ok {
+					return NewTypeError("rsplit() argument must be a string or None")
+				}
+				if sep.Value == "" {
+					return NewValueError("empty separator")
+				}
+				var parts []string
+				if len(args) >= 2 {
+					if maxsplit, ok := args[1].(*Integer); ok && maxsplit.Value >= 0 {
+						// rsplit: split from right, which Go doesn't natively support
+						// Use SplitN and then re-split the last element from the right
+						parts = strings.Split(s.Value, sep.Value)
+						if int(maxsplit.Value) < len(parts)-1 {
+							// Need to rejoin the first len(parts)-1-maxsplit parts
+							joinIdx := len(parts) - int(maxsplit.Value)
+							result := make([]string, 0, int(maxsplit.Value)+1)
+							result = append(result, strings.Join(parts[:joinIdx], sep.Value))
+							result = append(result, parts[joinIdx:]...)
+							parts = result
+						}
+					} else {
+						parts = strings.Split(s.Value, sep.Value)
+					}
+				} else {
+					parts = strings.Split(s.Value, sep.Value)
+				}
+				elements := make([]Object, len(parts))
+				for i, p := range parts {
+					elements[i] = &String{Value: p}
+				}
+				return &List{Elements: elements}
+			},
+		}, true
+	case "splitlines":
+		return &Builtin{
+			Name: "str.splitlines",
+			Fn: func(args ...Object) Object {
+				keepends := false
+				if len(args) >= 1 {
+					if b, ok := args[0].(*Boolean); ok {
+						keepends = b.Value
+					}
+				}
+				var lines []string
+				current := ""
+				for i := 0; i < len(s.Value); i++ {
+					if s.Value[i] == '\r' {
+						if i+1 < len(s.Value) && s.Value[i+1] == '\n' {
+							if keepends {
+								current += "\r\n"
+							}
+							lines = append(lines, current)
+							current = ""
+							i++ // skip \n
+						} else {
+							if keepends {
+								current += "\r"
+							}
+							lines = append(lines, current)
+							current = ""
+						}
+					} else if s.Value[i] == '\n' {
+						if keepends {
+							current += "\n"
+						}
+						lines = append(lines, current)
+						current = ""
+					} else {
+						current += string(s.Value[i])
+					}
+				}
+				if current != "" {
+					lines = append(lines, current)
+				}
+				elements := make([]Object, len(lines))
+				for i, l := range lines {
+					elements[i] = &String{Value: l}
+				}
+				return &List{Elements: elements}
+			},
+		}, true
+	case "join":
+		return &Builtin{
+			Name: "str.join",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("join() takes exactly 1 argument")
+				}
+				var elements []string
+				switch iter := args[0].(type) {
+				case *List:
+					for _, el := range iter.Elements {
+						elements = append(elements, el.Inspect())
+					}
+				case *Tuple:
+					for _, el := range iter.Elements {
+						elements = append(elements, el.Inspect())
+					}
+				default:
+					return NewTypeError("can only join an iterable")
+				}
+				return &String{Value: strings.Join(elements, s.Value)}
+			},
+		}, true
+	case "strip":
+		return &Builtin{
+			Name: "str.strip",
+			Fn: func(args ...Object) Object {
+				chars := " \t\n\r\f\v"
+				if len(args) >= 1 {
+					if c, ok := args[0].(*String); ok {
+						chars = c.Value
+					}
+				}
+				return &String{Value: strings.Trim(s.Value, chars)}
+			},
+		}, true
+	case "lstrip":
+		return &Builtin{
+			Name: "str.lstrip",
+			Fn: func(args ...Object) Object {
+				chars := " \t\n\r\f\v"
+				if len(args) >= 1 {
+					if c, ok := args[0].(*String); ok {
+						chars = c.Value
+					}
+				}
+				return &String{Value: strings.TrimLeft(s.Value, chars)}
+			},
+		}, true
+	case "rstrip":
+		return &Builtin{
+			Name: "str.rstrip",
+			Fn: func(args ...Object) Object {
+				chars := " \t\n\r\f\v"
+				if len(args) >= 1 {
+					if c, ok := args[0].(*String); ok {
+						chars = c.Value
+					}
+				}
+				return &String{Value: strings.TrimRight(s.Value, chars)}
+			},
+		}, true
+	case "upper":
+		return &Builtin{Name: "str.upper", Fn: func(args ...Object) Object {
+			return &String{Value: strings.ToUpper(s.Value)}
+		}}, true
+	case "lower":
+		return &Builtin{Name: "str.lower", Fn: func(args ...Object) Object {
+			return &String{Value: strings.ToLower(s.Value)}
+		}}, true
+	case "startswith":
+		return &Builtin{
+			Name: "str.startswith",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("startswith() takes at least 1 argument")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start > end {
+					return False
+				}
+				substr := s.Value[start:end]
+				switch prefix := args[0].(type) {
+				case *String:
+					return &Boolean{Value: strings.HasPrefix(substr, prefix.Value)}
+				case *Tuple:
+					for _, el := range prefix.Elements {
+						if p, ok := el.(*String); ok {
+							if strings.HasPrefix(substr, p.Value) {
+								return True
+							}
+						}
+					}
+					return False
+				default:
+					return NewTypeError("startswith() argument must be a string or a tuple of strings")
+				}
+			},
+		}, true
+	case "endswith":
+		return &Builtin{
+			Name: "str.endswith",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("endswith() takes at least 1 argument")
+				}
+				start := 0
+				end := len(s.Value)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(s.Value) {
+					end = len(s.Value)
+				}
+				if start > end {
+					return False
+				}
+				substr := s.Value[start:end]
+				switch suffix := args[0].(type) {
+				case *String:
+					return &Boolean{Value: strings.HasSuffix(substr, suffix.Value)}
+				case *Tuple:
+					for _, el := range suffix.Elements {
+						if suf, ok := el.(*String); ok {
+							if strings.HasSuffix(substr, suf.Value) {
+								return True
+							}
+						}
+					}
+					return False
+				default:
+					return NewTypeError("endswith() argument must be a string or a tuple of strings")
+				}
+			},
+		}, true
+	case "format":
+		return &Builtin{
+			Name: "str.format",
+			Fn: func(args ...Object) Object {
+				result := s.Value
+				// Collect keyword arguments from the last argument if it's a Dict
+				kwargs := make(map[string]string)
+				posArgs := args
+				if len(args) > 0 {
+					if d, ok := args[len(args)-1].(*Dict); ok {
+						// Check if this looks like kwargs (string keys)
+						isKwargs := true
+						for _, keyStr := range d.KeyOrder {
+							if _, ok := d.Keys[keyStr].(*String); !ok {
+								isKwargs = false
+								break
+							}
+						}
+						if isKwargs && len(d.KeyOrder) > 0 {
+							for _, keyStr := range d.KeyOrder {
+								if sk, ok := d.Keys[keyStr].(*String); ok {
+									kwargs[sk.Value] = d.Pairs[keyStr].Inspect()
+								}
+							}
+							posArgs = args[:len(args)-1]
+						}
+					}
+				}
+				// Replace positional {0}, {1}, etc.
+				for i, arg := range posArgs {
+					result = strings.ReplaceAll(result, "{"+fmt.Sprintf("%d", i)+"}", arg.Inspect())
+				}
+				// Replace keyword {name}
+				for key, val := range kwargs {
+					result = strings.ReplaceAll(result, "{"+key+"}", val)
+				}
+				return &String{Value: result}
+			},
+		}, true
+	case "casefold":
+		return &Builtin{Name: "str.casefold", Fn: func(args ...Object) Object {
+			return &String{Value: strings.ToLower(s.Value)}
+		}}, true
+	case "maketrans":
+		return &Builtin{
+			Name: "str.maketrans",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("maketrans() takes at least 1 argument")
+				}
+				result := NewDict()
+				if len(args) == 1 {
+					// dict argument
+					d, ok := args[0].(*Dict)
+					if !ok {
+						return NewTypeError("maketrans() argument must be a dict")
+					}
+					for _, keyStr := range d.KeyOrder {
+						k := d.Keys[keyStr]
+						v := d.Pairs[keyStr]
+						if ki, ok := k.(*Integer); ok {
+							result.Set(ki, v)
+						} else if ks, ok := k.(*String); ok {
+							if len(ks.Value) == 1 {
+								result.Set(&Integer{Value: int64(ks.Value[0])}, v)
+							}
+						}
+					}
+				} else if len(args) >= 2 {
+					from, ok1 := args[0].(*String)
+					to, ok2 := args[1].(*String)
+					if !ok1 || !ok2 {
+						return NewTypeError("maketrans() arguments must be strings")
+					}
+					if len(from.Value) != len(to.Value) {
+						return NewValueError("maketrans() arguments must have same length")
+					}
+					for i := 0; i < len(from.Value); i++ {
+						result.Set(&Integer{Value: int64(from.Value[i])}, &Integer{Value: int64(to.Value[i])})
+					}
+					if len(args) >= 3 {
+						if del, ok := args[2].(*String); ok {
+							for i := 0; i < len(del.Value); i++ {
+								result.Set(&Integer{Value: int64(del.Value[i])}, &None{})
+							}
+						}
+					}
+				}
+				return result
+			},
+		}, true
 	}
 	return nil, false
 }
@@ -680,6 +1291,42 @@ func NewBytes(data []byte) *Bytes {
 
 func (b *Bytes) Type() ObjectType { return BYTES_OBJ }
 func (b *Bytes) Inspect() string  { return fmt.Sprintf("b'%s'", string(b.Value)) }
+
+func (b *Bytes) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "decode":
+		return &Builtin{
+			Name: "bytes.decode",
+			Fn: func(args ...Object) Object {
+				return &String{Value: string(b.Value)}
+			},
+		}, true
+	case "hex":
+		return &Builtin{
+			Name: "bytes.hex",
+			Fn: func(args ...Object) Object {
+				return &String{Value: fmt.Sprintf("%x", b.Value)}
+			},
+		}, true
+	case "len":
+		return &Builtin{
+			Name: "bytes.len",
+			Fn: func(args ...Object) Object {
+				return &Integer{Value: int64(len(b.Value))}
+			},
+		}, true
+	case "__len__":
+		return &Builtin{
+			Name: "bytes.__len__",
+			Fn: func(args ...Object) Object {
+				return &Integer{Value: int64(len(b.Value))}
+			},
+		}, true
+	case "__class__":
+		return &String{Value: "bytes"}, true
+	}
+	return nil, false
+}
 
 type None struct{}
 
@@ -718,6 +1365,67 @@ func (t *Tuple) Inspect() string {
 	}
 	result += ")"
 	return result
+}
+
+func (t *Tuple) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "count":
+		return &Builtin{
+			Name: "tuple.count",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("count() takes exactly one argument (%d given)", len(args))
+				}
+				cnt := 0
+				for _, el := range t.Elements {
+					if Equal(el, args[0]) {
+						cnt++
+					}
+				}
+				return &Integer{Value: int64(cnt)}
+			},
+		}, true
+	case "index":
+		return &Builtin{
+			Name: "tuple.index",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("index() takes at least 1 argument (%d given)", len(args))
+				}
+				start := 0
+				end := len(t.Elements)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+						if start < 0 {
+							start = len(t.Elements) + start
+						}
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+						if end < 0 {
+							end = len(t.Elements) + end
+						}
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(t.Elements) {
+					end = len(t.Elements)
+				}
+				for i := start; i < end; i++ {
+					if Equal(t.Elements[i], args[0]) {
+						return &Integer{Value: int64(i)}
+					}
+				}
+				return NewValueError("tuple.index(x): x not in tuple")
+			},
+		}, true
+	}
+	return nil, false
 }
 
 func (l *List) Type() ObjectType { return LIST_OBJ }
@@ -878,6 +1586,166 @@ func (l *List) GetAttr(name string) (Object, bool) {
 					return NewTypeError("'%s' object is not iterable", args[0].Type())
 				}
 				return l
+			},
+		}, true
+	case "append":
+		return &Builtin{
+			Name: "list.append",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("append() takes exactly one argument (%d given)", len(args))
+				}
+				l.Elements = append(l.Elements, args[0])
+				return None_
+			},
+		}, true
+	case "extend":
+		return &Builtin{
+			Name: "list.extend",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("extend() takes exactly one argument (%d given)", len(args))
+				}
+				switch other := args[0].(type) {
+				case *List:
+					l.Elements = append(l.Elements, other.Elements...)
+				case *Tuple:
+					l.Elements = append(l.Elements, other.Elements...)
+				default:
+					return NewTypeError("'%s' object is not iterable", args[0].Type())
+				}
+				return None_
+			},
+		}, true
+	case "insert":
+		return &Builtin{
+			Name: "list.insert",
+			Fn: func(args ...Object) Object {
+				if len(args) != 2 {
+					return NewTypeError("insert() takes exactly 2 arguments (%d given)", len(args))
+				}
+				idx, ok := args[0].(*Integer)
+				if !ok {
+					return NewTypeError("'%s' object cannot be interpreted as an integer", args[0].Type())
+				}
+				l.Insert(int(idx.Value), args[1])
+				return None_
+			},
+		}, true
+	case "remove":
+		return &Builtin{
+			Name: "list.remove",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("remove() takes exactly one argument (%d given)", len(args))
+				}
+				err := l.Remove(args[0])
+				if err != nil {
+					return NewValueError("list.remove(x): x not in list")
+				}
+				return None_
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "list.pop",
+			Fn: func(args ...Object) Object {
+				if len(args) > 1 {
+					return NewTypeError("pop() takes at most 1 argument (%d given)", len(args))
+				}
+				idx := -1
+				if len(args) == 1 {
+					i, ok := args[0].(*Integer)
+					if !ok {
+						return NewTypeError("'%s' object cannot be interpreted as an integer", args[0].Type())
+					}
+					idx = int(i.Value)
+				}
+				obj, err := l.Pop(idx)
+				if err != nil {
+					return NewIndexError("pop index out of range")
+				}
+				return obj
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "list.clear",
+			Fn: func(args ...Object) Object {
+				l.Elements = []Object{}
+				return None_
+			},
+		}, true
+	case "index":
+		return &Builtin{
+			Name: "list.index",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("index() takes at least 1 argument (%d given)", len(args))
+				}
+				start := 0
+				end := len(l.Elements)
+				if len(args) >= 2 {
+					if i, ok := args[1].(*Integer); ok {
+						start = int(i.Value)
+						if start < 0 {
+							start = len(l.Elements) + start
+						}
+					}
+				}
+				if len(args) >= 3 {
+					if i, ok := args[2].(*Integer); ok {
+						end = int(i.Value)
+						if end < 0 {
+							end = len(l.Elements) + end
+						}
+					}
+				}
+				if start < 0 {
+					start = 0
+				}
+				if end > len(l.Elements) {
+					end = len(l.Elements)
+				}
+				for i := start; i < end; i++ {
+					if Equal(l.Elements[i], args[0]) {
+						return &Integer{Value: int64(i)}
+					}
+				}
+				return NewValueError("%s is not in list", args[0].Inspect())
+			},
+		}, true
+	case "count":
+		return &Builtin{
+			Name: "list.count",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("count() takes exactly one argument (%d given)", len(args))
+				}
+				cnt := 0
+				for _, el := range l.Elements {
+					if Equal(el, args[0]) {
+						cnt++
+					}
+				}
+				return &Integer{Value: int64(cnt)}
+			},
+		}, true
+	case "reverse":
+		return &Builtin{
+			Name: "list.reverse",
+			Fn: func(args ...Object) Object {
+				l.Reverse()
+				return None_
+			},
+		}, true
+	case "copy":
+		return &Builtin{
+			Name: "list.copy",
+			Fn: func(args ...Object) Object {
+				elements := make([]Object, len(l.Elements))
+				copy(elements, l.Elements)
+				return &List{Elements: elements}
 			},
 		}, true
 	}
@@ -1325,6 +2193,210 @@ func (s *Set) GetAttr(name string) (Object, bool) {
 				return s
 			},
 		}, true
+	case "add":
+		return &Builtin{
+			Name: "set.add",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("add() takes exactly one argument (%d given)", len(args))
+				}
+				s.Add(args[0])
+				return None_
+			},
+		}, true
+	case "remove":
+		return &Builtin{
+			Name: "set.remove",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("remove() takes exactly one argument (%d given)", len(args))
+				}
+				key := s.HashKey(args[0])
+				if _, ok := s.Elements[key]; !ok {
+					return NewKeyError("%s", args[0].Inspect())
+				}
+				delete(s.Elements, key)
+				delete(s.Keys, key)
+				return None_
+			},
+		}, true
+	case "discard":
+		return &Builtin{
+			Name: "set.discard",
+			Fn: func(args ...Object) Object {
+				if len(args) != 1 {
+					return NewTypeError("discard() takes exactly one argument (%d given)", len(args))
+				}
+				key := s.HashKey(args[0])
+				delete(s.Elements, key)
+				delete(s.Keys, key)
+				return None_
+			},
+		}, true
+	case "pop":
+		return &Builtin{
+			Name: "set.pop",
+			Fn: func(args ...Object) Object {
+				if len(s.Elements) == 0 {
+					return NewKeyError("pop from an empty set")
+				}
+				var elem Object
+				var key string
+				for k, v := range s.Elements {
+					elem = v
+					key = k
+					break
+				}
+				delete(s.Elements, key)
+				delete(s.Keys, key)
+				return elem
+			},
+		}, true
+	case "clear":
+		return &Builtin{
+			Name: "set.clear",
+			Fn: func(args ...Object) Object {
+				s.Elements = make(map[string]Object)
+				s.Keys = make(map[string]Object)
+				return None_
+			},
+		}, true
+	case "intersection_update":
+		return &Builtin{
+			Name: "set.intersection_update",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("intersection_update() takes at least one argument (%d given)", len(args))
+				}
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("'%s' object is not a set", args[0].Type())
+				}
+				for k := range s.Elements {
+					if _, ok := other.Elements[k]; !ok {
+						delete(s.Elements, k)
+						delete(s.Keys, k)
+					}
+				}
+				return None_
+			},
+		}, true
+	case "symmetric_difference_update":
+		return &Builtin{
+			Name: "set.symmetric_difference_update",
+			Fn: func(args ...Object) Object {
+				if len(args) < 1 {
+					return NewTypeError("symmetric_difference_update() takes at least one argument (%d given)", len(args))
+				}
+				other, ok := args[0].(*Set)
+				if !ok {
+					return NewTypeError("'%s' object is not a set", args[0].Type())
+				}
+				for k, v := range other.Elements {
+					if _, exists := s.Elements[k]; exists {
+						delete(s.Elements, k)
+						delete(s.Keys, k)
+					} else {
+						s.Elements[k] = v
+						s.Keys[k] = v
+					}
+				}
+				return None_
+			},
+		}, true
+	}
+	return nil, false
+}
+
+type Frozenset struct {
+	Elements map[string]Object
+	Keys     map[string]Object
+}
+
+func NewFrozenset(elements map[string]Object, keys map[string]Object) *Frozenset {
+	return &Frozenset{Elements: elements, Keys: keys}
+}
+
+func (fs *Frozenset) Type() ObjectType { return FROZENSET_OBJ }
+func (fs *Frozenset) Inspect() string {
+	result := "frozenset({"
+	first := true
+	for _, key := range fs.Keys {
+		if !first {
+			result += ", "
+		}
+		result += key.Inspect()
+		first = false
+	}
+	result += "})"
+	return result
+}
+
+func (fs *Frozenset) GetAttr(name string) (Object, bool) {
+	switch name {
+	case "union":
+		return &Builtin{Name: "frozenset.union", Fn: func(args ...Object) Object {
+			result := NewSet()
+			for k, v := range fs.Elements { result.Elements[k] = v; result.Keys[k] = v }
+			for _, arg := range args {
+				switch other := arg.(type) {
+				case *Set:
+					for k, v := range other.Elements { result.Elements[k] = v; result.Keys[k] = v }
+				case *Frozenset:
+					for k, v := range other.Elements { result.Elements[k] = v; result.Keys[k] = v }
+				}
+			}
+			return NewFrozenset(result.Elements, result.Keys)
+		}}, true
+	case "intersection":
+		return &Builtin{Name: "frozenset.intersection", Fn: func(args ...Object) Object {
+			result := NewSet()
+			if len(args) == 0 { return NewFrozenset(result.Elements, result.Keys) }
+			other, ok := args[0].(*Set)
+			if !ok { if fs2, ok2 := args[0].(*Frozenset); ok2 { other = &Set{Elements: fs2.Elements, Keys: fs2.Keys} } }
+			if other == nil { return NewTypeError("intersection() argument must be a set") }
+			for k, v := range fs.Elements {
+				if _, ok := other.Elements[k]; ok { result.Elements[k] = v; result.Keys[k] = v }
+			}
+			return NewFrozenset(result.Elements, result.Keys)
+		}}, true
+	case "issubset":
+		return &Builtin{Name: "frozenset.issubset", Fn: func(args ...Object) Object {
+			if len(args) < 1 { return NewTypeError("issubset() takes at least 1 argument") }
+			var otherElements map[string]Object
+			switch o := args[0].(type) {
+			case *Set: otherElements = o.Elements
+			case *Frozenset: otherElements = o.Elements
+			default: return NewTypeError("issubset() argument must be a set")
+			}
+			for k := range fs.Elements {
+				if _, ok := otherElements[k]; !ok { return False }
+			}
+			return True
+		}}, true
+	case "issuperset":
+		return &Builtin{Name: "frozenset.issuperset", Fn: func(args ...Object) Object {
+			if len(args) < 1 { return NewTypeError("issuperset() takes at least 1 argument") }
+			var otherElements map[string]Object
+			switch o := args[0].(type) {
+			case *Set: otherElements = o.Elements
+			case *Frozenset: otherElements = o.Elements
+			default: return NewTypeError("issuperset() argument must be a set")
+			}
+			for k := range otherElements {
+				if _, ok := fs.Elements[k]; !ok { return False }
+			}
+			return True
+		}}, true
+	case "copy":
+		return &Builtin{Name: "frozenset.copy", Fn: func(args ...Object) Object {
+			newElements := make(map[string]Object)
+			newKeys := make(map[string]Object)
+			for k, v := range fs.Elements { newElements[k] = v; newKeys[k] = v }
+			return NewFrozenset(newElements, newKeys)
+		}}, true
+	case "__class__":
+		return &String{Value: "frozenset"}, true
 	}
 	return nil, false
 }
@@ -3210,6 +4282,46 @@ func NewMemoryError(format string, a ...interface{}) *Error {
 	return NewErrorWithType("MemoryError", format, a...)
 }
 
+func NewOSError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("OSError", format, a...)
+}
+
+func NewIOError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("IOError", format, a...)
+}
+
+func NewFileExistsError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("FileExistsError", format, a...)
+}
+
+func NewPermissionError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("PermissionError", format, a...)
+}
+
+func NewModuleNotFoundError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("ModuleNotFoundError", format, a...)
+}
+
+func NewUnicodeError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("UnicodeError", format, a...)
+}
+
+func NewBufferError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("BufferError", format, a...)
+}
+
+func NewArithmeticError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("ArithmeticError", format, a...)
+}
+
+func NewLookupError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("LookupError", format, a...)
+}
+
+func NewReferenceError(format string, a ...interface{}) *Error {
+	return NewErrorWithType("ReferenceError", format, a...)
+}
+
 func Equal(a, b Object) bool {
 	if a.Type() != b.Type() {
 		return false
@@ -3312,6 +4424,17 @@ func FormatString(template string, args ...Object) string {
 	}
 	
 	return result
+}
+
+func toFloat(obj Object) (float64, bool) {
+	switch v := obj.(type) {
+	case *Float:
+		return v.Value, true
+	case *Integer:
+		return float64(v.Value), true
+	default:
+		return 0, false
+	}
 }
 
 func CreateMathModule() *Module {
@@ -3664,7 +4787,161 @@ func CreateMathModule() *Module {
 			}
 		},
 	}
-	
+
+	// math.atan2
+	mathModule.Fields["atan2"] = &Builtin{Name: "math.atan2", Fn: func(args ...Object) Object {
+		if len(args) != 2 {
+			return NewTypeError("atan2() takes exactly 2 arguments")
+		}
+		y, ok1 := toFloat(args[0]); x, ok2 := toFloat(args[1])
+		if !ok1 || !ok2 {
+			return NewTypeError("atan2() arguments must be numbers")
+		}
+		return &Float{Value: math.Atan2(y, x)}
+	}}
+
+	// math.copysign
+	mathModule.Fields["copysign"] = &Builtin{Name: "math.copysign", Fn: func(args ...Object) Object {
+		if len(args) != 2 {
+			return NewTypeError("copysign() takes exactly 2 arguments")
+		}
+		x, ok1 := toFloat(args[0]); y, ok2 := toFloat(args[1])
+		if !ok1 || !ok2 {
+			return NewTypeError("copysign() arguments must be numbers")
+		}
+		return &Float{Value: math.Copysign(x, y)}
+	}}
+
+	// math.fmod
+	mathModule.Fields["fmod"] = &Builtin{Name: "math.fmod", Fn: func(args ...Object) Object {
+		if len(args) != 2 {
+			return NewTypeError("fmod() takes exactly 2 arguments")
+		}
+		x, ok1 := toFloat(args[0]); y, ok2 := toFloat(args[1])
+		if !ok1 || !ok2 {
+			return NewTypeError("fmod() arguments must be numbers")
+		}
+		return &Float{Value: math.Mod(x, y)}
+	}}
+
+	// math.isnan
+	mathModule.Fields["isnan"] = &Builtin{Name: "math.isnan", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("isnan() takes exactly 1 argument")
+		}
+		x, ok := toFloat(args[0]); if !ok {
+			return NewTypeError("isnan() argument must be a number")
+		}
+		return &Boolean{Value: math.IsNaN(x)}
+	}}
+
+	// math.isinf
+	mathModule.Fields["isinf"] = &Builtin{Name: "math.isinf", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("isinf() takes exactly 1 argument")
+		}
+		x, ok := toFloat(args[0]); if !ok {
+			return NewTypeError("isinf() argument must be a number")
+		}
+		return &Boolean{Value: math.IsInf(x, 0)}
+	}}
+
+	// math.isfinite
+	mathModule.Fields["isfinite"] = &Builtin{Name: "math.isfinite", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("isfinite() takes exactly 1 argument")
+		}
+		x, ok := toFloat(args[0]); if !ok {
+			return NewTypeError("isfinite() argument must be a number")
+		}
+		return &Boolean{Value: !math.IsInf(x, 0) && !math.IsNaN(x)}
+	}}
+
+	// math.factorial
+	mathModule.Fields["factorial"] = &Builtin{Name: "math.factorial", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("factorial() takes exactly 1 argument")
+		}
+		n, ok := args[0].(*Integer); if !ok {
+			return NewTypeError("factorial() argument must be an integer")
+		}
+		if n.Value < 0 {
+			return NewValueError("factorial() not defined for negative values")
+		}
+		result := int64(1)
+		for i := int64(2); i <= n.Value; i++ {
+			result *= i
+		}
+		return &Integer{Value: result}
+	}}
+
+	// math.gcd
+	mathModule.Fields["gcd"] = &Builtin{Name: "math.gcd", Fn: func(args ...Object) Object {
+		if len(args) < 1 || len(args) > 2 {
+			return NewTypeError("gcd() takes 1 or 2 arguments")
+		}
+		a, ok1 := args[0].(*Integer)
+		if !ok1 {
+			return NewTypeError("gcd() arguments must be integers")
+		}
+		b := &Integer{Value: 0}
+		if len(args) == 2 {
+			b, ok1 = args[1].(*Integer); if !ok1 {
+				return NewTypeError("gcd() arguments must be integers")
+			}
+		}
+		av, bv := a.Value, b.Value
+		if av < 0 {
+			av = -av
+		}
+		if bv < 0 {
+			bv = -bv
+		}
+		for bv != 0 {
+			av, bv = bv, av%bv
+		}
+		return &Integer{Value: av}
+	}}
+
+	// math.lcm
+	mathModule.Fields["lcm"] = &Builtin{Name: "math.lcm", Fn: func(args ...Object) Object {
+		if len(args) < 1 || len(args) > 2 {
+			return NewTypeError("lcm() takes 1 or 2 arguments")
+		}
+		a, ok1 := args[0].(*Integer)
+		if !ok1 {
+			return NewTypeError("lcm() arguments must be integers")
+		}
+		if a.Value == 0 {
+			return &Integer{Value: 0}
+		}
+		b := &Integer{Value: 1}
+		if len(args) == 2 {
+			b, ok1 = args[1].(*Integer); if !ok1 {
+				return NewTypeError("lcm() arguments must be integers")
+			}
+		}
+		if b.Value == 0 {
+			return &Integer{Value: 0}
+		}
+		av, bv := a.Value, b.Value
+		if av < 0 {
+			av = -av
+		}
+		if bv < 0 {
+			bv = -bv
+		}
+		g := av; tmp := bv; for tmp != 0 {
+			g, tmp = tmp, g%tmp
+		}
+		return &Integer{Value: av / g * bv}
+	}}
+
+	// Constants
+	mathModule.Fields["inf"] = &Float{Value: math.Inf(1)}
+	mathModule.Fields["nan"] = &Float{Value: math.NaN()}
+	mathModule.Fields["tau"] = &Float{Value: math.Pi * 2}
+
 	return mathModule
 }
 
@@ -3776,6 +5053,27 @@ func CreateSysModule() *Module {
 			}
 		},
 	}
+
+	// sys.maxsize
+	sysModule.Fields["maxsize"] = &Integer{Value: int64(1<<63 - 1)}
+
+	// sys.byteorder
+	sysModule.Fields["byteorder"] = &String{Value: "little"}
+
+	// sys.executable
+	sysModule.Fields["executable"] = &String{Value: "gopy"}
+
+	// sys.prefix
+	sysModule.Fields["prefix"] = &String{Value: "/usr/local"}
+
+	// sys.modules
+	sysModule.Fields["modules"] = &Dict{Pairs: make(map[string]Object), Keys: make(map[string]Object)}
+
+	// sys.flags
+	flagsModule := &Module{Name: "sys.flags", Fields: make(map[string]Object)}
+	flagsModule.Fields["debug"] = &Integer{Value: 0}
+	flagsModule.Fields["optimize"] = &Integer{Value: 0}
+	sysModule.Fields["flags"] = flagsModule
 
 	return sysModule
 }
@@ -3941,6 +5239,190 @@ func CreateOsModule() *Module {
 		Keys:  make(map[string]Object),
 	}
 
+	// os.rmdir
+	osModule.Fields["rmdir"] = &Builtin{Name: "os.rmdir", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("rmdir() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("rmdir() argument must be a string")
+		}
+		if err := os.Remove(path.Value); err != nil {
+			return NewError("%s", err.Error())
+		}
+		return None_
+	}}
+
+	// os.makedirs
+	osModule.Fields["makedirs"] = &Builtin{Name: "os.makedirs", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("makedirs() takes at least 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("makedirs() argument must be a string")
+		}
+		mode := os.FileMode(0755)
+		if len(args) >= 2 {
+			if i, ok := args[1].(*Integer); ok {
+				mode = os.FileMode(i.Value)
+			}
+		}
+		if err := os.MkdirAll(path.Value, mode); err != nil {
+			return NewError("%s", err.Error())
+		}
+		return None_
+	}}
+
+	// os.removedirs
+	osModule.Fields["removedirs"] = &Builtin{Name: "os.removedirs", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("removedirs() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("removedirs() argument must be a string")
+		}
+		if err := os.RemoveAll(path.Value); err != nil {
+			return NewError("%s", err.Error())
+		}
+		return None_
+	}}
+
+	// os.stat
+	osModule.Fields["stat"] = &Builtin{Name: "os.stat", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("stat() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("stat() argument must be a string")
+		}
+		info, err := os.Stat(path.Value)
+		if err != nil {
+			return NewError("%s", err.Error())
+		}
+		d := NewDict()
+		d.Set(&String{Value: "st_size"}, &Integer{Value: info.Size()})
+		d.Set(&String{Value: "st_mode"}, &Integer{Value: int64(info.Mode())})
+		d.Set(&String{Value: "st_isdir"}, &Boolean{Value: info.IsDir()})
+		d.Set(&String{Value: "st_mtime"}, &Float{Value: float64(info.ModTime().UnixNano()) / 1e9})
+		return d
+	}}
+
+	// os.path sub-module
+	pathModule := &Module{Name: "os.path", Fields: make(map[string]Object)}
+	pathModule.Fields["exists"] = &Builtin{Name: "os.path.exists", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("exists() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("exists() argument must be a string")
+		}
+		_, err := os.Stat(path.Value)
+		return &Boolean{Value: err == nil}
+	}}
+	pathModule.Fields["isfile"] = &Builtin{Name: "os.path.isfile", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("isfile() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("isfile() argument must be a string")
+		}
+		info, err := os.Stat(path.Value)
+		if err != nil {
+			return False
+		}
+		return &Boolean{Value: !info.IsDir()}
+	}}
+	pathModule.Fields["isdir"] = &Builtin{Name: "os.path.isdir", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("isdir() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("isdir() argument must be a string")
+		}
+		info, err := os.Stat(path.Value)
+		if err != nil {
+			return False
+		}
+		return &Boolean{Value: info.IsDir()}
+	}}
+	pathModule.Fields["join"] = &Builtin{Name: "os.path.join", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("join() takes at least 1 argument")
+		}
+		parts := make([]string, len(args))
+		for i, a := range args {
+			s, ok := a.(*String); if !ok {
+				return NewTypeError("join() arguments must be strings")
+			}
+			parts[i] = s.Value
+		}
+		return &String{Value: filepath.Join(parts...)}
+	}}
+	pathModule.Fields["basename"] = &Builtin{Name: "os.path.basename", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("basename() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("basename() argument must be a string")
+		}
+		return &String{Value: filepath.Base(path.Value)}
+	}}
+	pathModule.Fields["dirname"] = &Builtin{Name: "os.path.dirname", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("dirname() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("dirname() argument must be a string")
+		}
+		return &String{Value: filepath.Dir(path.Value)}
+	}}
+	pathModule.Fields["split"] = &Builtin{Name: "os.path.split", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("split() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("split() argument must be a string")
+		}
+		dir, file := filepath.Split(path.Value)
+		return &Tuple{Elements: []Object{&String{Value: dir}, &String{Value: file}}}
+	}}
+	pathModule.Fields["getsize"] = &Builtin{Name: "os.path.getsize", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("getsize() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("getsize() argument must be a string")
+		}
+		info, err := os.Stat(path.Value)
+		if err != nil {
+			return NewError("%s", err.Error())
+		}
+		return &Integer{Value: info.Size()}
+	}}
+	pathModule.Fields["abspath"] = &Builtin{Name: "os.path.abspath", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("abspath() takes exactly 1 argument")
+		}
+		path, ok := args[0].(*String); if !ok {
+			return NewTypeError("abspath() argument must be a string")
+		}
+		abs, err := filepath.Abs(path.Value)
+		if err != nil {
+			return NewError("%s", err.Error())
+		}
+		return &String{Value: abs}
+	}}
+	osModule.Fields["path"] = pathModule
+
+	// os.name
+	osModule.Fields["name"] = &String{Value: runtime.GOOS}
+	// os.linesep
+	osModule.Fields["linesep"] = &String{Value: "\n"}
+	// os.curdir
+	osModule.Fields["curdir"] = &String{Value: "."}
+	// os.pardir
+	osModule.Fields["pardir"] = &String{Value: ".."}
+
 	return osModule
 }
 
@@ -3993,6 +5475,46 @@ func CreateJsonModule() *Module {
 			return convertToObject(data)
 		},
 	}
+
+	// json.dump
+	jsonModule.Fields["dump"] = &Builtin{Name: "json.dump", Fn: func(args ...Object) Object {
+		if len(args) < 2 {
+			return NewTypeError("dump() takes at least 2 arguments")
+		}
+		goValue := convertToGoValue(args[0])
+		filename, ok := args[1].(*String)
+		if !ok {
+			return NewTypeError("dump() second argument must be a string (filename)")
+		}
+		data, err := json.MarshalIndent(goValue, "", "  ")
+		if err != nil {
+			return NewError("%s", err.Error())
+		}
+		if err := os.WriteFile(filename.Value, data, 0644); err != nil {
+			return NewError("%s", err.Error())
+		}
+		return None_
+	}}
+
+	// json.load
+	jsonModule.Fields["load"] = &Builtin{Name: "json.load", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("load() takes at least 1 argument")
+		}
+		filename, ok := args[0].(*String)
+		if !ok {
+			return NewTypeError("load() argument must be a string (filename)")
+		}
+		data, err := os.ReadFile(filename.Value)
+		if err != nil {
+			return NewError("%s", err.Error())
+		}
+		var value interface{}
+		if err := json.Unmarshal(data, &value); err != nil {
+			return NewError("%s", err.Error())
+		}
+		return convertToObject(value)
+	}}
 
 	return jsonModule
 }
@@ -4182,7 +5704,91 @@ func CreateRandomModule() *Module {
 			return None_
 		},
 	}
-	
+
+	// random.randrange
+	randomModule.Fields["randrange"] = &Builtin{Name: "random.randrange", Fn: func(args ...Object) Object {
+		if len(args) < 1 || len(args) > 3 {
+			return NewTypeError("randrange() takes 1-3 arguments")
+		}
+		start := int64(0)
+		var stop int64
+		if len(args) == 1 {
+			s, ok := args[0].(*Integer); if !ok {
+				return NewTypeError("randrange() arguments must be integers")
+			}
+			stop = s.Value
+		} else {
+			s, ok := args[0].(*Integer); if !ok {
+				return NewTypeError("randrange() arguments must be integers")
+			}
+			start = s.Value
+			e, ok := args[1].(*Integer); if !ok {
+				return NewTypeError("randrange() arguments must be integers")
+			}
+			stop = e.Value
+		}
+		if stop <= start {
+			return NewValueError("empty range for randrange()")
+		}
+		return &Integer{Value: start + rand.Int63n(stop-start)}
+	}}
+
+	// random.sample
+	randomModule.Fields["sample"] = &Builtin{Name: "random.sample", Fn: func(args ...Object) Object {
+		if len(args) != 2 {
+			return NewTypeError("sample() takes exactly 2 arguments")
+		}
+		list, ok := args[0].(*List); if !ok {
+			return NewTypeError("sample() first argument must be a list")
+		}
+		k, ok := args[1].(*Integer); if !ok {
+			return NewTypeError("sample() second argument must be an integer")
+		}
+		if k.Value > int64(len(list.Elements)) {
+			return NewValueError("sample larger than population")
+		}
+		shuffled := make([]Object, len(list.Elements))
+		copy(shuffled, list.Elements)
+		rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		return &List{Elements: shuffled[:k.Value]}
+	}}
+
+	// random.choices
+	randomModule.Fields["choices"] = &Builtin{Name: "random.choices", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("choices() takes at least 1 argument")
+		}
+		list, ok := args[0].(*List); if !ok {
+			return NewTypeError("choices() first argument must be a list")
+		}
+		k := 1
+		if len(args) >= 2 {
+			if i, ok := args[1].(*Integer); ok {
+				k = int(i.Value)
+			}
+		}
+		result := make([]Object, k)
+		for i := 0; i < k; i++ {
+			result[i] = list.Elements[rand.Intn(len(list.Elements))]
+		}
+		return &List{Elements: result}
+	}}
+
+	// random.gauss
+	randomModule.Fields["gauss"] = &Builtin{Name: "random.gauss", Fn: func(args ...Object) Object {
+		if len(args) != 2 {
+			return NewTypeError("gauss() takes exactly 2 arguments")
+		}
+		mu, ok1 := toFloat(args[0]); sigma, ok2 := toFloat(args[1])
+		if !ok1 || !ok2 {
+			return NewTypeError("gauss() arguments must be numbers")
+		}
+		// Box-Muller transform
+		u1 := rand.Float64(); u2 := rand.Float64()
+		z := math.Sqrt(-2*math.Log(u1)) * math.Cos(2*math.Pi*u2)
+		return &Float{Value: mu + sigma*z}
+	}}
+
 	return randomModule
 }
 
@@ -4358,7 +5964,118 @@ func CreateTimeModule() *Module {
 			}
 		},
 	}
-	
+
+	// time.strftime
+	timeModule.Fields["strftime"] = &Builtin{Name: "time.strftime", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("strftime() takes at least 1 argument")
+		}
+		format, ok := args[0].(*String); if !ok {
+			return NewTypeError("strftime() argument must be a string")
+		}
+		t := time.Now()
+		if len(args) >= 2 {
+			if ts, ok := args[1].(*Float); ok {
+				t = time.Unix(0, int64(ts.Value*1e9))
+			}
+			if ts, ok := args[1].(*Integer); ok {
+				t = time.Unix(ts.Value, 0)
+			}
+		}
+		// Simple Python format -> Go format mapping
+		pyFormat := format.Value
+		pyFormat = strings.ReplaceAll(pyFormat, "%Y", "2006")
+		pyFormat = strings.ReplaceAll(pyFormat, "%m", "01")
+		pyFormat = strings.ReplaceAll(pyFormat, "%d", "02")
+		pyFormat = strings.ReplaceAll(pyFormat, "%H", "15")
+		pyFormat = strings.ReplaceAll(pyFormat, "%M", "04")
+		pyFormat = strings.ReplaceAll(pyFormat, "%S", "05")
+		return &String{Value: t.Format(pyFormat)}
+	}}
+
+	// time.strptime
+	timeModule.Fields["strptime"] = &Builtin{Name: "time.strptime", Fn: func(args ...Object) Object {
+		if len(args) < 1 {
+			return NewTypeError("strptime() takes at least 1 argument")
+		}
+		s, ok := args[0].(*String); if !ok {
+			return NewTypeError("strptime() argument must be a string")
+		}
+		format := "%Y-%m-%d %H:%M:%S"
+		if len(args) >= 2 {
+			if f, ok := args[1].(*String); ok {
+				format = f.Value
+			}
+		}
+		// Convert Python format to Go format (simplified)
+		goFormat := format
+		goFormat = strings.ReplaceAll(goFormat, "%Y", "2006")
+		goFormat = strings.ReplaceAll(goFormat, "%m", "01")
+		goFormat = strings.ReplaceAll(goFormat, "%d", "02")
+		goFormat = strings.ReplaceAll(goFormat, "%H", "15")
+		goFormat = strings.ReplaceAll(goFormat, "%M", "04")
+		goFormat = strings.ReplaceAll(goFormat, "%S", "05")
+		t, err := time.Parse(goFormat, s.Value)
+		if err != nil {
+			return NewValueError("time data does not match format")
+		}
+		return &Tuple{Elements: []Object{
+			&Integer{Value: int64(t.Year())}, &Integer{Value: int64(t.Month())},
+			&Integer{Value: int64(t.Day())}, &Integer{Value: int64(t.Hour())},
+			&Integer{Value: int64(t.Minute())}, &Integer{Value: int64(t.Second())},
+			&Integer{Value: int64(t.Weekday())}, &Integer{Value: int64(t.YearDay())},
+			&Integer{Value: -1},
+		}}
+	}}
+
+	// time.mktime
+	timeModule.Fields["mktime"] = &Builtin{Name: "time.mktime", Fn: func(args ...Object) Object {
+		if len(args) != 1 {
+			return NewTypeError("mktime() takes exactly 1 argument")
+		}
+		t := time.Now()
+		return &Float{Value: float64(t.Unix())}
+	}}
+
+	// time.time_ns
+	timeModule.Fields["time_ns"] = &Builtin{Name: "time.time_ns", Fn: func(args ...Object) Object {
+		return &Integer{Value: time.Now().UnixNano()}
+	}}
+
+	// time.monotonic
+	timeModule.Fields["monotonic"] = &Builtin{Name: "time.monotonic", Fn: func(args ...Object) Object {
+		return &Float{Value: float64(time.Now().UnixNano()) / 1e9}
+	}}
+
+	// time.perf_counter
+	timeModule.Fields["perf_counter"] = &Builtin{Name: "time.perf_counter", Fn: func(args ...Object) Object {
+		return &Float{Value: float64(time.Now().UnixNano()) / 1e9}
+	}}
+
+	// time.gmtime
+	timeModule.Fields["gmtime"] = &Builtin{Name: "time.gmtime", Fn: func(args ...Object) Object {
+		t := time.Now().UTC()
+		if len(args) >= 1 {
+			if ts, ok := args[0].(*Float); ok {
+				t = time.Unix(0, int64(ts.Value*1e9)).UTC()
+			}
+			if ts, ok := args[0].(*Integer); ok {
+				t = time.Unix(ts.Value, 0).UTC()
+			}
+		}
+		return &Tuple{Elements: []Object{
+			&Integer{Value: int64(t.Year())}, &Integer{Value: int64(t.Month())},
+			&Integer{Value: int64(t.Day())}, &Integer{Value: int64(t.Hour())},
+			&Integer{Value: int64(t.Minute())}, &Integer{Value: int64(t.Second())},
+			&Integer{Value: int64(t.Weekday())}, &Integer{Value: int64(t.YearDay())},
+		}}
+	}}
+
+	// time.timezone
+	timeModule.Fields["timezone"] = &Integer{Value: 0}
+	// time.tzname
+	timeModule.Fields["tzname"] = &Tuple{Elements: []Object{&String{Value: "UTC"}, &String{Value: "UTC"}}}
+
 	return timeModule
 }
 

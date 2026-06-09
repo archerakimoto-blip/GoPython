@@ -604,6 +604,36 @@ func (c *Compiler) registerBuiltins() {
 	c.constants = append(c.constants, setBuiltin)
 	c.symbolTable.DefineBuiltin("set", setIndex)
 
+	frozensetBuiltin := &objects.Builtin{
+		Name: "frozenset",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				return objects.NewFrozenset(make(map[string]objects.Object), make(map[string]objects.Object))
+			}
+			switch iter := args[0].(type) {
+			case *objects.List:
+				s := objects.NewSet()
+				for _, elem := range iter.Elements { s.Add(elem) }
+				return objects.NewFrozenset(s.Elements, s.Keys)
+			case *objects.Tuple:
+				s := objects.NewSet()
+				for _, elem := range iter.Elements { s.Add(elem) }
+				return objects.NewFrozenset(s.Elements, s.Keys)
+			case *objects.Set:
+				return objects.NewFrozenset(iter.Elements, iter.Keys)
+			case *objects.String:
+				s := objects.NewSet()
+				for _, r := range iter.Value { s.Add(&objects.String{Value: string(r)}) }
+				return objects.NewFrozenset(s.Elements, s.Keys)
+			default:
+				return objects.NewTypeError("'frozenset' object is not callable with %s", args[0].Type())
+			}
+		},
+	}
+	frozensetIndex := len(c.constants)
+	c.constants = append(c.constants, frozensetBuiltin)
+	c.symbolTable.DefineBuiltin("frozenset", frozensetIndex)
+
 	printBuiltin := &objects.Builtin{
 		Fn: func(args ...objects.Object) objects.Object {
 			for i, arg := range args {
@@ -1318,6 +1348,31 @@ func (c *Compiler) registerBuiltins() {
 		{"StopIteration", "StopIteration"},
 		{"NotImplementedError", "NotImplementedError"},
 		{"OverflowError", "OverflowError"},
+		{"Exception", "Exception"},
+		{"BaseException", "BaseException"},
+		{"AssertionError", "AssertionError"},
+		{"OSError", "OSError"},
+		{"IOError", "IOError"},
+		{"FileNotFoundError", "FileNotFoundError"},
+		{"FileExistsError", "FileExistsError"},
+		{"PermissionError", "PermissionError"},
+		{"ImportError", "ImportError"},
+		{"ModuleNotFoundError", "ModuleNotFoundError"},
+		{"SyntaxError", "SyntaxError"},
+		{"IndentationError", "IndentationError"},
+		{"UnicodeError", "UnicodeError"},
+		{"UnicodeDecodeError", "UnicodeDecodeError"},
+		{"UnicodeEncodeError", "UnicodeEncodeError"},
+		{"RecursionError", "RecursionError"},
+		{"IsADirectoryError", "IsADirectoryError"},
+		{"NotADirectoryError", "NotADirectoryError"},
+		{"BufferError", "BufferError"},
+		{"ArithmeticError", "ArithmeticError"},
+		{"LookupError", "LookupError"},
+		{"ReferenceError", "ReferenceError"},
+		{"StopAsyncIteration", "StopAsyncIteration"},
+		{"UnicodeWarning", "UnicodeWarning"},
+		{"DeprecationWarning", "DeprecationWarning"},
 	}
 
 	for _, et := range exceptionTypes {
@@ -2042,6 +2097,183 @@ func (c *Compiler) registerBuiltins() {
 	formatNewIndex := len(c.constants)
 	c.constants = append(c.constants, formatNewBuiltin)
 	c.symbolTable.DefineBuiltin("format", formatNewIndex)
+
+	// 25. divmod(a, b)
+	divmodBuiltin := &objects.Builtin{
+		Name: "divmod",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("divmod() takes exactly 2 arguments")
+			}
+			// Handle int + int
+			if a, ok := args[0].(*objects.Integer); ok {
+				b, ok2 := args[1].(*objects.Integer)
+				if !ok2 {
+					return objects.NewTypeError("unsupported operand type(s) for divmod()")
+				}
+				if b.Value == 0 {
+					return objects.NewZeroDivisionError("integer division or modulo by zero")
+				}
+				quot := a.Value / b.Value
+				rem := a.Value % b.Value
+				return &objects.Tuple{Elements: []objects.Object{&objects.Integer{Value: quot}, &objects.Integer{Value: rem}}}
+			}
+			// Handle float + float
+			if a, ok := args[0].(*objects.Float); ok {
+				b, ok2 := args[1].(*objects.Float)
+				if !ok2 {
+					return objects.NewTypeError("unsupported operand type(s) for divmod()")
+				}
+				quot := math.Trunc(a.Value / b.Value)
+				rem := a.Value - quot*b.Value
+				return &objects.Tuple{Elements: []objects.Object{&objects.Float{Value: quot}, &objects.Float{Value: rem}}}
+			}
+			return objects.NewTypeError("unsupported operand type(s) for divmod()")
+		},
+	}
+	divmodIndex := len(c.constants)
+	c.constants = append(c.constants, divmodBuiltin)
+	c.symbolTable.DefineBuiltin("divmod", divmodIndex)
+
+	// 26. delattr(obj, name)
+	delattrBuiltin := &objects.Builtin{
+		Name: "delattr",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 2 {
+				return objects.NewTypeError("delattr() takes exactly 2 arguments")
+			}
+			name, ok := args[1].(*objects.String)
+			if !ok {
+				return objects.NewTypeError("delattr() attribute name must be string")
+			}
+			if inst, ok := args[0].(*objects.Instance); ok {
+				delete(inst.Fields, name.Value)
+				return objects.None_
+			}
+			return objects.NewTypeError("delattr() first argument must be an object")
+		},
+	}
+	delattrIndex := len(c.constants)
+	c.constants = append(c.constants, delattrBuiltin)
+	c.symbolTable.DefineBuiltin("delattr", delattrIndex)
+
+	// 27. vars([obj])
+	varsBuiltin := &objects.Builtin{
+		Name: "vars",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				// Return empty dict for now (locals not easily accessible)
+				return objects.NewDict()
+			}
+			if inst, ok := args[0].(*objects.Instance); ok {
+				d := objects.NewDict()
+				for k, v := range inst.Fields {
+					d.Set(&objects.String{Value: k}, v)
+				}
+				return d
+			}
+			return objects.NewTypeError("vars() argument must be an object")
+		},
+	}
+	varsIndex := len(c.constants)
+	c.constants = append(c.constants, varsBuiltin)
+	c.symbolTable.DefineBuiltin("vars", varsIndex)
+
+	// 28. ascii(obj)
+	asciiBuiltin := &objects.Builtin{
+		Name: "ascii",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) != 1 {
+				return objects.NewTypeError("ascii() takes exactly 1 argument")
+			}
+			s := args[0].Inspect()
+			// Escape non-ASCII characters
+			var buf strings.Builder
+			for _, r := range s {
+				if r > 127 {
+					buf.WriteString(fmt.Sprintf("\\u%04x", r))
+				} else {
+					buf.WriteRune(r)
+				}
+			}
+			return &objects.String{Value: buf.String()}
+		},
+	}
+	asciiIndex := len(c.constants)
+	c.constants = append(c.constants, asciiBuiltin)
+	c.symbolTable.DefineBuiltin("ascii", asciiIndex)
+
+	// 29. object()
+	objectBuiltin := &objects.Builtin{
+		Name: "object",
+		Fn: func(args ...objects.Object) objects.Object {
+			return &objects.Instance{Fields: make(map[string]objects.Object)}
+		},
+	}
+	objectIndex := len(c.constants)
+	c.constants = append(c.constants, objectBuiltin)
+	c.symbolTable.DefineBuiltin("object", objectIndex)
+
+	// 30. slice([start], stop[, step])
+	sliceBuiltin := &objects.Builtin{
+		Name: "slice",
+		Fn: func(args ...objects.Object) objects.Object {
+			// Return a simple representation
+			if len(args) == 1 {
+				return &objects.Tuple{Elements: []objects.Object{objects.None_, args[0], objects.None_}}
+			}
+			if len(args) == 2 {
+				return &objects.Tuple{Elements: []objects.Object{args[0], args[1], objects.None_}}
+			}
+			if len(args) == 3 {
+				return &objects.Tuple{Elements: []objects.Object{args[0], args[1], args[2]}}
+			}
+			return objects.NewTypeError("slice() takes 1-3 arguments")
+		},
+	}
+	sliceIndex := len(c.constants)
+	c.constants = append(c.constants, sliceBuiltin)
+	c.symbolTable.DefineBuiltin("slice", sliceIndex)
+
+	// 31. bytearray([source])
+	bytearrayBuiltin := &objects.Builtin{
+		Name: "bytearray",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				return &objects.Bytes{Value: []byte{}}
+			}
+			if s, ok := args[0].(*objects.String); ok {
+				return &objects.Bytes{Value: []byte(s.Value)}
+			}
+			if i, ok := args[0].(*objects.Integer); ok {
+				return &objects.Bytes{Value: make([]byte, i.Value)}
+			}
+			return objects.NewTypeError("bytearray() argument must be string or integer")
+		},
+	}
+	bytearrayIndex := len(c.constants)
+	c.constants = append(c.constants, bytearrayBuiltin)
+	c.symbolTable.DefineBuiltin("bytearray", bytearrayIndex)
+
+	// 32. bytes([source])
+	bytesBuiltin := &objects.Builtin{
+		Name: "bytes",
+		Fn: func(args ...objects.Object) objects.Object {
+			if len(args) == 0 {
+				return &objects.Bytes{Value: []byte{}}
+			}
+			if s, ok := args[0].(*objects.String); ok {
+				return &objects.Bytes{Value: []byte(s.Value)}
+			}
+			if i, ok := args[0].(*objects.Integer); ok {
+				return &objects.Bytes{Value: make([]byte, i.Value)}
+			}
+			return objects.NewTypeError("bytes() argument must be string or integer")
+		},
+	}
+	bytesIndex := len(c.constants)
+	c.constants = append(c.constants, bytesBuiltin)
+	c.symbolTable.DefineBuiltin("bytes", bytesIndex)
 }
 
 func NewWithState(s *SymbolTable, constants []objects.Object) *Compiler {
