@@ -48,6 +48,8 @@ const (
 
 	EQ     = "=="
 	NOT_EQ = "!="
+	GTE    = ">="
+	LTE    = "<="
 
 	COMMA     = ","
 	COLON     = ":"
@@ -306,6 +308,10 @@ func (l *Lexer) NextToken() Token {
 			} else {
 				tok = Token{Type: LSHIFT, Literal: string(ch) + string(l.ch)}
 			}
+		} else if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: LTE, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(LT, l.ch)
 		}
@@ -343,6 +349,10 @@ func (l *Lexer) NextToken() Token {
 			} else {
 				tok = Token{Type: RSHIFT, Literal: string(ch) + string(l.ch)}
 			}
+		} else if l.peekChar() == '=' {
+			ch := l.ch
+			l.readChar()
+			tok = Token{Type: GTE, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(GT, l.ch)
 		}

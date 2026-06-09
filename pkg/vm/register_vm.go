@@ -293,6 +293,9 @@ func (rvm *RegisterVM) regGet(reg int) objects.Object {
 
 // binaryOp performs a binary operation on two objects.
 func (rvm *RegisterVM) binaryOp(op compiler.Opcode, left, right objects.Object) (objects.Object, error) {
+	if left == nil || right == nil {
+		return objects.None_, fmt.Errorf("binaryOp: nil operand (left=%v, right=%v, op=%d)", left, right, op)
+	}
 	leftType := left.Type()
 	rightType := right.Type()
 
@@ -443,6 +446,9 @@ func (rvm *RegisterVM) binaryComplexOp(op compiler.Opcode, left, right objects.O
 
 // compareOp performs a comparison operation.
 func (rvm *RegisterVM) compareOp(op compiler.Opcode, left, right objects.Object) (objects.Object, error) {
+	if left == nil || right == nil {
+		return objects.False, fmt.Errorf("compareOp: nil operand (left=%v, right=%v, op=%d)", left, right, op)
+	}
 	if leftEm, ok := left.(*objects.EnumMember); ok {
 		left = leftEm.Value
 	}
@@ -1866,12 +1872,14 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 		case RegOpSetLocal:
 			localIndex := inst.Operands[0]
 			valReg := inst.Operands[1]
-			vm.stack[frame.basePointer+localIndex] = rvm.regGet(valReg)
+			// Store in the register frame at the local's index
+			rvm.regSet(localIndex, rvm.regGet(valReg))
 
 		case RegOpGetLocal:
 			dst := inst.Operands[0]
 			localIndex := inst.Operands[1]
-			rvm.regSet(dst, vm.stack[frame.basePointer+localIndex])
+			// Read from the register frame at the local's index
+			rvm.regSet(dst, rvm.regGet(localIndex))
 
 		case RegOpGetFree:
 			dst := inst.Operands[0]
@@ -2971,12 +2979,12 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 		case RegOpSetLocal:
 			localIndex := inst.Operands[0]
 			valReg := inst.Operands[1]
-			vm.stack[frame.basePointer+localIndex] = rvm.regGet(valReg)
+			rvm.regSet(localIndex, rvm.regGet(valReg))
 
 		case RegOpGetLocal:
 			dst := inst.Operands[0]
 			localIndex := inst.Operands[1]
-			rvm.regSet(dst, vm.stack[frame.basePointer+localIndex])
+			rvm.regSet(dst, rvm.regGet(localIndex))
 
 		case RegOpGetFree:
 			dst := inst.Operands[0]

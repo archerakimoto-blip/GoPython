@@ -324,7 +324,7 @@ func (vm *VM) Run() error {
 				}
 			}
 
-		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower, compiler.OpBitOr, compiler.OpBitAnd, compiler.OpBitXor:
+		case compiler.OpAdd, compiler.OpSub, compiler.OpMul, compiler.OpDiv, compiler.OpMod, compiler.OpFloorDiv, compiler.OpPower, compiler.OpBitOr, compiler.OpBitAnd, compiler.OpBitXor, compiler.OpLShift, compiler.OpRShift:
 			var binaryErr error
 			// 快速整数算术路径：避免函数调用开销
 			right := vm.stack[vm.sp-1]
@@ -367,6 +367,10 @@ func (vm *VM) Run() error {
 						result = leftInt.Value & rightInt.Value
 					case compiler.OpBitXor:
 						result = leftInt.Value ^ rightInt.Value
+					case compiler.OpLShift:
+						result = leftInt.Value << uint(rightInt.Value)
+					case compiler.OpRShift:
+						result = leftInt.Value >> uint(rightInt.Value)
 					default:
 						vm.sp++
 						goto slowBinaryPath
@@ -401,7 +405,7 @@ func (vm *VM) Run() error {
 				return err
 			}
 
-		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan:
+		case compiler.OpEqual, compiler.OpNotEqual, compiler.OpGreaterThan, compiler.OpLessThan, compiler.OpGreaterEqual, compiler.OpLessEqual:
 			err := vm.executeComparison(op)
 			if err != nil {
 				return err
@@ -415,6 +419,18 @@ func (vm *VM) Run() error {
 
 		case compiler.OpBang:
 			err := vm.executeBangOperator()
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpContains:
+			err := vm.executeContainsOp(false)
+			if err != nil {
+				return err
+			}
+
+		case compiler.OpNotContains:
+			err := vm.executeContainsOp(true)
 			if err != nil {
 				return err
 			}
@@ -2948,6 +2964,10 @@ func (vm *VM) executeComparison(op compiler.Opcode) error {
 		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() > right.Inspect()))
 	case compiler.OpLessThan:
 		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() < right.Inspect()))
+	case compiler.OpGreaterEqual:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() >= right.Inspect()))
+	case compiler.OpLessEqual:
+		return vm.push(nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() <= right.Inspect()))
 	default:
 		return fmt.Errorf("unknown operator: %d (%s %s)", op, left.Type(), right.Type())
 	}
@@ -2966,6 +2986,10 @@ func (vm *VM) executeIntegerComparison(op compiler.Opcode, left, right objects.O
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
 	case compiler.OpLessThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+	case compiler.OpGreaterEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue >= rightValue))
+	case compiler.OpLessEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
 	}
@@ -2984,8 +3008,67 @@ func (vm *VM) executeFloatComparison(op compiler.Opcode, left, right objects.Obj
 		return vm.push(nativeBoolToBooleanObject(leftValue > rightValue))
 	case compiler.OpLessThan:
 		return vm.push(nativeBoolToBooleanObject(leftValue < rightValue))
+	case compiler.OpGreaterEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue >= rightValue))
+	case compiler.OpLessEqual:
+		return vm.push(nativeBoolToBooleanObject(leftValue <= rightValue))
 	default:
 		return fmt.Errorf("unknown operator: %d", op)
+	}
+}
+
+func (vm *VM) executeContainsOp(negate bool) error {
+	container := vm.pop()
+	element := vm.pop()
+
+	result := vm.containsCheck(element, container)
+	if negate {
+		result = !result
+	}
+	return vm.push(nativeBoolToBooleanObject(result))
+}
+
+func (vm *VM) containsCheck(element, container objects.Object) bool {
+	switch c := container.(type) {
+	case *objects.List:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return true
+			}
+		}
+		return false
+	case *objects.Tuple:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return true
+			}
+		}
+		return false
+	case *objects.Set:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return true
+			}
+		}
+		return false
+	case *objects.Dict:
+		keyStr := element.Inspect()
+		if _, ok := c.Pairs[keyStr]; ok {
+			return true
+		}
+		return false
+	case *objects.String:
+		if str, ok := element.(*objects.String); ok {
+			for i := 0; i <= len(c.Value)-len(str.Value); i++ {
+				if c.Value[i:i+len(str.Value)] == str.Value {
+					return true
+				}
+			}
+			return false
+		}
+		return false
+	default:
+		return false
 	}
 }
 
@@ -3352,6 +3435,10 @@ func (vm *VM) executeBinaryIntegerOperation(op compiler.Opcode, left, right obje
 		result = leftValue & rightValue
 	case compiler.OpBitXor:
 		result = leftValue ^ rightValue
+	case compiler.OpLShift:
+		result = leftValue << uint(rightValue)
+	case compiler.OpRShift:
+		result = leftValue >> uint(rightValue)
 	default:
 		return fmt.Errorf("unknown integer operator: %d", op)
 	}

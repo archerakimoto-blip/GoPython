@@ -117,6 +117,10 @@ const (
 	OpInPlaceBitXor
 	OpInPlaceLShift
 	OpInPlaceRShift
+	OpLShift
+	OpRShift
+	OpContains
+	OpNotContains
 	OpStringBuilderCreate
 	OpStringBuilderAppend
 	OpStringBuilderBuild
@@ -2386,6 +2390,12 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpPower)
 		case ">":
 			c.emit(OpGreaterThan)
+		case "<":
+			c.emit(OpLessThan)
+		case ">=":
+			c.emit(OpGreaterEqual)
+		case "<=":
+			c.emit(OpLessEqual)
 		case "==":
 			c.emit(OpEqual)
 		case "!=":
@@ -2396,6 +2406,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpBitAnd)
 		case "^":
 			c.emit(OpBitXor)
+		case "<<":
+			c.emit(OpLShift)
+		case ">>":
+			c.emit(OpRShift)
+		case "in":
+			c.emit(OpContains)
+		case "not in":
+			c.emit(OpNotContains)
 		case "and", "or":
 			return fmt.Errorf("and/or operators should be desugared before compilation")
 		default:
@@ -2413,6 +2431,8 @@ func (c *Compiler) Compile(node ast.Node) error {
 			c.emit(OpBang)
 		case "-":
 			c.emit(OpMinus)
+		case "not":
+			c.emit(OpBang)
 		}
 
 	case *ast.AwaitExpression:

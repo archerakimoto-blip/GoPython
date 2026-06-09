@@ -96,7 +96,7 @@ func runREPL() {
 		}
 
 		lastPopped := machine.LastPoppedStackElem()
-		if lastPopped != nil {
+		if lastPopped != nil && lastPopped.Inspect() != "None" {
 			fmt.Println(lastPopped.Inspect())
 		}
 	}
@@ -147,7 +147,7 @@ func runFile(filename string) {
 	}
 
 	lastPopped := machine.LastPoppedStackElem()
-	if lastPopped != nil {
+	if lastPopped != nil && lastPopped.Inspect() != "None" {
 		fmt.Println(lastPopped.Inspect())
 	}
 }
@@ -304,7 +304,7 @@ func runFileRegister(filename string) {
 	}
 
 	lastPopped := rvm.LastPopped()
-	if lastPopped != nil {
+	if lastPopped != nil && lastPopped.Inspect() != "None" {
 		fmt.Println(lastPopped.Inspect())
 	}
 }
@@ -354,7 +354,7 @@ func runREPLRegister() {
 		}
 
 		lastPopped := rvm.LastPopped()
-		if lastPopped != nil {
+		if lastPopped != nil && lastPopped.Inspect() != "None" {
 			fmt.Println(lastPopped.Inspect())
 		}
 	}

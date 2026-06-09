@@ -19,10 +19,12 @@ const (
 	TERNARY // a if b else c
 	OR
 	AND
+	NOT_PREC // not x
 	EQUALS
 	LESSGREATER
 	SUM
 	PRODUCT
+	POWER     // **
 	PREFIX
 	CALL
 	INDEX
@@ -33,6 +35,10 @@ var precedences = map[lexer.TokenType]int{
 	lexer.NOT_EQ:   EQUALS,
 	lexer.LT:       LESSGREATER,
 	lexer.GT:       LESSGREATER,
+	lexer.GTE:      LESSGREATER,
+	lexer.LTE:      LESSGREATER,
+	lexer.IN:       LESSGREATER,
+	lexer.NOT:      LESSGREATER,
 	lexer.PLUS:     SUM,
 	lexer.MINUS:    SUM,
 	lexer.PIPE:     SUM,
@@ -42,6 +48,9 @@ var precedences = map[lexer.TokenType]int{
 	lexer.RSHIFT:   PRODUCT,
 	lexer.SLASH:    PRODUCT,
 	lexer.ASTERISK: PRODUCT,
+	lexer.PERCENT:  PRODUCT,
+	lexer.FLOOR_DIV: PRODUCT,
+	lexer.POWER:    POWER,
 	lexer.LPAREN:   CALL,
 	lexer.LBRACKET: INDEX,
 	lexer.AND:      AND,
@@ -115,6 +124,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(lexer.BYTESTRING, p.parseByteStringLiteral)
 	p.registerPrefix(lexer.BANG, p.parsePrefixExpression)
 	p.registerPrefix(lexer.MINUS, p.parsePrefixExpression)
+	p.registerPrefix(lexer.NOT, p.parsePrefixExpression)
 	p.registerPrefix(lexer.TRUE, p.parseBoolean)
 	p.registerPrefix(lexer.FALSE, p.parseBoolean)
 	p.registerPrefix(lexer.LPAREN, p.parseGroupedExpression)
@@ -171,6 +181,10 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(lexer.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(lexer.LT, p.parseInfixExpression)
 	p.registerInfix(lexer.GT, p.parseInfixExpression)
+	p.registerInfix(lexer.GTE, p.parseInfixExpression)
+	p.registerInfix(lexer.LTE, p.parseInfixExpression)
+	p.registerInfix(lexer.IN, p.parseInfixExpression)
+	p.registerInfix(lexer.NOT, p.parseNotInExpression)
 	p.registerInfix(lexer.LPAREN, p.parseCallExpression)
 	p.registerInfix(lexer.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(lexer.AND, p.parseInfixExpression)
@@ -944,6 +958,30 @@ func (p *Parser) parseInfixExpression(left ast.Expression) ast.Expression {
 	expression.Right = p.parseExpression(precedence)
 
 	return expression
+}
+
+func (p *Parser) parseNotInExpression(left ast.Expression) ast.Expression {
+	// Handle "not in" as a single infix operator
+	// Current token is NOT, check if next is IN
+	if p.peekTokenIs(lexer.IN) {
+		p.nextToken() // advance to IN
+		expression := &ast.InfixExpression{
+			Token:    "not in",
+			Operator: "not in",
+			Left:     left,
+		}
+		precedence := p.curPrecedence()
+		p.nextToken()
+		expression.Right = p.parseExpression(precedence)
+		return expression
+	}
+	// If NOT is not followed by IN, treat it as a prefix expression on the left
+	// This shouldn't normally happen in well-formed Python, but handle gracefully
+	return &ast.PrefixExpression{
+		Token:    "not",
+		Operator: "not",
+		Right:    left,
+	}
 }
 
 func (p *Parser) parseGroupedExpression() ast.Expression {
