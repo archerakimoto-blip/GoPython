@@ -96,7 +96,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ⚠️ 直接线程 — 未实现
 ✅ 寄存器 VM — 直接编译器后端，寄存器帧隔离，全操作码覆盖，内联缓存，原生函数调用，翻译层已移除
 
-### 5. 标准库 (完成度: 90%)
+### 5. 标准库 (完成度: 75%)
 
 ✅ math, sys, os, json, gc, random, string, time, datetime
 ✅ re (正则表达式), io (StringIO/BytesIO), concurrency
@@ -107,6 +107,32 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 ✅ base64 / struct / itertools (15个函数)
 ✅ sys.getsizeof 真实实现
 ✅ asyncio 模块 — run/create_task/sleep/gather/Event/Future/wait_for/open/create_subprocess_exec
+⚠️ math — 缺失 atan2, copysign, fmod, frexp, ldexp, modf, isnan, isinf, isfinite, erf, erfc, gamma, lgamma, factorial, gcd, lcm, comb, perm, prod, inf, nan, tau, nextafter, ulp
+⚠️ os — 缺失 rmdir, makedirs, removedirs, walk, stat, os.path 子模块 (exists/isfile/isdir/join/split 等)
+⚠️ json — 缺失 dump, load, JSONEncoder, JSONDecoder
+⚠️ random — 缺失 randrange, sample, choices, gauss, normalvariate 等
+⚠️ time — 缺失 strftime, strptime, gmtime, mktime, time_ns, monotonic, perf_counter, struct_time
+⚠️ datetime — 返回字符串而非对象，缺失 timedelta, strptime, fromtimestamp, 属性访问
+⚠️ sys — 缺失 stdin/stdout/stderr, modules, exc_info, executable, prefix, byteorder, maxsize, flags
+
+### 6. 内置类型方法 (完成度: 55%)
+
+✅ str — rfind, rindex, count, isdigit, isalpha, isalnum, isspace, isupper, islower, istitle, capitalize, title, swapcase, center, ljust, rjust, zfill, partition, rpartition, encode, isdecimal, isnumeric, isidentifier, isprintable, expandtabs, translate, format_map
+⚠️ str — 缺失 find, index, replace, split, rsplit, splitlines, join, strip, lstrip, rstrip, upper, lower, startswith, endswith, format, casefold, maketrans
+✅ list — sort, __imul__, __iadd__
+⚠️ list — 缺失 append, extend, insert, remove, pop, clear, index, count, reverse, copy
+✅ dict — fromkeys, update, setdefault, popitem, pop, get, clear, copy, keys, values, items
+✅ set — union, intersection, difference, symmetric_difference, issubset, issuperset, update, copy, __isub__, difference_update, __ior__, __iand__, __ixor__
+⚠️ set — 缺失 add, remove, discard, pop, clear, intersection_update, symmetric_difference_update
+⚠️ tuple — 完全缺失 GetAttr（缺失 count, index）
+⚠️ int — 完全缺失 GetAttr（缺失 bit_length, to_bytes, from_bytes）
+⚠️ float — 完全缺失 GetAttr（缺失 is_integer, hex, fromhex, as_integer_ratio）
+⚠️ bytes — 完全缺失 GetAttr（缺失 decode, hex 等）
+
+### 7. 内置函数 (完成度: 75%)
+
+✅ print, len, range, set, open, next, type, str, int, float, bool, abs, complex, list, min, max, sum, format, input, round, zip, enumerate, property, classmethod, staticmethod, super, ExceptionGroup, isinstance, issubclass, hasattr, getattr, setattr, dir, id, hash, callable, map, filter, sorted, reversed, repr, iter, any, all, chr, ord, hex, oct, bin
+⚠️ 缺失 divmod, frozenset, pow(三参数), delattr, globals, locals, vars, eval, exec, compile, bytearray, bytes, memoryview, slice, ascii, object, __import__, breakpoint
 
 ---
 
@@ -217,6 +243,103 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **异步文件 I/O** — 基于协程的文件操作
 - [x] **异步网络** — 基于协程的 TCP/UDP
 
+### v0.28 — 内置方法与标准库补齐
+
+> 目标：补齐排查出的内置函数、对象方法和标准库模块缺失，提升 CPython 兼容性。
+
+#### B1. 字符串方法补齐（优先级：高）
+
+- [ ] **B1.1**: `str.find()` — 查找子串位置，支持 start/end 参数
+- [ ] **B1.2**: `str.index()` — 查找子串位置，不存在抛 ValueError
+- [ ] **B1.3**: `str.replace()` — 子串替换，支持 count 参数
+- [ ] **B1.4**: `str.split()` — 字符串分割，支持 sep/maxsplit 参数
+- [ ] **B1.5**: `str.rsplit()` — 右分割
+- [ ] **B1.6**: `str.splitlines()` — 按行分割
+- [ ] **B1.7**: `str.join()` — 连接序列
+- [ ] **B1.8**: `str.strip()` / `str.lstrip()` / `str.rstrip()` — 去除首尾字符
+- [ ] **B1.9**: `str.upper()` / `str.lower()` — 大小写转换
+- [ ] **B1.10**: `str.startswith()` / `str.endswith()` — 前缀/后缀判断
+- [ ] **B1.11**: `str.format()` — 格式化字符串
+- [ ] **B1.12**: `str.casefold()` — 大小写折叠
+- [ ] **B1.13**: `str.maketrans()` — 创建转换表（实例方法版）
+
+#### B2. 列表方法补齐（优先级：高）
+
+- [ ] **B2.1**: `list.append()` — 追加元素
+- [ ] **B2.2**: `list.extend()` — 扩展列表
+- [ ] **B2.3**: `list.insert()` — 插入元素
+- [ ] **B2.4**: `list.remove()` — 删除首个匹配元素
+- [ ] **B2.5**: `list.pop()` — 弹出指定位置元素
+- [ ] **B2.6**: `list.clear()` — 清空列表
+- [ ] **B2.7**: `list.index()` — 查找元素索引
+- [ ] **B2.8**: `list.count()` — 统计元素出现次数
+- [ ] **B2.9**: `list.reverse()` — 反转列表
+- [ ] **B2.10**: `list.copy()` — 浅拷贝
+
+#### B3. 集合方法补齐（优先级：中）
+
+- [ ] **B3.1**: `set.add()` — 添加元素
+- [ ] **B3.2**: `set.remove()` — 删除元素（不存在抛 KeyError）
+- [ ] **B3.3**: `set.discard()` — 安全删除元素
+- [ ] **B3.4**: `set.pop()` — 弹出元素
+- [ ] **B3.5**: `set.clear()` — 清空集合
+- [ ] **B3.6**: `set.intersection_update()` — 交集更新
+- [ ] **B3.7**: `set.symmetric_difference_update()` — 对称差更新
+
+#### B4. 元组/整数/浮点/字节方法补齐（优先级：中）
+
+- [ ] **B4.1**: `tuple.count()` / `tuple.index()` — 元组方法
+- [ ] **B4.2**: `int.bit_length()` / `int.to_bytes()` / `int.from_bytes()` — 整数方法
+- [ ] **B4.3**: `float.is_integer()` / `float.hex()` / `float.fromhex()` / `float.as_integer_ratio()` — 浮点方法
+- [ ] **B4.4**: `bytes.decode()` / `bytes.hex()` — 字节方法
+
+#### B5. 缺失内置函数补齐（优先级：高）
+
+- [ ] **B5.1**: `divmod()` — 商和余数
+- [ ] **B5.2**: `frozenset()` — 冻结集合构造
+- [ ] **B5.3**: `pow()` 三参数版 — 幂运算 + 取模
+- [ ] **B5.4**: `delattr()` — 删除属性
+- [ ] **B5.5**: `globals()` / `locals()` — 返回变量字典
+- [ ] **B5.6**: `vars()` — 返回对象 __dict__
+- [ ] **B5.7**: `eval()` / `exec()` — 动态执行代码
+- [ ] **B5.8**: `compile()` — 编译源代码
+- [ ] **B5.9**: `bytearray()` — 字节数组构造
+- [ ] **B5.10**: `bytes()` — 字节构造
+- [ ] **B5.11**: `memoryview()` — 内存视图
+- [ ] **B5.12**: `slice()` — 切片对象构造
+- [ ] **B5.13**: `ascii()` — 返回 ASCII 表示
+- [ ] **B5.14**: `object()` — 基础对象构造
+- [ ] **B5.15**: `__import__()` — 模块导入函数
+- [ ] **B5.16**: `breakpoint()` — 调试断点
+
+#### B6. 缺失异常类型补齐（优先级：中）
+
+- [ ] **B6.1**: `Exception` / `BaseException` — 基础异常类
+- [ ] **B6.2**: `AssertionError` — 断言错误
+- [ ] **B6.3**: `OSError` / `IOError` / `FileNotFoundError` / `FileExistsError` / `PermissionError` — 系统异常族
+- [ ] **B6.4**: `ImportError` / `ModuleNotFoundError` — 导入异常
+- [ ] **B6.5**: `SyntaxError` / `IndentationError` — 语法异常
+- [ ] **B6.6**: `UnicodeError` / `UnicodeDecodeError` / `UnicodeEncodeError` — Unicode 异常
+- [ ] **B6.7**: `RecursionError` — 递归错误
+- [ ] **B6.8**: `IsADirectoryError` / `NotADirectoryError` — 目录异常
+
+#### B7. 标准库模块补齐（优先级：中）
+
+- [ ] **B7.1**: math — `atan2, copysign, fmod, frexp, ldexp, modf, isnan, isinf, isfinite, erf, erfc, gamma, lgamma, factorial, gcd, lcm, comb, perm, prod, inf, nan, tau, nextafter, ulp`
+- [ ] **B7.2**: os — `rmdir, makedirs, removedirs, walk, stat, os.name, os.linesep, os.curdir, os.pardir`；os.path 子模块 — `exists, isfile, isdir, join, split, basename, dirname, getsize, abspath, realpath, expanduser`
+- [ ] **B7.3**: json — `dump, load, JSONEncoder, JSONDecoder`
+- [ ] **B7.4**: random — `randrange, sample, choices, gauss, normalvariate, lognormvariate, expovariate, triangular`
+- [ ] **B7.5**: time — `strftime, strptime, gmtime, mktime, time_ns, monotonic, perf_counter, process_time, timezone, tzname, struct_time`
+- [ ] **B7.6**: datetime — 重构为对象返回（非字符串），补齐 `timedelta, strptime, fromtimestamp, year/month/day 等属性访问`
+- [ ] **B7.7**: sys — `stdin, stdout, stderr, modules, exc_info, executable, prefix, byteorder, maxsize, flags`
+
+#### B8. 缺失类型补齐（优先级：低）
+
+- [ ] **B8.1**: `bytearray` 类型 — 可变字节数组
+- [ ] **B8.2**: `frozenset` 类型 — 不可变集合
+- [ ] **B8.3**: `memoryview` 类型 — 内存视图
+- [ ] **B8.4**: `slice` 对象 — 切片对象类型
+
 ### v1.0.0 — Production Ready
 
 - [x] 所有 v0.18-v0.25 里程碑完成
@@ -225,6 +348,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [ ] 测试覆盖率 > 80%（当前：Lexer 97.9%, Desugar 99.6%, Parser 81.7%, Compiler 78.3%, VM 52.4%）
 - [x] 关键路径测试覆盖率 > 95%（Lexer, Desugar 已达标）
 - [x] 跨平台验证（Linux/macOS/Windows/WASM）
+- [ ] v0.28 内置方法与标准库补齐
 - [ ] 生产环境验证
 
 ---
