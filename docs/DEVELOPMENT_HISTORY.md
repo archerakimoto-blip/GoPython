@@ -548,3 +548,120 @@
 - [x] **struct/module_test.go** — 30+ 个测试，覆盖所有格式码和字节序
 - [x] **vm/vm_test_new_test.go** — 200+ 个测试，覆盖栈式 VM 操作码
 - [x] **vm/vm_coverage_boost_test.go** — 200+ 个测试，覆盖 VM 内部函数和寄存器 VM
+
+---
+
+## v0.28 — 内置方法与标准库补齐 ✅
+
+> 完成时间：2026-06
+
+### 内置函数补齐
+
+- 新增 `divmod`, `delattr`, `vars`, `ascii`, `object`, `slice`, `bytearray`, `bytes`, `frozenset`
+- 新增 `pow` 三参数版本 `pow(base, exp, mod)`
+- 新增 `eval`, `exec` — 通过回调模式解决 compiler ↔ vm 循环依赖
+- 新增 `globals`, `locals` — 通过回调模式 + LocalNames 字段实现
+- 新增 `__import__`, `compile`, `memoryview`, `breakpoint`
+
+### 异常类型补齐
+
+新增 25 种异常类型：OSError, IOError, FileExistsError, PermissionError, ModuleNotFoundError, UnicodeError, BufferError, ArithmeticError, LookupError, ReferenceError, StopIteration, StopAsyncIteration, BufferError, ImportError, FileNotFoundError, IsADirectoryError, NotADirectoryError, InterruptedError, ProcessLookupError, ChildProcessError, ConnectionError, ConnectionAbortedError, ConnectionRefusedError, ConnectionResetError, BrokenPipeError
+
+### 内置类型方法补齐
+
+- **String**: find, index, replace, split, rsplit, splitlines, join, strip, lstrip, rstrip, upper, lower, startswith, endswith, format, casefold, maketrans + 17 个 dunder 方法
+- **List**: append, extend, insert, remove, pop, clear, index, count, reverse, copy + dunder 方法
+- **Set**: add, remove, discard, pop, clear, intersection_update, symmetric_difference_update + __len__, __contains__
+- **Dict**: __len__, __contains__, __eq__
+- **Tuple**: count, index
+- **Integer**: bit_length, bit_count, to_bytes
+- **Float**: is_integer, hex, as_integer_ratio
+- **Bytes**: decode, hex, __len__
+- **Frozenset**: 新类型，union, intersection, issubset, issuperset, copy
+- **Memoryview**: 新类型，tobytes, hex, __len__, __getitem__, readonly, format, itemsize, nbytes
+- **SliceObject**: 新类型，start, stop, step, indices()
+- **FileObject**: 新类型，read, readline, write, close, flush, name, closed
+
+### 标准库补齐
+
+- **math**: atan2, copysign, fmod, isnan, isinf, isfinite, factorial, gcd, lcm, inf, nan, tau
+- **os**: rmdir, makedirs, removedirs, stat, os.path 子模块 (exists/isfile/isdir/join/split/basename/dirname/getsize/abspath)
+- **json**: dump, load
+- **random**: randrange, sample, choices, gauss
+- **time**: strftime, strptime, gmtime, mktime, time_ns, monotonic, perf_counter, timezone, tzname
+- **sys**: maxsize, byteorder, executable, prefix, modules, flags
+- **datetime**: Instance 对象返回，strptime/fromtimestamp/fromisoformat/timezone.utc/min/max
+- **string**: capwords, Template, Formatter
+- **collections**: namedtuple, ChainMap
+- **io**: FileObject + open()
+- **functools**: cmp_to_key
+- **itertools**: combinations_with_replacement, dropwhile, takewhile, compress
+- **hashlib**: blake2b, blake2s, shake_128, shake_256
+- **base64**: b32encode/decode, b16encode/decode, a85encode/decode, b85encode/decode
+- **typing**: ParamSpec, Concatenate, TypeAlias, TypeGuard, Never, NoReturn, Self, Unpack, TypeVarTuple, override, final
+
+### 架构改进
+
+- **回调模式**: 新增 `EvalExecFunc`, `GlobalsFunc`, `LocalsFunc` 变量解决 compiler ↔ vm 循环依赖
+- **LocalNames**: CompiledFunction 新增 LocalNames 字段，通过 Closure 传播，支持 locals() 访问
+- **SymbolTable.Store()**: 新增方法支持 globals/locals 回调
+- **错误构造器**: NewOSError, NewIOError, NewFileExistsError, NewPermissionError, NewModuleNotFoundError, NewUnicodeError, NewBufferError, NewArithmeticError, NewLookupError, NewReferenceError
+
+---
+
+## v0.29 — 标准库与内置方法深度补齐 ✅
+
+> 完成时间：2026-06
+
+### 深度补齐内容
+
+- **String 方法**: rfind, rindex, count, isdigit, isalpha, isalnum, isspace, isupper, islower, istitle, capitalize, title, swapcase, center, ljust, rjust, zfill, partition, rpartition, encode, isdecimal, isnumeric, isidentifier, isprintable, expandtabs, translate, format_map
+- **List 方法**: sort, __imul__, __iadd__
+- **Set 方法**: union, intersection, difference, symmetric_difference, issubset, issuperset, update, difference_update, __isub__, __ior__, __iand__, __ixor__
+- **Dict 方法**: fromkeys, update, setdefault, popitem, pop, get, clear, copy, keys, values, items
+- **compareObjectsEqual()**: 通用对象相等比较辅助函数
+- **toFloat()**: 类型转换辅助函数
+
+---
+
+## v0.30 — 寄存器 VM 功能完善 ✅
+
+> 完成时间：2026-06
+
+### 寄存器编译器操作符补齐
+
+- **位移操作符**: `<<` / `>>` 编译为 ROpLShift/ROpRShift
+- **比较操作符**: `>=` / `<=` 编译为 ROpCompare(OpGreaterEqual/OpLessEqual)
+- **成员测试操作符**: `in` / `not in` 编译为 ROpContains/ROpNotContains
+- **布尔短路操作符**: `and` / `or` 编译为 JumpIfFalse + Move 模式实现短路求值
+- **`not` 关键字**: PrefixExpression 支持 `not` 操作符（与 `!` 等价）
+
+### 寄存器 VM 操作码补齐
+
+- **RegOpLShift/RegOpRShift**: 整数位移快速路径 + fallback，在 RunRegDirect 和 executeRegFrame 两个执行循环中实现
+- **RegOpContains/RegOpNotContains**: List/Tuple/Set/Dict/String 成员测试，新增 `regContains` 辅助函数
+- **compareOp 扩展**: OpGreaterEqual/OpLessEqual 支持（Integer/Float/通用路径）
+
+### 寄存器编译器表达式修复
+
+- **IfExpression 结果返回**: 从 BlockStatement 提取单表达式结果，不再总是返回 Null
+- **栈 VM 操作码扩展**: 新增 OpGreaterEqual/OpLessEqual，opToString 更新
+
+### 新增操作码
+
+| 操作码 | 编号 | 说明 |
+|--------|------|------|
+| ROpLShift | 83 | 左位移 |
+| ROpRShift | 84 | 右位移 |
+| ROpBoolAnd | 85 | 布尔与（预留） |
+| ROpBoolOr | 86 | 布尔或（预留） |
+| ROpContains | 87 | 成员测试 in |
+| ROpNotContains | 88 | 非成员测试 not in |
+
+### 新增测试
+
+- TestRegisterVMLShiftRShift — 位移操作
+- TestRegisterVMContainsOp — 成员测试 in
+- TestRegisterVMNotContainsOp — 非成员测试 not in
+- TestRegisterVMComparisonGTELT — >= / <= 比较
+- TestRegisterVMIfExpressionResult — If 表达式结果返回
