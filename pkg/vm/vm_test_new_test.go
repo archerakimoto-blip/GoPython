@@ -8339,3 +8339,72 @@ _r = _f.__class__.__name__
 		t.Fatalf("Register VM execution error: %s", err)
 	}
 }
+
+func TestRegisterVMLShiftRShift(t *testing.T) {
+	rbc := compileToRegBytecodeNew(`
+_a = 1 << 3
+_b = 16 >> 2
+`)
+	globals := make([]objects.Object, GlobalSize)
+	rvm := NewRegisterVMWithBytecode(rbc, globals)
+	err := rvm.RunRegDirect(rbc)
+	if err != nil {
+		t.Fatalf("Register VM execution error: %s", err)
+	}
+}
+
+func TestRegisterVMContainsOp(t *testing.T) {
+	rbc := compileToRegBytecodeNew(`
+_a = 2 in [1, 2, 3]
+_b = 5 in [1, 2, 3]
+_c = "hello" in "hello world"
+_d = "xyz" in "hello world"
+`)
+	globals := make([]objects.Object, GlobalSize)
+	rvm := NewRegisterVMWithBytecode(rbc, globals)
+	err := rvm.RunRegDirect(rbc)
+	if err != nil {
+		t.Fatalf("Register VM execution error: %s", err)
+	}
+}
+
+func TestRegisterVMNotContainsOp(t *testing.T) {
+	rbc := compileToRegBytecodeNew(`
+_a = 5 not in [1, 2, 3]
+_b = 2 not in [1, 2, 3]
+`)
+	globals := make([]objects.Object, GlobalSize)
+	rvm := NewRegisterVMWithBytecode(rbc, globals)
+	err := rvm.RunRegDirect(rbc)
+	if err != nil {
+		t.Fatalf("Register VM execution error: %s", err)
+	}
+}
+
+func TestRegisterVMComparisonGTELT(t *testing.T) {
+	rbc := compileToRegBytecodeNew(`
+_a = 5 >= 3
+_b = 3 >= 5
+_c = 3 <= 5
+_d = 5 <= 3
+`)
+	globals := make([]objects.Object, GlobalSize)
+	rvm := NewRegisterVMWithBytecode(rbc, globals)
+	err := rvm.RunRegDirect(rbc)
+	if err != nil {
+		t.Fatalf("Register VM execution error: %s", err)
+	}
+}
+
+func TestRegisterVMIfExpressionResult(t *testing.T) {
+	rbc := compileToRegBytecodeNew(`
+_a = 10 if True else 20
+_b = 10 if False else 20
+`)
+	globals := make([]objects.Object, GlobalSize)
+	rvm := NewRegisterVMWithBytecode(rbc, globals)
+	err := rvm.RunRegDirect(rbc)
+	if err != nil {
+		t.Fatalf("Register VM execution error: %s", err)
+	}
+}

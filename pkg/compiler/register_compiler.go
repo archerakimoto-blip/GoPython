@@ -98,6 +98,12 @@ const (
 	ROpListUnpack
 	ROpDictUnpack
 	ROpExceptStarHandler
+	ROpLShift
+	ROpRShift
+	ROpBoolAnd
+	ROpBoolOr
+	ROpContains
+	ROpNotContains
 )
 
 // RegInstruction represents a single register-based instruction.
@@ -285,7 +291,7 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		switch node.Operator {
 		case "-":
 			rc.emitReg(ROpNegate, dst, right)
-		case "!":
+		case "!", "not":
 			rc.emitReg(ROpNot, dst, right)
 		}
 		rc.freeReg(right)
@@ -325,6 +331,10 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 			rc.emitReg(ROpBitAnd, dst, left, right)
 		case "^":
 			rc.emitReg(ROpBitXor, dst, left, right)
+		case "<<":
+			rc.emitReg(ROpLShift, dst, left, right)
+		case ">>":
+			rc.emitReg(ROpRShift, dst, left, right)
 		case "==":
 			rc.emitReg(ROpCompare, dst, left, right, int(OpEqual))
 		case "!=":
@@ -333,6 +343,79 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 			rc.emitReg(ROpCompare, dst, left, right, int(OpGreaterThan))
 		case "<":
 			rc.emitReg(ROpCompare, dst, left, right, int(OpLessThan))
+		case ">=":
+			rc.emitReg(ROpCompare, dst, left, right, int(OpGreaterEqual))
+		case "<=":
+			rc.emitReg(ROpCompare, dst, left, right, int(OpLessEqual))
+		case "in":
+			rc.emitReg(ROpContains, dst, left, right)
+		case "not in":
+			rc.emitReg(ROpNotContains, dst, left, right)
+		case "and":
+			// Short-circuit: if left is falsy, result = left; else result = right
+			// Jump if left is falsy over right evaluation
+			rc.freeReg(right) // we won't use the pre-compiled right
+			rc.freeReg(dst)
+			rc.freeReg(left)
+			// Re-compile: evaluate left, jump if false, evaluate right, move to result
+			leftReg, err := rc.compileExpr(node.Left)
+			if err != nil {
+				return 0, err
+			}
+			jumpIdx := len(rc.instructions)
+			rc.emitReg(ROpJumpIfFalse, leftReg, -1) // placeholder
+			rc.freeReg(leftReg)
+			rightReg, err := rc.compileExpr(node.Right)
+			if err != nil {
+				return 0, err
+			}
+			resultReg := rc.allocReg()
+			rc.emitReg(ROpMove, resultReg, rightReg)
+			rc.freeReg(rightReg)
+			endIdx := len(rc.instructions)
+			rc.emitReg(ROpJump, -1) // placeholder
+			rc.instructions[jumpIdx].Operands[1] = len(rc.instructions)
+			// Falsy path: result = left
+			leftReg2, err := rc.compileExpr(node.Left)
+			if err != nil {
+				return 0, err
+			}
+			rc.emitReg(ROpMove, resultReg, leftReg2)
+			rc.freeReg(leftReg2)
+			rc.instructions[endIdx].Operands[0] = len(rc.instructions)
+			return resultReg, nil
+		case "or":
+			// Short-circuit: if left is truthy, result = left; else result = right
+			rc.freeReg(right)
+			rc.freeReg(dst)
+			rc.freeReg(left)
+			leftReg, err := rc.compileExpr(node.Left)
+			if err != nil {
+				return 0, err
+			}
+			jumpIdx := len(rc.instructions)
+			rc.emitReg(ROpJumpIfFalse, leftReg, -1) // placeholder: if false, go to right
+			rc.freeReg(leftReg)
+			// Truthy path: result = left
+			leftReg2, err := rc.compileExpr(node.Left)
+			if err != nil {
+				return 0, err
+			}
+			resultReg := rc.allocReg()
+			rc.emitReg(ROpMove, resultReg, leftReg2)
+			rc.freeReg(leftReg2)
+			endIdx := len(rc.instructions)
+			rc.emitReg(ROpJump, -1) // placeholder
+			rc.instructions[jumpIdx].Operands[1] = len(rc.instructions)
+			// Falsy path: result = right
+			rightReg, err := rc.compileExpr(node.Right)
+			if err != nil {
+				return 0, err
+			}
+			rc.emitReg(ROpMove, resultReg, rightReg)
+			rc.freeReg(rightReg)
+			rc.instructions[endIdx].Operands[0] = len(rc.instructions)
+			return resultReg, nil
 		default:
 			return 0, fmt.Errorf("unknown operator %s", node.Operator)
 		}
@@ -348,16 +431,25 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		rc.emitReg(ROpJumpIfFalse, cond, -1) // placeholder
 		rc.freeReg(cond)
 
-		// Compile consequence (BlockStatement)
+		// Compile consequence - try to extract result if it's a single expression
 		var conseqReg int
-		if node.Consequence != nil {
-			err = rc.compileStmt(node.Consequence)
-			if err != nil {
-				return 0, err
+		conseqCompiled := false
+		if node.Consequence != nil && len(node.Consequence.Statements) == 1 {
+			if exprStmt, ok := node.Consequence.Statements[0].(*ast.ExpressionStatement); ok {
+				conseqReg, err = rc.compileExpr(exprStmt.Expression)
+				if err != nil {
+					return 0, err
+				}
+				conseqCompiled = true
 			}
-			conseqReg = rc.allocReg()
-			rc.emitReg(ROpNull, conseqReg)
-		} else {
+		}
+		if !conseqCompiled {
+			if node.Consequence != nil {
+				err = rc.compileStmt(node.Consequence)
+				if err != nil {
+					return 0, err
+				}
+			}
 			conseqReg = rc.allocReg()
 			rc.emitReg(ROpNull, conseqReg)
 		}
@@ -369,18 +461,32 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		// Patch the jump-if-false target
 		rc.instructions[jumpIdx].Operands[1] = len(rc.instructions)
 
+		// Compile alternative - try to extract result if it's a single expression
 		var altReg int
-		if node.Alternative != nil {
-			err = rc.compileStmt(node.Alternative)
-			if err != nil {
-				return 0, err
+		altCompiled := false
+		if node.Alternative != nil && len(node.Alternative.Statements) == 1 {
+			if exprStmt, ok := node.Alternative.Statements[0].(*ast.ExpressionStatement); ok {
+				altReg, err = rc.compileExpr(exprStmt.Expression)
+				if err != nil {
+					return 0, err
+				}
+				altCompiled = true
+			}
+		}
+		if !altCompiled {
+			if node.Alternative != nil {
+				err = rc.compileStmt(node.Alternative)
+				if err != nil {
+					return 0, err
+				}
 			}
 			altReg = rc.allocReg()
 			rc.emitReg(ROpNull, altReg)
-		} else {
-			altReg = rc.allocReg()
-			rc.emitReg(ROpNull, altReg)
 		}
+
+		// Move alternative result to same register as consequence
+		rc.emitReg(ROpMove, conseqReg, altReg)
+		rc.freeReg(altReg)
 
 		// Patch the jump-over target
 		rc.instructions[jumpOverIdx].Operands[0] = len(rc.instructions)

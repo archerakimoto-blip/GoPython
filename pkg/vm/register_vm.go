@@ -145,6 +145,18 @@ const (
 
 	// Array prealloc
 	RegOpArrayPrealloc // dst = list with pre-allocated capacity
+
+	// Shift operations
+	RegOpLShift // dst = src1 << src2
+	RegOpRShift // dst = src1 >> src2
+
+	// Boolean short-circuit
+	RegOpBoolAnd // dst = src1 and src2
+	RegOpBoolOr  // dst = src1 or src2
+
+	// Membership
+	RegOpContains    // dst = src1 in src2
+	RegOpNotContains // dst = src1 not in src2
 )
 
 // RegInstruction represents a single register-based instruction.
@@ -450,6 +462,10 @@ func (rvm *RegisterVM) compareOp(op compiler.Opcode, left, right objects.Object)
 			return nativeBoolToBooleanObject(leftValue > rightValue), nil
 		case compiler.OpLessThan:
 			return nativeBoolToBooleanObject(leftValue < rightValue), nil
+		case compiler.OpGreaterEqual:
+			return nativeBoolToBooleanObject(leftValue >= rightValue), nil
+		case compiler.OpLessEqual:
+			return nativeBoolToBooleanObject(leftValue <= rightValue), nil
 		}
 	}
 
@@ -465,6 +481,10 @@ func (rvm *RegisterVM) compareOp(op compiler.Opcode, left, right objects.Object)
 			return nativeBoolToBooleanObject(leftValue > rightValue), nil
 		case compiler.OpLessThan:
 			return nativeBoolToBooleanObject(leftValue < rightValue), nil
+		case compiler.OpGreaterEqual:
+			return nativeBoolToBooleanObject(leftValue >= rightValue), nil
+		case compiler.OpLessEqual:
+			return nativeBoolToBooleanObject(leftValue <= rightValue), nil
 		}
 	}
 
@@ -490,6 +510,10 @@ func (rvm *RegisterVM) compareOp(op compiler.Opcode, left, right objects.Object)
 		return nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() > right.Inspect()), nil
 	case compiler.OpLessThan:
 		return nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() < right.Inspect()), nil
+	case compiler.OpGreaterEqual:
+		return nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() >= right.Inspect()), nil
+	case compiler.OpLessEqual:
+		return nativeBoolToBooleanObject(left.Type() == right.Type() && left.Inspect() <= right.Inspect()), nil
 	}
 
 	return nil, fmt.Errorf("unknown comparison operator: %d", op)
@@ -518,6 +542,51 @@ func (rvm *RegisterVM) notOp(operand objects.Object) objects.Object {
 		return objects.True
 	case objects.None_:
 		return objects.True
+	default:
+		return objects.False
+	}
+}
+
+// regContains performs the "in" membership test.
+func (rvm *RegisterVM) regContains(element, container objects.Object) objects.Object {
+	switch c := container.(type) {
+	case *objects.List:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return objects.True
+			}
+		}
+		return objects.False
+	case *objects.Tuple:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return objects.True
+			}
+		}
+		return objects.False
+	case *objects.Set:
+		for _, item := range c.Elements {
+			if objects.Equal(element, item) {
+				return objects.True
+			}
+		}
+		return objects.False
+	case *objects.Dict:
+		keyStr := element.Inspect()
+		if _, ok := c.Pairs[keyStr]; ok {
+			return objects.True
+		}
+		return objects.False
+	case *objects.String:
+		if str, ok := element.(*objects.String); ok {
+			for i := 0; i <= len(c.Value)-len(str.Value); i++ {
+				if c.Value[i:i+len(str.Value)] == str.Value {
+					return objects.True
+				}
+			}
+			return objects.False
+		}
+		return objects.False
 	default:
 		return objects.False
 	}
@@ -1484,6 +1553,12 @@ var compilerToVMOpcode = map[byte]RegOpcode{
 	80: RegOpListUnpack,
 	81: RegOpDictUnpack,
 	82: RegOpExceptStarHandler,
+	83: RegOpLShift,
+	84: RegOpRShift,
+	85: RegOpBoolAnd,
+	86: RegOpBoolOr,
+	87: RegOpContains,
+	88: RegOpNotContains,
 }
 
 func convertCompilerRegInstructions(instrs []compiler.RegInstruction) []RegInstruction {
@@ -2337,6 +2412,70 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 				return err
 			}
 			rvm.regSet(dst, result)
+
+		case RegOpLShift:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					rvm.regSet(dst, objects.GetCachedInteger(leftInt.Value<<rightInt.Value))
+					ip++
+					continue
+				}
+			}
+			result, err := rvm.regBinaryOp(compiler.OpBitOr, left, right) // fallback
+			if err != nil {
+				return err
+			}
+			rvm.regSet(dst, result)
+
+		case RegOpRShift:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					rvm.regSet(dst, objects.GetCachedInteger(leftInt.Value>>rightInt.Value))
+					ip++
+					continue
+				}
+			}
+			result, err := rvm.regBinaryOp(compiler.OpBitOr, left, right) // fallback
+			if err != nil {
+				return err
+			}
+			rvm.regSet(dst, result)
+
+		case RegOpContains:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			result := rvm.regContains(left, right)
+			rvm.regSet(dst, result)
+
+		case RegOpNotContains:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			result := rvm.regContains(left, right)
+			if b, ok := result.(*objects.Boolean); ok {
+				if b.Value {
+					rvm.regSet(dst, &objects.Boolean{Value: false})
+				} else {
+					rvm.regSet(dst, &objects.Boolean{Value: true})
+				}
+			} else {
+				rvm.regSet(dst, result)
+			}
 
 		// In-place operations
 		case RegOpInPlaceAdd, RegOpInPlaceSub, RegOpInPlaceMul,
@@ -3463,6 +3602,70 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 				return err
 			}
 			rvm.regSet(dst, result)
+
+		case RegOpLShift:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					rvm.regSet(dst, objects.GetCachedInteger(leftInt.Value<<rightInt.Value))
+					ip++
+					continue
+				}
+			}
+			result, err := rvm.regBinaryOp(compiler.OpBitOr, left, right) // fallback
+			if err != nil {
+				return err
+			}
+			rvm.regSet(dst, result)
+
+		case RegOpRShift:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			if leftInt, ok := left.(*objects.Integer); ok {
+				if rightInt, ok := right.(*objects.Integer); ok {
+					rvm.regSet(dst, objects.GetCachedInteger(leftInt.Value>>rightInt.Value))
+					ip++
+					continue
+				}
+			}
+			result, err := rvm.regBinaryOp(compiler.OpBitOr, left, right) // fallback
+			if err != nil {
+				return err
+			}
+			rvm.regSet(dst, result)
+
+		case RegOpContains:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			result := rvm.regContains(left, right)
+			rvm.regSet(dst, result)
+
+		case RegOpNotContains:
+			dst := inst.Operands[0]
+			src1 := inst.Operands[1]
+			src2 := inst.Operands[2]
+			left := rvm.regGet(src1)
+			right := rvm.regGet(src2)
+			result := rvm.regContains(left, right)
+			if b, ok := result.(*objects.Boolean); ok {
+				if b.Value {
+					rvm.regSet(dst, &objects.Boolean{Value: false})
+				} else {
+					rvm.regSet(dst, &objects.Boolean{Value: true})
+				}
+			} else {
+				rvm.regSet(dst, result)
+			}
 
 		// Set operations
 		case RegOpSetUnion:

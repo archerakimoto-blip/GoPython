@@ -3009,6 +3009,10 @@ func opToString(op compiler.Opcode) string {
 		return ">"
 	case compiler.OpLessThan:
 		return "<"
+	case compiler.OpGreaterEqual:
+		return ">="
+	case compiler.OpLessEqual:
+		return "<="
 	default:
 		return "unknown"
 	}
