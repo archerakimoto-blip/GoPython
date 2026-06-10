@@ -169,13 +169,24 @@ func NewRegisterCompilerWithState(st *SymbolTable, constants []objects.Object) *
 }
 
 // allocReg allocates a new register.
+// It ensures the register doesn't overlap with local variable slots.
 func (rc *RegisterCompiler) allocReg() int {
+	minReg := rc.symbolTable.numDefinitions
 	if len(rc.freeRegs) > 0 {
-		reg := rc.freeRegs[len(rc.freeRegs)-1]
-		rc.freeRegs = rc.freeRegs[:len(rc.freeRegs)-1]
-		return reg
+		// Find a free register that doesn't overlap with local slots
+		for i := len(rc.freeRegs) - 1; i >= 0; i-- {
+			if rc.freeRegs[i] >= minReg {
+				reg := rc.freeRegs[i]
+				rc.freeRegs = append(rc.freeRegs[:i], rc.freeRegs[i+1:]...)
+				return reg
+			}
+		}
 	}
 	reg := rc.nextReg
+	if reg < minReg {
+		reg = minReg
+		rc.nextReg = minReg
+	}
 	rc.nextReg++
 	return reg
 }
@@ -643,6 +654,17 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		return dst, nil
 
 	case *ast.FunctionLiteral:
+		// If the function has a name, define it in the outer symbol table
+		// before compiling the body, so recursive calls can find it
+		var fnSymbol Symbol
+		var fnSymbolOk bool
+		if node.Name != "" {
+			fnSymbol, fnSymbolOk = rc.symbolTable.Resolve(node.Name)
+			if !fnSymbolOk {
+				fnSymbol = rc.symbolTable.DefineFunctionName(node.Name)
+			}
+		}
+
 		// Save outer state
 		outerInstructions := rc.instructions
 		outerNextReg := rc.nextReg
@@ -655,6 +677,8 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		for _, p := range node.Parameters {
 			rc.symbolTable.Define(p.Value)
 		}
+		// Reserve registers for parameters so temporaries don't overwrite them
+		rc.nextReg = len(node.Parameters)
 
 		// Handle global/nonlocal
 		for _, stmt := range node.Body.Statements {
@@ -761,16 +785,12 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 			rc.emitReg(ROpMakeAsync, dst, dst)
 		}
 
-		// If the function has a name, define it in the symbol table
+		// If the function has a name, store it using the pre-defined symbol
 		if node.Name != "" {
-			symbol, ok := rc.symbolTable.Resolve(node.Name)
-			if !ok {
-				symbol = rc.symbolTable.Define(node.Name)
-			}
-			if symbol.Scope == GlobalScope {
-				rc.emitReg(ROpSetGlobal, symbol.Index, dst)
+			if fnSymbol.Scope == GlobalScope || fnSymbol.Scope == FunctionScope {
+				rc.emitReg(ROpSetGlobal, fnSymbol.Index, dst)
 			} else {
-				rc.emitReg(ROpSetLocal, symbol.Index, dst)
+				rc.emitReg(ROpSetLocal, fnSymbol.Index, dst)
 			}
 		}
 
@@ -1780,49 +1800,14 @@ func (rc *RegisterCompiler) registerBuiltins() {
 	rc.constants = append(rc.constants, timeModule)
 	rc.symbolTable.DefineBuiltin("time", timeIndex)
 
-	printBuiltin := &objects.Builtin{
-		Name: "print",
-		Fn: func(args ...objects.Object) objects.Object {
-			for i, arg := range args {
-				if i > 0 {
-					fmt.Print(" ")
-				}
-				if arg != nil {
-					fmt.Print(arg.Inspect())
-				}
-			}
-			fmt.Println()
-			os.Stdout.Sync()
-			return objects.None_
-		},
+	// Register common builtins (print, len, range, abs, etc.)
+	for _, entry := range GetCommonBuiltins() {
+		idx := len(rc.constants)
+		if entry.Builtin != nil {
+			rc.constants = append(rc.constants, entry.Builtin)
+		} else {
+			rc.constants = append(rc.constants, entry.Value)
+		}
+		rc.symbolTable.DefineBuiltin(entry.Name, idx)
 	}
-	printIndex := len(rc.constants)
-	rc.constants = append(rc.constants, printBuiltin)
-	rc.symbolTable.DefineBuiltin("print", printIndex)
-
-	lenBuiltin := &objects.Builtin{
-		Name: "len",
-		Fn: func(args ...objects.Object) objects.Object {
-			if len(args) < 1 {
-				return objects.NewError("len() takes at least 1 argument")
-			}
-			switch arg := args[0].(type) {
-			case *objects.String:
-				return &objects.Integer{Value: int64(len(arg.Value))}
-			case *objects.List:
-				return &objects.Integer{Value: int64(len(arg.Elements))}
-			case *objects.Dict:
-				return &objects.Integer{Value: int64(arg.Size())}
-			case *objects.Tuple:
-				return &objects.Integer{Value: int64(len(arg.Elements))}
-			case *objects.Set:
-				return &objects.Integer{Value: int64(arg.Size())}
-			default:
-				return objects.NewError("object of type '%s' has no len()", arg.Type())
-			}
-		},
-	}
-	lenIndex := len(rc.constants)
-	rc.constants = append(rc.constants, lenBuiltin)
-	rc.symbolTable.DefineBuiltin("len", lenIndex)
 }

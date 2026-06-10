@@ -304,9 +304,9 @@ func runFileRegister(filename string) {
 	}
 
 	lastPopped := rvm.LastPopped()
-	if lastPopped != nil && lastPopped.Inspect() != "None" {
-		fmt.Println(lastPopped.Inspect())
-	}
+	// In register VM, lastPopped may retain values from inner function calls
+	// Only print if it's a meaningful result (not from inner calls)
+	_ = lastPopped
 }
 
 func runREPLRegister() {

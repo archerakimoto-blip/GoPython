@@ -161,7 +161,7 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 	if s.outer != nil {
 		obj, ok = s.outer.Resolve(name)
 		if ok {
-			if obj.Scope == LocalScope || obj.Scope == FunctionScope {
+			if obj.Scope == LocalScope {
 				if s.Free == nil {
 					s.Free = []Symbol{}
 				}
@@ -185,6 +185,10 @@ func (s *SymbolTable) Resolve(name string) (Symbol, bool) {
 				}
 
 				return newSymbol, true
+			}
+			if obj.Scope == FunctionScope {
+				// FunctionScope is like GlobalScope — accessed via GetGlobal, not captured as free variable
+				return obj, true
 			}
 			if obj.Scope == FreeScope {
 				// 外层作用域的 free 变量需要传播到当前作用域

@@ -2341,7 +2341,11 @@ func (c *Compiler) Compile(node ast.Node) error {
 		}
 		if fl, ok := node.Expression.(*ast.FunctionLiteral); ok {
 			if fl.Name != "" {
-				symbol := c.symbolTable.DefineFunctionName(fl.Name)
+				// Use the pre-defined symbol instead of defining a new one
+				symbol, ok := c.symbolTable.Resolve(fl.Name)
+				if !ok {
+					symbol = c.symbolTable.DefineFunctionName(fl.Name)
+				}
 				c.emit(OpSetGlobal, symbol.Index)
 			} else {
 				c.emit(OpPop)
@@ -2931,6 +2935,14 @@ func (c *Compiler) Compile(node ast.Node) error {
 		return nil
 
 	case *ast.FunctionLiteral:
+		// If the function has a name, pre-define it in the outer symbol table
+		// so recursive calls can find it
+		if node.Name != "" {
+			if _, ok := c.symbolTable.Resolve(node.Name); !ok {
+				c.symbolTable.DefineFunctionName(node.Name)
+			}
+		}
+
 		outerInstructions := c.instructions
 		outerLastInstruction := c.lastInstruction
 		outerPreviousInstruction := c.previousInstruction
@@ -3669,67 +3681,6 @@ func (c *Compiler) compileMethodCall(node *ast.MethodCall) error {
 func boolToInt(b bool) int {
 	if b {
 		return 1
-	}
-	return 0
-}
-
-func isTruthy(obj objects.Object) bool {
-	switch o := obj.(type) {
-	case *objects.Boolean:
-		return o.Value
-	case *objects.Integer:
-		return o.Value != 0
-	case *objects.Float:
-		return o.Value != 0.0
-	case *objects.String:
-		return o.Value != ""
-	case *objects.None:
-		return false
-	case *objects.List:
-		return len(o.Elements) > 0
-	case *objects.Tuple:
-		return len(o.Elements) > 0
-	case *objects.Dict:
-		return len(o.Pairs) > 0
-	case *objects.Set:
-		return o.Size() > 0
-	default:
-		return true
-	}
-}
-
-func compareObjects(a, b objects.Object) int {
-	switch a := a.(type) {
-	case *objects.Integer:
-		if bInt, ok := b.(*objects.Integer); ok {
-			if a.Value < bInt.Value {
-				return -1
-			}
-			if a.Value > bInt.Value {
-				return 1
-			}
-			return 0
-		}
-	case *objects.Float:
-		if bFloat, ok := b.(*objects.Float); ok {
-			if a.Value < bFloat.Value {
-				return -1
-			}
-			if a.Value > bFloat.Value {
-				return 1
-			}
-			return 0
-		}
-	case *objects.String:
-		if bStr, ok := b.(*objects.String); ok {
-			if a.Value < bStr.Value {
-				return -1
-			}
-			if a.Value > bStr.Value {
-				return 1
-			}
-			return 0
-		}
 	}
 	return 0
 }

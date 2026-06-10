@@ -1997,17 +1997,8 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 				}
 
 				// Save current state
-				oldSP := vm.sp
 				oldFrameIndex := rvm.frameIndex
-
-				// Set up locals on the stack (for RegOpGetLocal/RegOpSetLocal)
-				for i := 0; i < compiledFn.NumLocals; i++ {
-					if i < numArgs && i < compiledFn.NumParameters {
-						vm.push(args[i])
-					} else {
-						vm.push(objects.None_)
-					}
-				}
+				oldNumRegs := rvm.numRegs
 
 				// Calculate new regBase for the callee
 				newRegBase := rvm.numRegs
@@ -2018,12 +2009,11 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 					rvm.registers = newRegs
 				}
 
-				// Set up a new frame with the correct basePointer and regBase
+				// Set up a new frame
 				convertedInstrs := convertCompilerRegInstructions(regInstrs)
 				newFrame := &RegFrame{
 					instructions: convertedInstrs,
 					ip:           -1,
-					basePointer:  oldSP,
 					regBase:      newRegBase,
 				}
 				rvm.frames[rvm.frameIndex] = newFrame
@@ -2039,7 +2029,7 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 
 				// Restore state
 				rvm.frameIndex = oldFrameIndex
-				vm.sp = oldSP
+				rvm.numRegs = oldNumRegs
 
 				if err != nil {
 					return err
@@ -3102,17 +3092,8 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 				}
 
 				// Save current state
-				oldSP := vm.sp
 				oldFrameIndex := rvm.frameIndex
-
-				// Set up locals on the stack (for RegOpGetLocal/RegOpSetLocal)
-				for i := 0; i < compiledFn.NumLocals; i++ {
-					if i < numArgs && i < compiledFn.NumParameters {
-						vm.push(args[i])
-					} else {
-						vm.push(objects.None_)
-					}
-				}
+				oldNumRegs := rvm.numRegs
 
 				// Calculate new regBase for the callee
 				newRegBase := rvm.numRegs
@@ -3123,12 +3104,11 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 					rvm.registers = newRegs
 				}
 
-				// Set up a new frame with the correct basePointer and regBase
+				// Set up a new frame
 				convertedInstrs := convertCompilerRegInstructions(regInstrs)
 				newFrame := &RegFrame{
 					instructions: convertedInstrs,
 					ip:           -1,
-					basePointer:  oldSP,
 					regBase:      newRegBase,
 				}
 				rvm.frames[rvm.frameIndex] = newFrame
@@ -3144,7 +3124,7 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 
 				// Restore state
 				rvm.frameIndex = oldFrameIndex
-				vm.sp = oldSP
+				rvm.numRegs = oldNumRegs
 
 				if err != nil {
 					return err
