@@ -252,9 +252,9 @@ func desugarStatement(stmt ast.Statement) ast.Statement {
 	case *ast.ForStatement:
 		return desugarForToWhile(s)
 	case *ast.BreakStatement:
-		return nil
+		return s
 	case *ast.ContinueStatement:
-		return nil
+		return s
 	case *ast.TryStatement:
 		// 对 try 语句进行脱糖处理：脱糖 body、excepts 和 finally
 		desugaredTry := &ast.TryStatement{
@@ -1037,7 +1037,44 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 		},
 	}
 
+	// Restructure so continue works correctly:
+	// _i = -1
+	// while True:
+	//     _i = _i + 1
+	//     if not (_i < len(iterable)):
+	//         break
+	//     value = iterable[_i]
+	//     ... user's loop body ...
+	// This way, continue jumps back to the while, which increments _i first.
+
 	loopBodyStmts := []ast.Statement{
+		&ast.AssignStatement{
+			Token: "+=",
+			Names: []*ast.Identifier{indexVar},
+			Value: &ast.InfixExpression{
+				Token:    "+",
+				Left:     indexVar,
+				Operator: "+",
+				Right:    &ast.IntegerLiteral{Token: "1", Value: 1},
+			},
+		},
+		&ast.ExpressionStatement{
+			Token: "if",
+			Expression: &ast.IfExpression{
+				Token: "if",
+				Condition: &ast.PrefixExpression{
+					Token:    "not",
+					Operator: "not",
+					Right:    condition,
+				},
+				Consequence: &ast.BlockStatement{
+					Token: "if",
+					Statements: []ast.Statement{
+						&ast.BreakStatement{Token: "break"},
+					},
+				},
+			},
+		},
 		&ast.AssignStatement{
 			Token: "=",
 			Names: []*ast.Identifier{forStmt.Value},
@@ -1051,17 +1088,6 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 
 	loopBodyStmts = append(loopBodyStmts, desugarBlockStatement(forStmt.Body).Statements...)
 
-	loopBodyStmts = append(loopBodyStmts, &ast.AssignStatement{
-		Token: "+=",
-		Names: []*ast.Identifier{indexVar},
-		Value: &ast.InfixExpression{
-			Token:    "+",
-			Left:     indexVar,
-			Operator: "+",
-			Right:    &ast.IntegerLiteral{Token: "1", Value: 1},
-		},
-	})
-
 	loopBody := &ast.BlockStatement{
 		Token:      forStmt.Token,
 		Statements: loopBodyStmts,
@@ -1069,7 +1095,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 
 	whileStmt := &ast.WhileStatement{
 		Token:     forStmt.Token,
-		Condition: condition,
+		Condition: &ast.Boolean{Token: "True", Value: true},
 		Body:      loopBody,
 	}
 
@@ -1079,7 +1105,7 @@ func desugarForToWhile(forStmt *ast.ForStatement) *ast.BlockStatement {
 			&ast.LetStatement{
 				Token: "let",
 				Names: []*ast.Identifier{indexVar},
-				Value: &ast.IntegerLiteral{Token: "0", Value: 0},
+				Value: &ast.IntegerLiteral{Token: "-1", Value: -1},
 			},
 			whileStmt,
 		},

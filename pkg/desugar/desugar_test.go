@@ -50,7 +50,7 @@ func TestDesugarForToWhile(t *testing.T) {
 		t.Fatalf("expected 2 statements in block, got %d", len(block.Statements))
 	}
 
-	// First statement should be LetStatement for index variable
+	// First statement should be LetStatement for index variable initialized to -1
 	letStmt, ok := block.Statements[0].(*ast.LetStatement)
 	if !ok {
 		t.Fatalf("expected LetStatement, got %T", block.Statements[0])
@@ -61,36 +61,58 @@ func TestDesugarForToWhile(t *testing.T) {
 	if letStmt.Names[0].Value == "" {
 		t.Fatal("index variable name should not be empty")
 	}
+	// Index variable should be initialized to -1
+	intVal, ok := letStmt.Value.(*ast.IntegerLiteral)
+	if !ok || intVal.Value != -1 {
+		t.Fatalf("expected index variable initialized to -1, got %v", letStmt.Value)
+	}
 
-	// Second statement should be WhileStatement
+	// Second statement should be WhileStatement with True condition
 	whileStmt, ok := block.Statements[1].(*ast.WhileStatement)
 	if !ok {
 		t.Fatalf("expected WhileStatement, got %T", block.Statements[1])
 	}
-
-	// While body should contain: assign x = iterable[index], body, index += 1
-	whileBlock := whileStmt.Body
-	if len(whileBlock.Statements) < 3 {
-		t.Fatalf("expected at least 3 statements in while body, got %d", len(whileBlock.Statements))
+	boolCond, ok := whileStmt.Condition.(*ast.Boolean)
+	if !ok || !boolCond.Value {
+		t.Fatalf("expected True condition, got %T", whileStmt.Condition)
 	}
 
-	// First in while body: assign x = iterable[index]
-	assignStmt, ok := whileBlock.Statements[0].(*ast.AssignStatement)
+	// While body should contain: _i += 1, if not condition: break, assign x = iterable[index], body
+	whileBlock := whileStmt.Body
+	if len(whileBlock.Statements) < 4 {
+		t.Fatalf("expected at least 4 statements in while body, got %d", len(whileBlock.Statements))
+	}
+
+	// First in while body: _i += 1 (increment first)
+	assignIncr, ok := whileBlock.Statements[0].(*ast.AssignStatement)
 	if !ok {
 		t.Fatalf("expected AssignStatement, got %T", whileBlock.Statements[0])
 	}
-	if assignStmt.Names[0].Value != "x" {
-		t.Fatalf("expected variable 'x', got '%s'", assignStmt.Names[0].Value)
-	}
-
-	// Last in while body: index += 1 (stored as AssignStatement with "+=" token)
-	lastStmt := whileBlock.Statements[len(whileBlock.Statements)-1]
-	assignIncr, ok := lastStmt.(*ast.AssignStatement)
-	if !ok {
-		t.Fatalf("expected AssignStatement, got %T", lastStmt)
-	}
 	if assignIncr.Token != "+=" {
 		t.Fatalf("expected '+=' token, got '%s'", assignIncr.Token)
+	}
+
+	// Second in while body: if not condition: break
+	exprStmt, ok := whileBlock.Statements[1].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("expected ExpressionStatement, got %T", whileBlock.Statements[1])
+	}
+	ifExpr, ok := exprStmt.Expression.(*ast.IfExpression)
+	if !ok {
+		t.Fatalf("expected IfExpression, got %T", exprStmt.Expression)
+	}
+	prefixExpr, ok := ifExpr.Condition.(*ast.PrefixExpression)
+	if !ok || prefixExpr.Operator != "not" {
+		t.Fatalf("expected 'not' prefix expression, got %T", ifExpr.Condition)
+	}
+
+	// Third in while body: assign x = iterable[index]
+	assignStmt, ok := whileBlock.Statements[2].(*ast.AssignStatement)
+	if !ok {
+		t.Fatalf("expected AssignStatement, got %T", whileBlock.Statements[2])
+	}
+	if assignStmt.Names[0].Value != "x" {
+		t.Fatalf("expected variable 'x', got '%s'", assignStmt.Names[0].Value)
 	}
 }
 
@@ -1978,16 +2000,18 @@ func TestDesugarHashLiteral_OldFormat(t *testing.T) {
 func TestDesugarBreakStatement(t *testing.T) {
 	bs := &ast.BreakStatement{Token: "break"}
 	result := desugarStatement(bs)
-	if result != nil {
-		t.Fatalf("expected nil for break statement, got %T", result)
+	_, ok := result.(*ast.BreakStatement)
+	if !ok {
+		t.Fatalf("expected BreakStatement, got %T", result)
 	}
 }
 
 func TestDesugarContinueStatement(t *testing.T) {
 	cs := &ast.ContinueStatement{Token: "continue"}
 	result := desugarStatement(cs)
-	if result != nil {
-		t.Fatalf("expected nil for continue statement, got %T", result)
+	_, ok := result.(*ast.ContinueStatement)
+	if !ok {
+		t.Fatalf("expected ContinueStatement, got %T", result)
 	}
 }
 
@@ -2440,13 +2464,13 @@ func TestDesugarBlockStatement(t *testing.T) {
 		Token: ":",
 		Statements: []ast.Statement{
 			&ast.ExpressionStatement{Token: "1", Expression: ident("x")},
-			&ast.BreakStatement{Token: "break"}, // should be filtered out
+			&ast.BreakStatement{Token: "break"},
 		},
 	}
 
 	result := desugarBlockStatement(bs)
-	if len(result.Statements) != 1 {
-		t.Fatalf("expected 1 statement (break filtered), got %d", len(result.Statements))
+	if len(result.Statements) != 2 {
+		t.Fatalf("expected 2 statements (break preserved), got %d", len(result.Statements))
 	}
 }
 
@@ -2568,14 +2592,14 @@ func TestDesugar_EmptyProgram(t *testing.T) {
 func TestDesugar_NilStatementsFiltered(t *testing.T) {
 	program := &ast.Program{
 		Statements: []ast.Statement{
-			&ast.BreakStatement{Token: "break"}, // desugars to nil
+			&ast.BreakStatement{Token: "break"}, // now preserved as BreakStatement
 			&ast.LetStatement{Token: "let", Names: []*ast.Identifier{ident("x")}, Value: intLit(1)},
 		},
 	}
 
 	result := Desugar(program)
-	if len(result.Statements) != 1 {
-		t.Fatalf("expected 1 statement (break filtered), got %d", len(result.Statements))
+	if len(result.Statements) != 2 {
+		t.Fatalf("expected 2 statements (break preserved), got %d", len(result.Statements))
 	}
 }
 

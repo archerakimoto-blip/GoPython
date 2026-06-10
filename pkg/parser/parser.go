@@ -378,6 +378,13 @@ func (p *Parser) parseStatement() ast.Statement {
 			Expression: expr,
 		}
 	case lexer.IDENT:
+		// Check for break/continue keywords that are tokenized as IDENT
+		if p.curToken.Literal == "break" {
+			return p.parseBreakStatement()
+		}
+		if p.curToken.Literal == "continue" {
+			return p.parseContinueStatement()
+		}
 		switch p.peekToken.Type {
 		case lexer.ASSIGN:
 			return p.parseAssignStatement()

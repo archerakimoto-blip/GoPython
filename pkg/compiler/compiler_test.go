@@ -7423,8 +7423,9 @@ func TestRegCompilerIdentifierNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !hasRegOpcode(rc.Instructions(), ROpNull) {
-		t.Error("expected ROpNull for None identifier")
+	// None is registered as a builtin, so it emits ROpLoadConst (not ROpNull)
+	if !hasRegOpcode(rc.Instructions(), ROpNull) && !hasRegOpcode(rc.Instructions(), ROpLoadConst) {
+		t.Error("expected ROpNull or ROpLoadConst for None identifier")
 	}
 }
 
@@ -7436,8 +7437,9 @@ func TestRegCompilerIdentifierFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !hasRegOpcode(rc.Instructions(), ROpFalse) {
-		t.Error("expected ROpFalse for False identifier")
+	// False is registered as a builtin, so it emits ROpLoadConst (not ROpFalse)
+	if !hasRegOpcode(rc.Instructions(), ROpFalse) && !hasRegOpcode(rc.Instructions(), ROpLoadConst) {
+		t.Error("expected ROpFalse or ROpLoadConst for False identifier")
 	}
 }
 

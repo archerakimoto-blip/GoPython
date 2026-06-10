@@ -2975,6 +2975,7 @@ func (f *Future) Inspect() string {
 
 type Closure struct {
 	Instructions          []byte
+	RegInstructions       interface{} // []compiler.RegInstruction, stored as interface{} to avoid import cycle
 	NumLocals             int
 	NumParameters         int
 	NumKeywordOnly        int

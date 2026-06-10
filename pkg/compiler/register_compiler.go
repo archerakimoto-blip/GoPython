@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -137,6 +136,14 @@ type RegisterCompiler struct {
 	instructions []RegInstruction
 	nextReg     int
 	freeRegs    []int
+	// loopContexts tracks break/continue jump targets for nested loops
+	loopContexts []loopContext
+}
+
+type loopContext struct {
+	breakTarget    int // instruction index to jump to for break
+	continueTarget int // instruction index to jump to for continue
+	startIP        int // instruction index of loop start (for back-patching)
 }
 
 // NewRegisterCompiler creates a new RegisterCompiler.
@@ -710,23 +717,50 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		numLocals := rc.symbolTable.numDefinitions
 		freeVars := rc.symbolTable.Free
 		freeSymbols := rc.symbolTable.FreeSymbols
-		nestedFreeSymbols := rc.symbolTable.NestedFreeSymbols
+
+		// In the register compiler, we only use freeVars (not nestedFreeSymbols).
+		// nestedFreeSymbols is a stack-VM concept for propagating captures through
+		// intermediate functions. In the register compiler, when a nested function
+		// resolves a variable from an outer scope, the Resolve() function already
+		// creates free variable entries in each intermediate scope, so the chain
+		// is handled correctly through freeSymbols alone.
+		allFreeVars := make([]Symbol, 0, len(freeVars))
+		allFreeVars = append(allFreeVars, freeVars...)
+
+		numFree := len(freeVars)
 
 		rc.symbolTable = rc.symbolTable.outer
 
-		// Restore outer state
+		// Restore outer state (instructions, nextReg, freeRegs) so that
+		// free variable loading instructions are emitted into the outer
+		// function's instruction list with correct register allocation.
 		rc.instructions = outerInstructions
 		rc.nextReg = outerNextReg
 		rc.freeRegs = outerFreeRegs
 
-		allFreeVars := make([]Symbol, 0, len(freeVars)+len(nestedFreeSymbols))
-		allFreeVars = append(allFreeVars, freeVars...)
-		for _, nfs := range nestedFreeSymbols {
-			allFreeVars = append(allFreeVars, Symbol{
-				Name:  nfs.Name,
-				Scope: FreeScope,
-				Index: len(allFreeVars),
-			})
+		// Load free variable values using the freeSymbols' original scope info.
+		// freeSymbols contains the ORIGINAL symbols from outer scopes, so we
+		// emit load instructions based on their Scope/Index directly, rather
+		// than re-resolving through the symbol table.
+		var freeRegs []int
+		if numFree > 0 {
+			freeRegs = make([]int, 0, numFree)
+			for _, freeSym := range freeSymbols {
+				fr := rc.allocReg()
+				switch freeSym.Scope {
+				case LocalScope:
+					rc.emitReg(ROpGetLocal, fr, freeSym.Index)
+				case FreeScope:
+					rc.emitReg(ROpGetFree, fr, freeSym.Index)
+				case GlobalScope:
+					rc.emitReg(ROpGetGlobal, fr, freeSym.Index)
+				case FunctionScope:
+					rc.emitReg(ROpGetGlobal, fr, freeSym.Index)
+				case BuiltinScope:
+					rc.emitReg(ROpLoadConst, fr, freeSym.Index)
+				}
+				freeRegs = append(freeRegs, fr)
+			}
 		}
 
 		paramNames := make([]string, len(node.Parameters))
@@ -748,24 +782,7 @@ func (rc *RegisterCompiler) compileExpr(node ast.Node) (int, error) {
 		}
 
 		dst := rc.allocReg()
-		numFree := len(freeVars) + len(nestedFreeSymbols)
 		if numFree > 0 {
-			// Load free variables
-			freeRegs := make([]int, 0, numFree)
-			for _, freeSym := range freeSymbols {
-				fr, err := rc.compileExpr(&ast.Identifier{Value: freeSym.Name})
-				if err != nil {
-					return 0, err
-				}
-				freeRegs = append(freeRegs, fr)
-			}
-			for _, nestedFree := range nestedFreeSymbols {
-				fr, err := rc.compileExpr(&ast.Identifier{Value: nestedFree.Name})
-				if err != nil {
-					return 0, err
-				}
-				freeRegs = append(freeRegs, fr)
-			}
 			idx := rc.addConstant(compiledFn)
 			operands := []int{dst, idx, numFree}
 			operands = append(operands, freeRegs...)
@@ -1149,13 +1166,38 @@ func (rc *RegisterCompiler) compileStmt(node ast.Node) error {
 		rc.emitReg(ROpJumpIfFalse, cond, -1) // placeholder
 		rc.freeReg(cond)
 
+		// Push loop context for break/continue
+		rc.loopContexts = append(rc.loopContexts, loopContext{
+			breakTarget:    -1, // will be back-patched
+			continueTarget: conditionPos,
+			startIP:        conditionPos,
+		})
+
 		if err := rc.compileStmt(node.Body); err != nil {
+			rc.loopContexts = rc.loopContexts[:len(rc.loopContexts)-1]
 			return err
 		}
 		rc.emitReg(ROpJump, conditionPos)
 
 		afterLoop := len(rc.instructions)
 		rc.instructions[jumpIdx].Operands[1] = afterLoop
+
+		// Back-patch any break jumps in this loop
+		lc := &rc.loopContexts[len(rc.loopContexts)-1]
+		if lc.breakTarget == -1 {
+			lc.breakTarget = afterLoop
+		}
+		for i := lc.startIP; i < afterLoop; i++ {
+			if rc.instructions[i].Opcode == ROpJump && rc.instructions[i].Operands[0] == -2 {
+				// -2 is our sentinel for break jump
+				rc.instructions[i].Operands[0] = afterLoop
+			}
+			if rc.instructions[i].Opcode == ROpJumpIfFalse && len(rc.instructions[i].Operands) >= 2 && rc.instructions[i].Operands[1] == -3 {
+				// -3 is our sentinel for continue jump
+				rc.instructions[i].Operands[1] = conditionPos
+			}
+		}
+		rc.loopContexts = rc.loopContexts[:len(rc.loopContexts)-1]
 
 	case *ast.AugAssignStatement:
 		if node.Name != nil {
@@ -1521,10 +1563,18 @@ func (rc *RegisterCompiler) compileStmt(node ast.Node) error {
 		rc.freeReg(val)
 
 	case *ast.BreakStatement:
-		return fmt.Errorf("break statements should be desugared before compilation")
+		if len(rc.loopContexts) == 0 {
+			return fmt.Errorf("break statement outside of loop")
+		}
+		// Emit a jump with sentinel value -2, will be back-patched to after-loop
+		rc.emitReg(ROpJump, -2)
 
 	case *ast.ContinueStatement:
-		return fmt.Errorf("continue statements should be desugared before compilation")
+		if len(rc.loopContexts) == 0 {
+			return fmt.Errorf("continue statement outside of loop")
+		}
+		lc := rc.loopContexts[len(rc.loopContexts)-1]
+		rc.emitReg(ROpJump, lc.continueTarget)
 
 	case *ast.YieldStatement:
 		if node.Expression != nil {

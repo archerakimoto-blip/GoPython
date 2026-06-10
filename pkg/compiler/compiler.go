@@ -143,6 +143,15 @@ type Compiler struct {
 	// stringBuilderLocals tracks variables that should use StringBuilder optimization
 	// in the current while loop. Map from original var name to temp local symbol.
 	stringBuilderLocals map[string]Symbol
+
+	// loopContexts tracks break/continue jump targets for nested loops
+	loopContexts []stackLoopContext
+}
+
+type stackLoopContext struct {
+	breakTarget    int // instruction position to jump to for break
+	continueTarget int // instruction position to jump to for continue
+	startPos       int // instruction position of loop start
 }
 
 type Bytecode struct {
@@ -3209,11 +3218,19 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		jumpNotTruthyPos := c.emit(OpJumpNotTruthy, 9999)
 
+		// Push loop context for break/continue
+		c.loopContexts = append(c.loopContexts, stackLoopContext{
+			breakTarget:    -1,
+			continueTarget: conditionPos,
+			startPos:       conditionPos,
+		})
+
 		// Compile loop body with StringBuilder optimization context
 		c.stringBuilderLocals = sbTempLocals
 		err = c.Compile(node.Body)
 		c.stringBuilderLocals = nil
 		if err != nil {
+			c.loopContexts = c.loopContexts[:len(c.loopContexts)-1]
 			return err
 		}
 
@@ -3225,6 +3242,22 @@ func (c *Compiler) Compile(node ast.Node) error {
 
 		afterLoopPos := len(c.instructions)
 		c.changeOperand(jumpNotTruthyPos, afterLoopPos)
+
+		// Back-patch break jumps
+		lc := &c.loopContexts[len(c.loopContexts)-1]
+		if lc.breakTarget == -1 {
+			lc.breakTarget = afterLoopPos
+		}
+		for i := lc.startPos; i < afterLoopPos; i++ {
+			// Check for break sentinel (OpJump with placeholder 9998)
+			if c.instructions[i] == byte(OpJump) && i+2 < len(c.instructions) {
+				pos := int(c.instructions[i+1])<<8 | int(c.instructions[i+2])
+				if pos == 9998 {
+					c.changeOperand(i, afterLoopPos)
+				}
+			}
+		}
+		c.loopContexts = c.loopContexts[:len(c.loopContexts)-1]
 
 		// V3: After the loop, build StringBuilders back to original variables
 		for varName, tempSymbol := range sbTempLocals {
@@ -3241,9 +3274,18 @@ func (c *Compiler) Compile(node ast.Node) error {
 	case *ast.ForStatement:
 		return fmt.Errorf("for loops should be desugared before compilation")
 	case *ast.BreakStatement:
-		return fmt.Errorf("break statements should be desugared before compilation")
+		if len(c.loopContexts) == 0 {
+			return fmt.Errorf("break statement outside of loop")
+		}
+		// Emit a jump with sentinel value 9998, will be back-patched
+		c.emit(OpJump, 9998)
+
 	case *ast.ContinueStatement:
-		return fmt.Errorf("continue statements should be desugared before compilation")
+		if len(c.loopContexts) == 0 {
+			return fmt.Errorf("continue statement outside of loop")
+		}
+		lc := c.loopContexts[len(c.loopContexts)-1]
+		c.emit(OpJump, lc.continueTarget)
 	case *ast.TryStatement:
 		return c.compileTryStatement(node)
 	case *ast.RaiseStatement:

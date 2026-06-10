@@ -420,11 +420,11 @@ func GetCommonBuiltins() []BuiltinEntry {
 					return objects.NewError("set() takes at most 1 argument")
 				}
 				if len(args) == 0 {
-					return &objects.Set{Elements: make(map[string]objects.Object)}
+					return objects.NewSet()
 				}
 				switch arg := args[0].(type) {
 				case *objects.List:
-					s := &objects.Set{Elements: make(map[string]objects.Object)}
+					s := objects.NewSet()
 					for _, e := range arg.Elements {
 						s.Add(e)
 					}

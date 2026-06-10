@@ -1108,11 +1108,7 @@ func (rvm *RegisterVM) getAttrOp(obj objects.Object, attrName string) (objects.O
 		if instance.Class != nil {
 			if classAttr, ok := instance.Class.FindClassAttr(attrName); ok {
 				if method, ok := classAttr.(*compiler.CompiledFunction); ok {
-					// For methods, we need to return both instance and method
-					// This is complex - fall back to stack
-					vm.push(instance)
-					vm.push(method)
-					return vm.pop(), nil
+					return &objects.BoundMethod{Self: instance, Method: method}, nil
 				}
 				return classAttr, nil
 			}
@@ -1169,6 +1165,38 @@ func (rvm *RegisterVM) getAttrOp(obj objects.Object, attrName string) (objects.O
 			return objects.NewDictValues(dictObj), nil
 		case "items":
 			return objects.NewDictItems(dictObj), nil
+		}
+		return objects.None_, nil
+	}
+
+	// Handle List attribute access (append, sort, etc.)
+	if listObj, ok := obj.(*objects.List); ok {
+		if val, found := listObj.GetAttr(attrName); found {
+			return val, nil
+		}
+		return objects.None_, nil
+	}
+
+	// Handle Set attribute access
+	if setObj, ok := obj.(*objects.Set); ok {
+		if val, found := setObj.GetAttr(attrName); found {
+			return val, nil
+		}
+		return objects.None_, nil
+	}
+
+	// Handle String attribute access
+	if strObj, ok := obj.(*objects.String); ok {
+		if val, found := strObj.GetAttr(attrName); found {
+			return val, nil
+		}
+		return objects.None_, nil
+	}
+
+	// Handle Tuple attribute access
+	if tupleObj, ok := obj.(*objects.Tuple); ok {
+		if val, found := tupleObj.GetAttr(attrName); found {
+			return val, nil
 		}
 		return objects.None_, nil
 	}
@@ -1897,6 +1925,104 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 
 			callee := rvm.regGet(funcReg)
 
+			// Handle BoundMethod: prepend self to args and delegate to underlying method
+			if boundMethod, ok := callee.(*objects.BoundMethod); ok {
+				args := make([]objects.Object, numArgs+1)
+				args[0] = boundMethod.Self
+				for i := 0; i < numArgs; i++ {
+					args[i+1] = rvm.regGet(inst.Operands[3+i])
+				}
+				// Delegate to the underlying method type
+				switch method := boundMethod.Method.(type) {
+				case *compiler.CompiledFunction:
+					var regInstrs []compiler.RegInstruction
+					if len(method.RegInstructions) > 0 {
+						regInstrs = method.RegInstructions
+					} else {
+						regInstrs = bytesToRegInstructions(method.Instructions)
+					}
+					if len(regInstrs) == 0 {
+						rvm.regSet(dst, objects.None_)
+						break
+					}
+					oldFrameIndex := rvm.frameIndex
+					oldNumRegs := rvm.numRegs
+					newRegBase := rvm.numRegs
+					neededRegs := newRegBase + method.NumLocals + 64
+					if neededRegs > len(rvm.registers) {
+						newRegs := make([]objects.Object, neededRegs*2)
+						copy(newRegs, rvm.registers)
+						rvm.registers = newRegs
+					}
+					convertedInstrs := convertCompilerRegInstructions(regInstrs)
+					newFrame := &RegFrame{
+						instructions: convertedInstrs,
+						ip:           -1,
+						regBase:      newRegBase,
+					}
+					rvm.frames[rvm.frameIndex] = newFrame
+					rvm.frameIndex++
+					totalArgs := numArgs + 1
+					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
+						rvm.regSet(i, args[i])
+					}
+					err := rvm.executeRegFrame(newFrame)
+					rvm.frameIndex = oldFrameIndex
+					rvm.numRegs = oldNumRegs
+					if err != nil {
+						return err
+					}
+					result := vm.lastPopped
+					rvm.regSet(dst, result)
+					break
+				case *objects.Closure:
+					var regInstrs []compiler.RegInstruction
+					if method.RegInstructions != nil {
+						regInstrs = method.RegInstructions.([]compiler.RegInstruction)
+					} else {
+						regInstrs = bytesToRegInstructions(method.Instructions)
+					}
+					if len(regInstrs) == 0 {
+						rvm.regSet(dst, objects.None_)
+						break
+					}
+					oldFrameIndex := rvm.frameIndex
+					newRegBase := rvm.numRegs
+					neededRegs := newRegBase + method.NumLocals + 64
+					if neededRegs > len(rvm.registers) {
+						newRegs := make([]objects.Object, neededRegs*2)
+						copy(newRegs, rvm.registers)
+						rvm.registers = newRegs
+					}
+					convertedInstrs := convertCompilerRegInstructions(regInstrs)
+					newFrame := &RegFrame{
+						instructions: convertedInstrs,
+						ip:           -1,
+						basePointer:  0,
+						regBase:      newRegBase,
+						freeVars:     method.Free,
+					}
+					rvm.frames[rvm.frameIndex] = newFrame
+					rvm.frameIndex++
+					totalArgs := numArgs + 1
+					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
+						rvm.regSet(i, args[i])
+					}
+					err := rvm.executeRegFrame(newFrame)
+					rvm.frameIndex = oldFrameIndex
+					if err != nil {
+						return err
+					}
+					result := vm.lastPopped
+					rvm.regSet(dst, result)
+					break
+				default:
+					rvm.regSet(dst, objects.None_)
+					break
+				}
+				break
+			}
+
 			// Handle Builtin functions directly
 			if builtin, ok := callee.(*objects.Builtin); ok {
 				args := make([]objects.Object, numArgs)
@@ -1926,15 +2052,17 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 					args[i] = rvm.regGet(inst.Operands[3+i])
 				}
 
-				// Build the function's register bytecode from the closure instructions
-				fnInstructions := closure.Instructions
-				if len(fnInstructions) == 0 {
+				// Use RegInstructions directly if available, otherwise decode from bytes
+				var regInstrs []compiler.RegInstruction
+				if closure.RegInstructions != nil {
+					regInstrs = closure.RegInstructions.([]compiler.RegInstruction)
+				} else {
+					regInstrs = bytesToRegInstructions(closure.Instructions)
+				}
+				if len(regInstrs) == 0 {
 					rvm.regSet(dst, objects.None_)
 					break
 				}
-
-				// Convert bytes back to RegInstructions
-				regInstrs := bytesToRegInstructions(fnInstructions)
 
 				// Save current state
 				oldFrameIndex := rvm.frameIndex
@@ -2106,6 +2234,7 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 
 			closure := &objects.Closure{
 				Instructions:          fn.Instructions,
+				RegInstructions:       fn.RegInstructions,
 				NumLocals:             fn.NumLocals,
 				NumParameters:         fn.NumParameters,
 				NumKeywordOnly:        fn.NumKeywordOnly,
@@ -2329,12 +2458,15 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 		case RegOpRaise:
 			errReg := inst.Operands[0]
 			errObj := rvm.regGet(errReg)
-			caught := vm.raiseException(errObj)
-			if !caught {
-				vm.pendingError = errObj
-				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+			// Try stack VM's exception handling first
+			if vm.framesIndex > 0 {
+				caught := vm.raiseException(errObj)
+				if caught {
+					return nil
+				}
 			}
-			return nil
+			vm.pendingError = errObj
+			return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 
 		case RegOpListUnpack:
 			listReg := inst.Operands[0]
@@ -2992,6 +3124,104 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 
 			callee := rvm.regGet(funcReg)
 
+			// Handle BoundMethod: prepend self to args and delegate to underlying method
+			if boundMethod, ok := callee.(*objects.BoundMethod); ok {
+				args := make([]objects.Object, numArgs+1)
+				args[0] = boundMethod.Self
+				for i := 0; i < numArgs; i++ {
+					args[i+1] = rvm.regGet(inst.Operands[3+i])
+				}
+				// Delegate to the underlying method type
+				switch method := boundMethod.Method.(type) {
+				case *compiler.CompiledFunction:
+					var regInstrs []compiler.RegInstruction
+					if len(method.RegInstructions) > 0 {
+						regInstrs = method.RegInstructions
+					} else {
+						regInstrs = bytesToRegInstructions(method.Instructions)
+					}
+					if len(regInstrs) == 0 {
+						rvm.regSet(dst, objects.None_)
+						break
+					}
+					oldFrameIndex := rvm.frameIndex
+					oldNumRegs := rvm.numRegs
+					newRegBase := rvm.numRegs
+					neededRegs := newRegBase + method.NumLocals + 64
+					if neededRegs > len(rvm.registers) {
+						newRegs := make([]objects.Object, neededRegs*2)
+						copy(newRegs, rvm.registers)
+						rvm.registers = newRegs
+					}
+					convertedInstrs := convertCompilerRegInstructions(regInstrs)
+					newFrame := &RegFrame{
+						instructions: convertedInstrs,
+						ip:           -1,
+						regBase:      newRegBase,
+					}
+					rvm.frames[rvm.frameIndex] = newFrame
+					rvm.frameIndex++
+					totalArgs := numArgs + 1
+					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
+						rvm.regSet(i, args[i])
+					}
+					err := rvm.executeRegFrame(newFrame)
+					rvm.frameIndex = oldFrameIndex
+					rvm.numRegs = oldNumRegs
+					if err != nil {
+						return err
+					}
+					result := vm.lastPopped
+					rvm.regSet(dst, result)
+					break
+				case *objects.Closure:
+					var regInstrs []compiler.RegInstruction
+					if method.RegInstructions != nil {
+						regInstrs = method.RegInstructions.([]compiler.RegInstruction)
+					} else {
+						regInstrs = bytesToRegInstructions(method.Instructions)
+					}
+					if len(regInstrs) == 0 {
+						rvm.regSet(dst, objects.None_)
+						break
+					}
+					oldFrameIndex := rvm.frameIndex
+					newRegBase := rvm.numRegs
+					neededRegs := newRegBase + method.NumLocals + 64
+					if neededRegs > len(rvm.registers) {
+						newRegs := make([]objects.Object, neededRegs*2)
+						copy(newRegs, rvm.registers)
+						rvm.registers = newRegs
+					}
+					convertedInstrs := convertCompilerRegInstructions(regInstrs)
+					newFrame := &RegFrame{
+						instructions: convertedInstrs,
+						ip:           -1,
+						basePointer:  0,
+						regBase:      newRegBase,
+						freeVars:     method.Free,
+					}
+					rvm.frames[rvm.frameIndex] = newFrame
+					rvm.frameIndex++
+					totalArgs := numArgs + 1
+					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
+						rvm.regSet(i, args[i])
+					}
+					err := rvm.executeRegFrame(newFrame)
+					rvm.frameIndex = oldFrameIndex
+					if err != nil {
+						return err
+					}
+					result := vm.lastPopped
+					rvm.regSet(dst, result)
+					break
+				default:
+					rvm.regSet(dst, objects.None_)
+					break
+				}
+				break
+			}
+
 			// Handle Builtin functions directly
 			if builtin, ok := callee.(*objects.Builtin); ok {
 				args := make([]objects.Object, numArgs)
@@ -3021,15 +3251,17 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 					args[i] = rvm.regGet(inst.Operands[3+i])
 				}
 
-				// Build the function's register bytecode from the closure instructions
-				fnInstructions := closure.Instructions
-				if len(fnInstructions) == 0 {
+				// Use RegInstructions directly if available, otherwise decode from bytes
+				var regInstrs []compiler.RegInstruction
+				if closure.RegInstructions != nil {
+					regInstrs = closure.RegInstructions.([]compiler.RegInstruction)
+				} else {
+					regInstrs = bytesToRegInstructions(closure.Instructions)
+				}
+				if len(regInstrs) == 0 {
 					rvm.regSet(dst, objects.None_)
 					break
 				}
-
-				// Convert bytes back to RegInstructions
-				regInstrs := bytesToRegInstructions(fnInstructions)
 
 				// Save current state
 				oldFrameIndex := rvm.frameIndex
@@ -3201,6 +3433,7 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 
 			closure := &objects.Closure{
 				Instructions:          fn.Instructions,
+				RegInstructions:       fn.RegInstructions,
 				NumLocals:             fn.NumLocals,
 				NumParameters:         fn.NumParameters,
 				NumKeywordOnly:        fn.NumKeywordOnly,
@@ -3509,12 +3742,15 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 		case RegOpRaise:
 			errReg := inst.Operands[0]
 			errObj := rvm.regGet(errReg)
-			caught := vm.raiseException(errObj)
-			if !caught {
-				vm.pendingError = errObj
-				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+			// Try stack VM's exception handling first
+			if vm.framesIndex > 0 {
+				caught := vm.raiseException(errObj)
+				if caught {
+					return nil
+				}
 			}
-			return nil
+			vm.pendingError = errObj
+			return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
 
 		case RegOpListUnpack:
 			listReg := inst.Operands[0]
