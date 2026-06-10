@@ -1,6 +1,6 @@
 # GoPy 开发计划
 
-**当前版本**: 0.30.x
+**当前版本**: 0.31.x
 **目标版本**: 1.0.0
 **最后更新**: 2026-06
 
@@ -168,6 +168,31 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] **R4.13**: TestRegisterVMComparisonGTELT — >= / <= 比较
 - [x] **R4.14**: TestRegisterVMIfExpressionResult — If 表达式结果返回
 
+### v0.31 — 寄存器 VM 异常处理与默认参数 ✅
+
+> 目标：完善寄存器 VM 的异常处理和默认参数支持，实现与栈式 VM 功能对齐。
+
+#### 异常处理实现
+
+- [x] **R5.1**: try/except 编译器回填 — ROpBeginTry 的 handlerIP 和 finallyStartIP 回填
+- [x] **R5.2**: 寄存器 VM 异常处理 — 扫描 RegInstruction 找匹配的 RegOpExceptHandler
+- [x] **R5.3**: 异常类型 ErrorType 字段 — ValueError/TypeError 等构造函数设置 ErrorType
+- [x] **R5.4**: RegOpEndTry 重新抛出 — pendingError 使用寄存器 VM 方式处理
+
+#### 默认参数支持
+
+- [x] **R5.5**: 函数调用参数填充 — 缺失参数用 None 填充（Closure/CompiledFunction/BoundMethod 路径）
+
+#### Dict 方法支持
+
+- [x] **R5.6**: getAttrOp 使用 Dict.GetAttr — 返回可调用的 Builtin 方法
+- [x] **R5.7**: Dict merge 操作符 — `|` 操作符支持 d1 | d2
+
+#### 测试结果
+
+- [x] **R5.8**: 366/366 RegVM 测试通过（之前 135/144，9 失败）
+- [x] **R5.9**: 全项目测试通过
+
 ### v1.0.0 — Production Ready
 
 - [x] 所有 v0.18-v0.25 里程碑完成
@@ -179,6 +204,7 @@ GoPy 采用**脱糖优先**（Desugar-First）的架构设计。核心原则是�
 - [x] v0.28 内置方法与标准库补齐
 - [x] v0.29 标准库与内置方法深度补齐
 - [x] v0.30 寄存器 VM 功能完善
+- [x] v0.31 寄存器 VM 异常处理与默认参数
 - [ ] 生产环境验证
 
 ---
