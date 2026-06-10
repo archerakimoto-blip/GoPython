@@ -1204,7 +1204,7 @@ func GetCommonBuiltins() []BuiltinEntry {
 					if len(args) > 0 {
 						msg = args[0].Inspect()
 					}
-					return &objects.Error{Message: msg}
+					return &objects.Error{Message: msg, ErrorType: name}
 				},
 			},
 		})

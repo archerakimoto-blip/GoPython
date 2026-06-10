@@ -1158,13 +1158,8 @@ func (rvm *RegisterVM) getAttrOp(obj objects.Object, attrName string) (objects.O
 	}
 
 	if dictObj, ok := obj.(*objects.Dict); ok {
-		switch attrName {
-		case "keys":
-			return objects.NewDictKeys(dictObj), nil
-		case "values":
-			return objects.NewDictValues(dictObj), nil
-		case "items":
-			return objects.NewDictItems(dictObj), nil
+		if val, found := dictObj.GetAttr(attrName); found {
+			return val, nil
 		}
 		return objects.None_, nil
 	}
@@ -1292,6 +1287,29 @@ func (rvm *RegisterVM) regBinaryOp(op compiler.Opcode, left, right objects.Objec
 			return objects.GetCachedInteger(leftVal & rightVal), nil
 		case compiler.OpBitXor:
 			return objects.GetCachedInteger(leftVal ^ rightVal), nil
+		}
+	}
+
+	// Dict merge: d1 | d2 creates a new dict
+	if left.Type() == objects.DICT_OBJ && right.Type() == objects.DICT_OBJ {
+		leftDict := left.(*objects.Dict)
+		rightDict := right.(*objects.Dict)
+		switch op {
+		case compiler.OpBitOr:
+			result := objects.NewDict()
+			for _, keyStr := range leftDict.KeyOrder {
+				key := leftDict.Keys[keyStr]
+				val := leftDict.Pairs[keyStr]
+				result.Set(key, val)
+			}
+			for _, keyStr := range rightDict.KeyOrder {
+				key := rightDict.Keys[keyStr]
+				val := rightDict.Pairs[keyStr]
+				result.Set(key, val)
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("unsupported operand type(s) for binary operation: DICT and DICT")
 		}
 	}
 
@@ -1966,6 +1984,10 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
 						rvm.regSet(i, args[i])
 					}
+					// Fill missing parameters with None for default argument handling
+					for i := totalArgs; i < method.NumParameters; i++ {
+						rvm.regSet(i, objects.None_)
+					}
 					err := rvm.executeRegFrame(newFrame)
 					rvm.frameIndex = oldFrameIndex
 					rvm.numRegs = oldNumRegs
@@ -2007,6 +2029,10 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 					totalArgs := numArgs + 1
 					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
 						rvm.regSet(i, args[i])
+					}
+					// Fill missing parameters with None for default argument handling
+					for i := totalArgs; i < method.NumParameters; i++ {
+						rvm.regSet(i, objects.None_)
 					}
 					err := rvm.executeRegFrame(newFrame)
 					rvm.frameIndex = oldFrameIndex
@@ -2091,6 +2117,10 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 				for i := 0; i < numArgs && i < closure.NumParameters; i++ {
 					rvm.regSet(i, args[i])
 				}
+				// Fill missing parameters with None for default argument handling
+				for i := numArgs; i < closure.NumParameters; i++ {
+					rvm.regSet(i, objects.None_)
+				}
 
 				err := rvm.executeRegFrame(newFrame)
 				rvm.frameIndex = oldFrameIndex
@@ -2150,6 +2180,10 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 				// Set up argument registers in the callee's frame
 				for i := 0; i < numArgs && i < compiledFn.NumParameters; i++ {
 					rvm.regSet(i, args[i])
+				}
+				// Fill missing parameters with None for default argument handling
+				for i := numArgs; i < compiledFn.NumParameters; i++ {
+					rvm.regSet(i, objects.None_)
 				}
 
 				// Execute the function body directly using the instruction loop
@@ -2458,15 +2492,61 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 		case RegOpRaise:
 			errReg := inst.Operands[0]
 			errObj := rvm.regGet(errReg)
-			// Try stack VM's exception handling first
-			if vm.framesIndex > 0 {
-				caught := vm.raiseException(errObj)
-				if caught {
-					return nil
+			// Register VM-specific exception handling:
+			// Scan vm.exceptionStack for matching handlers in register instructions
+			caught := false
+			for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
+				handler := vm.exceptionStack[i]
+
+				if handler.exceptCount == 0 && !handler.hasFinally {
+					continue
+				}
+
+				foundHandler := false
+
+				if handler.handlerIP >= 0 {
+					scanIP := handler.handlerIP
+					for scanIP < len(instructions) {
+						scanInst := instructions[scanIP]
+						if scanInst.Opcode == RegOpExceptHandler {
+							typeIdx := scanInst.Operands[0]
+							var exceptionType string
+							if typeIdx > 0 && typeIdx < len(vm.constants) {
+								if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+									exceptionType = typeObj.Value
+								}
+							}
+							if exceptionType == "" || matchesException(errObj, exceptionType) {
+								ip = scanIP + 1 // jump to handler body
+								foundHandler = true
+								caught = true
+								break
+							}
+							scanIP++
+						} else if scanInst.Opcode == RegOpFinally || scanInst.Opcode == RegOpEndTry {
+							break
+						} else {
+							scanIP++
+						}
+					}
+				}
+
+				if foundHandler {
+					break
+				}
+
+				if handler.hasFinally && handler.finallyStartIP > 0 {
+					vm.exceptionStack[i].pendingError = errObj
+					ip = handler.finallyStartIP
+					caught = true
+					break
 				}
 			}
-			vm.pendingError = errObj
-			return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+
+			if !caught {
+				vm.pendingError = errObj
+				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+			}
 
 		case RegOpListUnpack:
 			listReg := inst.Operands[0]
@@ -2754,7 +2834,50 @@ func (rvm *RegisterVM) RunRegDirect(regBytecode *compiler.RegBytecode) error {
 				vm.exceptionStack = vm.exceptionStack[:lastIdx]
 				vm.inFinally = false
 				if pendingError != nil {
-					caught := vm.raiseException(pendingError)
+					// Re-raise pending error using register VM exception handling
+					caught := false
+					for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
+						h := vm.exceptionStack[i]
+						if h.exceptCount == 0 && !h.hasFinally {
+							continue
+						}
+						foundHandler := false
+						if h.handlerIP >= 0 {
+							scanIP := h.handlerIP
+							for scanIP < len(instructions) {
+								scanInst := instructions[scanIP]
+								if scanInst.Opcode == RegOpExceptHandler {
+									typeIdx := scanInst.Operands[0]
+									var exceptionType string
+									if typeIdx > 0 && typeIdx < len(vm.constants) {
+										if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+											exceptionType = typeObj.Value
+										}
+									}
+									if exceptionType == "" || matchesException(pendingError, exceptionType) {
+										ip = scanIP + 1
+										foundHandler = true
+										caught = true
+										break
+									}
+									scanIP++
+								} else if scanInst.Opcode == RegOpFinally || scanInst.Opcode == RegOpEndTry {
+									break
+								} else {
+									scanIP++
+								}
+							}
+						}
+						if foundHandler {
+							break
+						}
+						if h.hasFinally && h.finallyStartIP > 0 {
+							vm.exceptionStack[i].pendingError = pendingError
+							ip = h.finallyStartIP
+							caught = true
+							break
+						}
+					}
 					if !caught {
 						vm.pendingError = pendingError
 						return fmt.Errorf("unhandled exception: %s", pendingError.Inspect())
@@ -3165,6 +3288,10 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
 						rvm.regSet(i, args[i])
 					}
+					// Fill missing parameters with None for default argument handling
+					for i := totalArgs; i < method.NumParameters; i++ {
+						rvm.regSet(i, objects.None_)
+					}
 					err := rvm.executeRegFrame(newFrame)
 					rvm.frameIndex = oldFrameIndex
 					rvm.numRegs = oldNumRegs
@@ -3206,6 +3333,10 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 					totalArgs := numArgs + 1
 					for i := 0; i < totalArgs && i < method.NumParameters; i++ {
 						rvm.regSet(i, args[i])
+					}
+					// Fill missing parameters with None for default argument handling
+					for i := totalArgs; i < method.NumParameters; i++ {
+						rvm.regSet(i, objects.None_)
 					}
 					err := rvm.executeRegFrame(newFrame)
 					rvm.frameIndex = oldFrameIndex
@@ -3290,6 +3421,10 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 				for i := 0; i < numArgs && i < closure.NumParameters; i++ {
 					rvm.regSet(i, args[i])
 				}
+				// Fill missing parameters with None for default argument handling
+				for i := numArgs; i < closure.NumParameters; i++ {
+					rvm.regSet(i, objects.None_)
+				}
 
 				err := rvm.executeRegFrame(newFrame)
 				rvm.frameIndex = oldFrameIndex
@@ -3349,6 +3484,10 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 				// Set up argument registers in the callee's frame
 				for i := 0; i < numArgs && i < compiledFn.NumParameters; i++ {
 					rvm.regSet(i, args[i])
+				}
+				// Fill missing parameters with None for default argument handling
+				for i := numArgs; i < compiledFn.NumParameters; i++ {
+					rvm.regSet(i, objects.None_)
 				}
 
 				// Execute the function body directly using the instruction loop
@@ -3742,15 +3881,61 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 		case RegOpRaise:
 			errReg := inst.Operands[0]
 			errObj := rvm.regGet(errReg)
-			// Try stack VM's exception handling first
-			if vm.framesIndex > 0 {
-				caught := vm.raiseException(errObj)
-				if caught {
-					return nil
+			// Register VM-specific exception handling:
+			// Scan vm.exceptionStack for matching handlers in register instructions
+			caught := false
+			for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
+				handler := vm.exceptionStack[i]
+
+				if handler.exceptCount == 0 && !handler.hasFinally {
+					continue
+				}
+
+				foundHandler := false
+
+				if handler.handlerIP >= 0 {
+					scanIP := handler.handlerIP
+					for scanIP < len(instructions) {
+						scanInst := instructions[scanIP]
+						if scanInst.Opcode == RegOpExceptHandler {
+							typeIdx := scanInst.Operands[0]
+							var exceptionType string
+							if typeIdx > 0 && typeIdx < len(vm.constants) {
+								if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+									exceptionType = typeObj.Value
+								}
+							}
+							if exceptionType == "" || matchesException(errObj, exceptionType) {
+								ip = scanIP + 1 // jump to handler body
+								foundHandler = true
+								caught = true
+								break
+							}
+							scanIP++
+						} else if scanInst.Opcode == RegOpFinally || scanInst.Opcode == RegOpEndTry {
+							break
+						} else {
+							scanIP++
+						}
+					}
+				}
+
+				if foundHandler {
+					break
+				}
+
+				if handler.hasFinally && handler.finallyStartIP > 0 {
+					vm.exceptionStack[i].pendingError = errObj
+					ip = handler.finallyStartIP
+					caught = true
+					break
 				}
 			}
-			vm.pendingError = errObj
-			return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+
+			if !caught {
+				vm.pendingError = errObj
+				return fmt.Errorf("unhandled exception: %s", errObj.Inspect())
+			}
 
 		case RegOpListUnpack:
 			listReg := inst.Operands[0]
@@ -4115,7 +4300,50 @@ func (rvm *RegisterVM) executeRegFrame(frame *RegFrame) error {
 				vm.exceptionStack = vm.exceptionStack[:lastIdx]
 				vm.inFinally = false
 				if pendingError != nil {
-					caught := vm.raiseException(pendingError)
+					// Re-raise pending error using register VM exception handling
+					caught := false
+					for i := len(vm.exceptionStack) - 1; i >= 0; i-- {
+						h := vm.exceptionStack[i]
+						if h.exceptCount == 0 && !h.hasFinally {
+							continue
+						}
+						foundHandler := false
+						if h.handlerIP >= 0 {
+							scanIP := h.handlerIP
+							for scanIP < len(instructions) {
+								scanInst := instructions[scanIP]
+								if scanInst.Opcode == RegOpExceptHandler {
+									typeIdx := scanInst.Operands[0]
+									var exceptionType string
+									if typeIdx > 0 && typeIdx < len(vm.constants) {
+										if typeObj, ok := vm.constants[typeIdx].(*objects.String); ok {
+											exceptionType = typeObj.Value
+										}
+									}
+									if exceptionType == "" || matchesException(pendingError, exceptionType) {
+										ip = scanIP + 1
+										foundHandler = true
+										caught = true
+										break
+									}
+									scanIP++
+								} else if scanInst.Opcode == RegOpFinally || scanInst.Opcode == RegOpEndTry {
+									break
+								} else {
+									scanIP++
+								}
+							}
+						}
+						if foundHandler {
+							break
+						}
+						if h.hasFinally && h.finallyStartIP > 0 {
+							vm.exceptionStack[i].pendingError = pendingError
+							ip = h.finallyStartIP
+							caught = true
+							break
+						}
+					}
 					if !caught {
 						vm.pendingError = pendingError
 						return fmt.Errorf("unhandled exception: %s", pendingError.Inspect())

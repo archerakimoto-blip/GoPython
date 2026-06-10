@@ -1608,16 +1608,23 @@ func (rc *RegisterCompiler) compileTryStatement(ts *ast.TryStatement) error {
 	hasExcept := len(ts.Excepts) > 0
 	hasFinally := ts.Finally != nil
 
+	beginTryIdx := len(rc.instructions)
 	rc.emitReg(ROpBeginTry, len(ts.Excepts), boolToInt(hasFinally), -1, -1)
 
 	if err := rc.compileStmt(ts.Body); err != nil {
 		return err
 	}
 
+	// Jump past except handlers (to finally or after try)
 	jumpIdx := len(rc.instructions)
 	rc.emitReg(ROpJump, -1)
 
+	// Record the IP of the first except handler
+	firstHandlerIP := -1
+	var exceptJumpIdxs []int
+
 	if hasExcept {
+		firstHandlerIP = len(rc.instructions)
 		for _, ex := range ts.Excepts {
 			var typeIdx int
 			if ex.Type != nil {
@@ -1647,22 +1654,48 @@ func (rc *RegisterCompiler) compileTryStatement(ts *ast.TryStatement) error {
 			if err := rc.compileStmt(ex.Body); err != nil {
 				return err
 			}
+
+			// Jump to after try (or to finally) after except body
+			ejIdx := len(rc.instructions)
+			rc.emitReg(ROpJump, -1)
+			exceptJumpIdxs = append(exceptJumpIdxs, ejIdx)
 		}
 	}
 
+	var finallyStartIP int
 	if hasFinally {
-		finallyStart := len(rc.instructions)
+		finallyStartIP = len(rc.instructions)
 		rc.emitReg(ROpFinally, -1)
 		if err := rc.compileStmt(ts.Finally); err != nil {
 			return err
 		}
-		rc.instructions[jumpIdx].Operands[0] = finallyStart
-	} else {
-		afterTry := len(rc.instructions)
-		rc.instructions[jumpIdx].Operands[0] = afterTry
 	}
 
+	// Back-patch ROpBeginTry with handler IP and finally IP
+	rc.instructions[beginTryIdx].Operands[2] = firstHandlerIP
+	if hasFinally {
+		rc.instructions[beginTryIdx].Operands[3] = finallyStartIP
+	}
+
+	afterTryIP := len(rc.instructions)
 	rc.emitReg(ROpEndTry)
+
+	// Back-patch the jump after try body
+	if hasFinally {
+		rc.instructions[jumpIdx].Operands[0] = finallyStartIP
+	} else {
+		rc.instructions[jumpIdx].Operands[0] = afterTryIP
+	}
+
+	// Back-patch the jumps after each except handler body
+	for _, ejIdx := range exceptJumpIdxs {
+		if hasFinally {
+			rc.instructions[ejIdx].Operands[0] = finallyStartIP
+		} else {
+			rc.instructions[ejIdx].Operands[0] = afterTryIP
+		}
+	}
+
 	return nil
 }
 
