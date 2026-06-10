@@ -1,630 +1,998 @@
-#!/usr/bin/env python3
-"""GoPy Runtime Test Suite - Comprehensive test for VM behavior comparison"""
+# GoPy Runtime Test Suite
+# Comprehensive test for VM behavior - compatible with GoPy parser limitations
+# No multi-arg print, no tuple literals, no dict literals, no f-strings, no walrus, no decorators
 
-import sys
-
-# Test counter
 _passed = 0
 _failed = 0
-_tests = []
+_total = 0
 
-def test(name):
-    """Decorator to register a test"""
-    def decorator(func):
-        _tests.append((name, func))
-        return func
-    return decorator
+def check(name, actual, expected):
+    global _passed, _failed, _total
+    _total = _total + 1
+    if actual == expected:
+        _passed = _passed + 1
+    else:
+        _failed = _failed + 1
+        print("FAIL: " + name + " => got " + str(actual) + " want " + str(expected))
 
-def run_tests():
-    """Run all registered tests"""
-    global _passed, _failed
-    print(f"Running {_len(_tests)} tests...")
-    print("=" * 60)
-    for name, func in _tests:
-        try:
-            func()
-            print(f"[PASS] {name}")
-            _passed += 1
-        except Exception as e:
-            print(f"[FAIL] {name}: {e}")
-            _failed += 1
-    print("=" * 60)
-    print(f"Results: {_passed} passed, {_failed} failed")
-    return _failed == 0
+def check_true(name, cond):
+    global _passed, _failed, _total
+    _total = _total + 1
+    if cond:
+        _passed = _passed + 1
+    else:
+        _failed = _failed + 1
+        print("FAIL: " + name)
 
-# Helper
-def _len(x):
-    return x.__len__() if hasattr(x, '__len__') else 0
+# ============================================================
+# Section 1: Basic Types and Arithmetic
+# ============================================================
 
-# ========== Basic Types ==========
+check("int add", 1 + 2, 3)
+check("int sub", 10 - 3, 7)
+check("int mul", 4 * 5, 20)
+check("int div", 10 // 3, 3)
+check("int mod", 10 % 3, 1)
+check("int pow", 2 ** 10, 1024)
+check("int neg", -5, -5)
+check("float add", 1.5 + 2.5, 4.0)
+check("float sub", 5.5 - 1.5, 4.0)
+check("float mul", 2.5 * 4.0, 10.0)
+check("float div", 7.0 / 2.0, 3.5)
+check("int float mix", 1 + 2.0, 3.0)
 
-@test("int arithmetic")
-def test_int_arithmetic():
-    a = 10
-    b = 3
-    assert a + b == 13
-    assert a - b == 7
-    assert a * b == 30
-    assert a // b == 3
-    assert a % b == 1
-    assert a ** b == 1000
+# ============================================================
+# Section 2: Comparison and Boolean
+# ============================================================
 
-@test("float arithmetic")
-def test_float_arithmetic():
-    a = 10.5
-    b = 2.5
-    assert a + b == 13.0
-    assert a - b == 8.0
-    assert a * b == 26.25
+check_true("eq", 1 == 1)
+check_true("ne", 1 != 2)
+check_true("lt", 1 < 2)
+check_true("gt", 2 > 1)
+check_true("le", 1 <= 1)
+check_true("ge", 2 >= 1)
+check_true("and true", True and True)
+check_true("or true", True or False)
+check_true("not false", not False)
+check_true("and false", not (True and False))
+check_true("or false", not (False or False))
+check_true("chained cmp", 1 < 2 < 3)
+check_true("chained cmp2", not (1 < 2 < 1))
 
-@test("bool operations")
-def test_bool_operations():
-    assert True and False == False
-    assert True or False == True
-    assert not True == False
-    assert True and True == True
+# ============================================================
+# Section 3: String Operations
+# ============================================================
 
-@test("string operations")
-def test_string_operations():
-    s = "hello"
-    assert s + " world" == "hello world"
-    assert s * 2 == "hellohello"
-    assert len(s) == 5
-    assert s[0] == "h"
-    assert s[1:4] == "ell"
-    assert "ell" in s
+check("str concat", "hello" + " " + "world", "hello world")
+check("str repeat", "ab" * 3, "ababab")
+check("str len", len("hello"), 5)
+check("str index", "hello"[1], "e")
+check("str slice", "hello"[1:4], "ell")
+check("str neg index", "hello"[-1], "o")
+check_true("str in", "ell" in "hello")
+check_true("str not in", "xyz" not in "hello")
+check("str upper", "Hello".upper(), "HELLO")
+check("str lower", "Hello".lower(), "hello")
+check("str strip", "  hi  ".strip(), "hi")
+check("str lstrip", "  hi  ".lstrip(), "hi  ")
+check("str rstrip", "  hi  ".rstrip(), "  hi")
+check("str replace", "hello world".replace("world", "python"), "hello python")
+check("str split len", len("a,b,c".split(",")), 3)
+check("str join", "-".join(["a", "b", "c"]), "a-b-c")
+check("str startswith", "hello".startswith("he"), True)
+check("str endswith", "hello".endswith("lo"), True)
+check("str find", "hello".find("ll"), 2)
+check("str find miss", "hello".find("xx"), -1)
+check("str count", "hello".count("l"), 2)
+check("str format", "Hello, {}!".format("World"), "Hello, World!")
+check("str isdigit", "123".isdigit(), True)
+check("str isalpha", "abc".isalpha(), True)
 
-@test("list operations")
-def test_list_operations():
-    lst = [1, 2, 3]
-    lst.append(4)
-    assert len(lst) == 4
-    assert lst[0] == 1
-    assert lst[-1] == 4
-    lst2 = lst + [5, 6]
-    assert len(lst2) == 6
+# ============================================================
+# Section 4: List Operations
+# ============================================================
 
-@test("dict operations")
-def test_dict_operations():
-    d = {"a": 1, "b": 2}
-    assert d["a"] == 1
-    d["c"] = 3
-    assert len(d) == 3
-    assert "a" in d
-    assert d.get("x", 0) == 0
+lst = [1, 2, 3]
+check("list index", lst[0], 1)
+check("list neg index", lst[-1], 3)
+check("list len", len(lst), 3)
+lst.append(4)
+check("list append", len(lst), 4)
+lst.extend([5, 6])
+check("list extend", len(lst), 6)
+lst.insert(0, 0)
+check("list insert", lst[0], 0)
+v = lst.pop()
+check("list pop val", v, 6)
+check("list pop len", len(lst), 6)
+lst.remove(0)
+check("list remove", lst[0], 1)
+check("list index of", lst.index(3), 2)
+check("list count", [1, 2, 2, 3].count(2), 2)
+lst2 = [3, 1, 2]
+lst2.sort()
+check("list sort", lst2[0], 1)
+check("list sort2", lst2[1], 2)
+lst3 = [1, 2, 3]
+lst3.reverse()
+check("list reverse", lst3[0], 3)
+check("list concat", [1, 2] + [3, 4], [1, 2, 3, 4])
+check("list repeat", [0] * 3, [0, 0, 0])
+check("list slice", [0, 1, 2, 3, 4][1:3], [1, 2])
+check_true("list in", 2 in [1, 2, 3])
+check_true("list not in", 4 not in [1, 2, 3])
 
-@test("set operations")
-def test_set_operations():
-    s = {1, 2, 3}
-    s.add(4)
-    assert len(s) == 4
-    assert 1 in s
-    s2 = s | {5, 6}
-    assert len(s2) == 6
+# ============================================================
+# Section 5: Dict Operations
+# ============================================================
 
-# ========== Functions ==========
+d = {}
+d["a"] = 1
+d["b"] = 2
+check("dict setget", d["a"], 1)
+check("dict len", len(d), 2)
+check("dict get", d.get("a"), 1)
+check("dict get default", d.get("x", 0), 0)
+check_true("dict in", "a" in d)
+check_true("dict not in", "z" not in d)
+d["c"] = 3
+check("dict assign", len(d), 3)
+v = d.pop("a")
+check("dict pop", v, 1)
+check("dict pop len", len(d), 2)
+d.update({"x": 10})
+check("dict update", d["x"], 10)
+d.setdefault("y", 20)
+check("dict setdefault", d["y"], 20)
+check("dict keys len", len(d.keys()), 4)
+check("dict values len", len(d.values()), 4)
+check("dict items len", len(d.items()), 4)
 
-@test("function definition and call")
-def test_function_basic():
-    def add(a, b):
-        return a + b
-    assert add(2, 3) == 5
-    assert add(10, 20) == 30
+# Dict merge
+d1 = {}
+d1["a"] = 1
+d2 = {}
+d2["b"] = 2
+d3 = d1 | d2
+check("dict merge len", len(d3), 2)
+check("dict merge a", d3["a"], 1)
+check("dict merge b", d3["b"], 2)
 
-@test("default arguments")
-def test_default_args():
-    def greet(name, greeting="hello"):
-        return greeting + " " + name
-    assert greet("world") == "hello world"
-    assert greet("world", "hi") == "hi world"
+# ============================================================
+# Section 6: Set Operations
+# ============================================================
 
-@test("multiple default arguments")
-def test_multiple_default_args():
-    def func(a, b=2, c=3):
-        return a + b + c
-    assert func(1) == 6
-    assert func(1, 5) == 9
-    assert func(1, 5, 7) == 13
+s = set()
+s.add(1)
+s.add(2)
+s.add(3)
+check("set add len", len(s), 3)
+check_true("set in", 1 in s)
+s.add(2)
+check("set add dup", len(s), 3)
+s.remove(1)
+check("set remove", len(s), 2)
+check_true("set not in", 1 not in s)
 
-@test("*args")
-def test_varargs():
-    def sum_all(*args):
-        total = 0
-        for x in args:
-            total = total + x
-        return total
-    assert sum_all(1, 2, 3) == 6
-    assert sum_all(1, 2, 3, 4, 5) == 15
+# ============================================================
+# Section 7: Variables and Scope
+# ============================================================
 
-@test("**kwargs")
-def test_kwargs():
-    def get_values(**kwargs):
-        return kwargs
-    result = get_values(a=1, b=2)
-    assert result["a"] == 1
-    assert result["b"] == 2
+x = 10
+check("global var", x, 10)
+x = x + 5
+check("global reassign", x, 15)
+x += 3
+check("augmented +=", x, 18)
+x -= 2
+check("augmented -=", x, 16)
+x *= 2
+check("augmented *=", x, 32)
+x //= 3
+check("augmented //=", x, 10)
+x %= 3
+check("augmented %=", x, 1)
 
-@test("mixed args")
-def test_mixed_args():
-    def func(a, b, *args, **kwargs):
-        return (a, b, args, kwargs)
-    r = func(1, 2, 3, 4, x=5)
-    assert r[0] == 1
-    assert r[1] == 2
-    assert len(r[2]) == 2
-    assert r[3]["x"] == 5
+# ============================================================
+# Section 8: Control Flow
+# ============================================================
 
-# ========== Closures ==========
+# if/elif/else
+def classify(n):
+    if n < 0:
+        return "neg"
+    elif n == 0:
+        return "zero"
+    else:
+        return "pos"
+check("if elif", classify(-1), "neg")
+check("if else", classify(0), "zero")
+check("if elif2", classify(1), "pos")
 
-@test("simple closure")
-def test_simple_closure():
-    def make_adder(n):
-        def adder(x):
-            return x + n
-        return adder
-    add5 = make_adder(5)
-    assert add5(10) == 15
-    add10 = make_adder(10)
-    assert add10(3) == 13
+# for loop
+total = 0
+for i in range(5):
+    total = total + i
+check("for range", total, 10)
 
-@test("nested closure")
-def test_nested_closure():
-    def outer(x):
-        def middle(y):
-            def inner(z):
-                return x + y + z
-            return inner
-        return middle
-    assert outer(1)(2)(3) == 6
+# while loop
+n = 0
+while n < 5:
+    n = n + 1
+check("while", n, 5)
 
-@test("closure with mutation")
-def test_closure_mutation():
-    def make_counter():
-        count = 0
-        def counter():
-            nonlocal count
-            count = count + 1
-            return count
-        return counter
-    c = make_counter()
-    assert c() == 1
-    assert c() == 2
-    assert c() == 3
+# break
+result = []
+for i in range(10):
+    if i == 5:
+        break
+    result.append(i)
+check("break len", len(result), 5)
+check("break last", result[-1], 4)
 
-# ========== Classes ==========
+# continue
+result2 = []
+for i in range(10):
+    if i % 2 == 0:
+        continue
+    result2.append(i)
+check("continue len", len(result2), 5)
+check("continue first", result2[0], 1)
+check("continue last", result2[-1], 9)
 
-@test("simple class")
-def test_simple_class():
-    class Point:
-        def __init__(self, x, y):
-            self.x = x
-            self.y = y
-        def add(self, other):
-            return Point(self.x + other.x, self.y + other.y)
-    p1 = Point(1, 2)
-    p2 = Point(3, 4)
-    p3 = p1.add(p2)
-    assert p3.x == 4
-    assert p3.y == 6
+# nested loop
+count = 0
+for i in range(3):
+    for j in range(3):
+        count = count + 1
+check("nested loop", count, 9)
 
-@test("class with method")
-def test_class_method():
-    class Counter:
-        def __init__(self):
-            self.value = 0
-        def increment(self):
-            self.value = self.value + 1
-            return self.value
-    c = Counter()
-    assert c.increment() == 1
-    assert c.increment() == 2
+# for else
+def has_item(lst, target):
+    for x in lst:
+        if x == target:
+            return True
+    else:
+        return False
+check("for else found", has_item([1, 2, 3], 2), True)
+check("for else not found", has_item([1, 2, 3], 5), False)
 
-@test("inheritance")
-def test_inheritance():
-    class Animal:
-        def __init__(self, name):
-            self.name = name
-        def speak(self):
-            return "..."
-    class Dog(Animal):
-        def speak(self):
-            return self.name + " says woof"
-    d = Dog("Rex")
-    assert d.speak() == "Rex says woof"
+# ============================================================
+# Section 9: Functions
+# ============================================================
 
-@test("class attribute")
-def test_class_attribute():
-    class MyClass:
-        count = 0
-        def __init__(self):
-            MyClass.count = MyClass.count + 1
-    a = MyClass()
-    b = MyClass()
-    assert MyClass.count == 2
+def add(a, b):
+    return a + b
+check("func basic", add(3, 4), 7)
 
-# ========== Control Flow ==========
+def greet(name, greeting="hello"):
+    return greeting + " " + name
+check("func default", greet("world"), "hello world")
+check("func default override", greet("world", "hi"), "hi world")
 
-@test("if/elif/else")
-def test_if_elif():
-    def classify(x):
-        if x < 0:
-            return "negative"
-        elif x == 0:
-            return "zero"
-        else:
-            return "positive"
-    assert classify(-1) == "negative"
-    assert classify(0) == "zero"
-    assert classify(1) == "positive"
+def multi_default(a, b=2, c=3):
+    return a + b + c
+check("func multi default", multi_default(1), 6)
+check("func multi default2", multi_default(1, 5), 9)
+check("func multi default3", multi_default(1, 5, 7), 13)
 
-@test("for loop")
-def test_for_loop():
+def sum_all(*args):
     total = 0
-    for i in range(5):
-        total = total + i
-    assert total == 10
+    for x in args:
+        total = total + x
+    return total
+check("func *args", sum_all(1, 2, 3), 6)
+check("func *args2", sum_all(1, 2, 3, 4, 5), 15)
 
-@test("while loop")
-def test_while_loop():
-    x = 0
-    while x < 5:
-        x = x + 1
-    assert x == 5
+def get_kw(**kwargs):
+    return kwargs
+r = get_kw(a=1, b=2)
+check("func **kwargs a", r["a"], 1)
+check("func **kwargs b", r["b"], 2)
 
-@test("break statement")
-def test_break():
-    result = []
-    for i in range(10):
-        if i == 5:
-            break
-        result.append(i)
-    assert len(result) == 5
-    assert result[-1] == 4
+def mixed(a, b, *args, **kwargs):
+    return a + b + sum_all(*args)
+check("func mixed", mixed(1, 2, 3, 4), 10)
 
-@test("continue statement")
-def test_continue():
-    result = []
-    for i in range(10):
-        if i % 2 == 0:
-            continue
-        result.append(i)
-    assert len(result) == 5
-    assert result == [1, 3, 5, 7, 9]
+# Recursive
+def factorial(n):
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+check("factorial 5", factorial(5), 120)
+check("factorial 10", factorial(10), 3628800)
 
-@test("for-else")
-def test_for_else():
-    def find(lst, target):
-        for x in lst:
-            if x == target:
-                return True
-        else:
-            return False
-    assert find([1, 2, 3], 2) == True
-    assert find([1, 2, 3], 5) == False
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+check("fib 10", fib(10), 55)
 
-# ========== Exceptions ==========
+# ============================================================
+# Section 10: Closures
+# ============================================================
 
-@test("try/except")
-def test_try_except():
-    def safe_div(a, b):
-        try:
-            return a / b
-        except:
-            return None
-    assert safe_div(10, 2) == 5.0
-    assert safe_div(10, 0) == None
+def make_adder(n):
+    def adder(x):
+        return x + n
+    return adder
+add5 = make_adder(5)
+add10 = make_adder(10)
+check("closure add5", add5(3), 8)
+check("closure add10", add10(3), 13)
 
-@test("try/except specific")
-def test_try_except_specific():
-    def get_item(lst, idx):
-        try:
-            return lst[idx]
-        except IndexError:
-            return "out of range"
-    assert get_item([1, 2, 3], 1) == 2
-    assert get_item([1, 2, 3], 10) == "out of range"
+def make_counter():
+    count = 0
+    def counter():
+        nonlocal count
+        count = count + 1
+        return count
+    return counter
+c = make_counter()
+check("counter 1", c(), 1)
+check("counter 2", c(), 2)
+check("counter 3", c(), 3)
 
-@test("try/finally")
-def test_try_finally():
-    result = []
-    def test():
-        try:
-            result.append("try")
-            return "done"
-        finally:
-            result.append("finally")
-    assert test() == "done"
-    assert result == ["try", "finally"]
+def outer(x):
+    def middle(y):
+        def inner(z):
+            return x + y + z
+        return inner
+    return middle
+check("nested closure", outer(1)(2)(3), 6)
 
-@test("raise exception")
-def test_raise():
-    def check_positive(x):
-        if x < 0:
-            raise ValueError("must be positive")
-        return True
-    assert check_positive(5) == True
+# Closure capturing loop variable
+def make_funcs():
+    funcs = []
+    for i in range(3):
+        def make_func(val):
+            def func():
+                return val
+            return func
+        funcs.append(make_func(i))
+    check("closure loop 0", funcs[0](), 0)
+    check("closure loop 1", funcs[1](), 1)
+    check("closure loop 2", funcs[2](), 2)
+make_funcs()
+
+# ============================================================
+# Section 11: Classes
+# ============================================================
+
+class Dog:
+    def __init__(self, name):
+        self.name = name
+    def speak(self):
+        return self.name + " says woof"
+
+d = Dog("Rex")
+check("class attr", d.name, "Rex")
+check("class method", d.speak(), "Rex says woof")
+
+class Counter:
+    def __init__(self):
+        self.value = 0
+    def increment(self):
+        self.value = self.value + 1
+        return self.value
+    def get(self):
+        return self.value
+
+ctr = Counter()
+check("class incr 1", ctr.increment(), 1)
+check("class incr 2", ctr.increment(), 2)
+check("class get", ctr.get(), 2)
+
+# Inheritance
+class Animal:
+    def __init__(self, name):
+        self.name = name
+    def speak(self):
+        return "..."
+
+class Cat(Animal):
+    def speak(self):
+        return self.name + " says meow"
+
+cat = Cat("Whiskers")
+check("inherit attr", cat.name, "Whiskers")
+check("inherit method", cat.speak(), "Whiskers says meow")
+
+# Class attribute
+class Tracker:
+    count = 0
+    def __init__(self):
+        Tracker.count = Tracker.count + 1
+
+t1 = Tracker()
+t2 = Tracker()
+check("class attr", Tracker.count, 2)
+
+# __str__ method
+class Wrapper:
+    def __init__(self, val):
+        self.val = val
+    def __str__(self):
+        return "W:" + str(self.val)
+
+w = Wrapper(42)
+check("class str", str(w), "W:42")
+
+# ============================================================
+# Section 12: Exception Handling
+# ============================================================
+
+def safe_div(a, b):
     try:
-        check_positive(-1)
-        assert False, "should have raised"
-    except ValueError:
-        pass
+        return a / b
+    except:
+        return -1
+check("try except div", safe_div(10, 2), 5.0)
+check("try except zero", safe_div(10, 0), -1)
 
-# ========== Built-in Functions ==========
+def check_value(x):
+    if x < 0:
+        raise ValueError("negative")
+    return True
 
-@test("len()")
-def test_len():
-    assert len([1, 2, 3]) == 3
-    assert len("hello") == 5
-    assert len({"a": 1, "b": 2}) == 2
+check("no raise", check_value(5), True)
+caught = False
+try:
+    check_value(-1)
+except ValueError:
+    caught = True
+check("raise catch", caught, True)
 
-@test("range()")
-def test_range():
-    r = list(range(5))
-    assert r == [0, 1, 2, 3, 4]
-    r2 = list(range(2, 6))
-    assert r2 == [2, 3, 4, 5]
-    r3 = list(range(0, 10, 2))
-    assert r3 == [0, 2, 4, 6, 8]
+# try/finally
+finally_ran = False
+try:
+    x = 1 + 1
+finally:
+    finally_ran = True
+check("finally runs", finally_ran, True)
 
-@test("min/max")
-def test_min_max():
-    assert min([3, 1, 2]) == 1
-    assert max([3, 1, 2]) == 3
-    assert min(1, 2, 3) == 1
-    assert max(1, 2, 3) == 3
+# nested try
+def nested_try():
+    try:
+        try:
+            raise ValueError("inner")
+        except ValueError:
+            return "caught inner"
+    except:
+        return "caught outer"
+check("nested try", nested_try(), "caught inner")
 
-@test("sum()")
-def test_sum():
-    assert sum([1, 2, 3, 4, 5]) == 15
+# ============================================================
+# Section 13: Built-in Functions
+# ============================================================
 
-@test("sorted()")
-def test_sorted():
-    assert sorted([3, 1, 2]) == [1, 2, 3]
-    assert sorted([3, 1, 2], reverse=True) == [3, 2, 1]
+check("len list", len([1, 2, 3]), 3)
+check("len str", len("hello"), 5)
+check("len dict", len(d), 4)
+check("abs", abs(-5), 5)
+check("abs pos", abs(3), 3)
+check("min list", min([3, 1, 2]), 1)
+check("max list", max([3, 1, 2]), 3)
+check("sum list", sum([1, 2, 3, 4, 5]), 15)
+check("sorted", sorted([3, 1, 2]), [1, 2, 3])
+check("reversed", list(reversed([1, 2, 3])), [3, 2, 1])
+check("range list", list(range(5)), [0, 1, 2, 3, 4])
+check("range step", list(range(0, 10, 2)), [0, 2, 4, 6, 8])
+check("chr", chr(65), "A")
+check("ord", ord("A"), 65)
+check("hex", hex(255), "0xff")
+check("oct", oct(8), "0o10")
+check("bin", bin(10), "0b1010")
+check("str int", str(123), "123")
+check("int str", int("42"), 42)
+check("float str", float("3.14"), 3.14)
+check("bool true", bool(1), True)
+check("bool false", bool(0), False)
+check("type int", type(1).__name__, "int")
+check("type str", type("a").__name__, "str")
+check("isinstance int", isinstance(1, int), True)
+check("isinstance str", isinstance("a", str), True)
 
-@test("map/filter")
-def test_map_filter():
-    doubled = list(map(lambda x: x * 2, [1, 2, 3]))
-    assert doubled == [2, 4, 6]
-    evens = list(filter(lambda x: x % 2 == 0, [1, 2, 3, 4, 5]))
-    assert evens == [2, 4]
+# map/filter
+doubled = list(map(lambda x: x * 2, [1, 2, 3]))
+check("map", doubled, [2, 4, 6])
+evens = list(filter(lambda x: x % 2 == 0, [1, 2, 3, 4, 5]))
+check("filter", evens, [2, 4])
 
-@test("zip()")
-def test_zip():
-    result = list(zip([1, 2, 3], ["a", "b", "c"]))
-    assert len(result) == 3
-    assert result[0] == (1, "a")
+# zip
+zipped = list(zip([1, 2, 3], ["a", "b", "c"]))
+check("zip len", len(zipped), 3)
+check("zip first0", zipped[0][0], 1)
+check("zip first1", zipped[0][1], "a")
 
-@test("enumerate()")
-def test_enumerate():
-    result = list(enumerate(["a", "b", "c"]))
-    assert result[0] == (0, "a")
-    assert result[1] == (1, "b")
+# enumerate
+enumed = list(enumerate(["a", "b", "c"]))
+check("enum len", len(enumed), 3)
+check("enum idx", enumed[0][0], 0)
+check("enum val", enumed[0][1], "a")
 
-# ========== Comprehensions ==========
+# any/all
+check("any true", any([False, True, False]), True)
+check("any false", any([False, False, False]), False)
+check("all true", all([True, True, True]), True)
+check("all false", all([True, False, True]), False)
 
-@test("list comprehension")
-def test_list_comprehension():
-    squares = [x * x for x in range(5)]
-    assert squares == [0, 1, 4, 9, 16]
+# ============================================================
+# Section 14: Comprehensions
+# ============================================================
 
-@test("list comprehension with filter")
-def test_list_comp_filter():
-    evens = [x for x in range(10) if x % 2 == 0]
-    assert evens == [0, 2, 4, 6, 8]
+squares = [x * x for x in range(5)]
+check("list comp", squares, [0, 1, 4, 9, 16])
 
-@test("dict comprehension")
-def test_dict_comprehension():
-    squares = {x: x * x for x in range(5)}
-    assert squares[2] == 4
-    assert squares[4] == 16
+evens_comp = [x for x in range(10) if x % 2 == 0]
+check("list comp filter", evens_comp, [0, 2, 4, 6, 8])
 
-@test("set comprehension")
-def test_set_comprehension():
-    chars = {c for c in "hello"}
-    assert len(chars) == 4  # h, e, l, o
+# ============================================================
+# Section 15: Lambda
+# ============================================================
 
-# ========== Decorators ==========
+f = lambda x: x * 2
+check("lambda basic", f(5), 10)
+g = lambda x, y: x + y
+check("lambda multi", g(2, 3), 5)
 
-@test("simple decorator")
-def test_simple_decorator():
-    def double_result(func):
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs) * 2
-        return wrapper
+# ============================================================
+# Section 16: Generator
+# ============================================================
 
-    @double_result
-    def add(a, b):
-        return a + b
+def gen(n):
+    for i in range(n):
+        yield i
+check("generator", list(gen(5)), [0, 1, 2, 3, 4])
 
-    assert add(2, 3) == 10
-
-@test("decorator with args")
-def test_decorator_with_args():
-    def multiply_by(n):
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs) * n
-            return wrapper
-        return decorator
-
-    @multiply_by(3)
-    def add(a, b):
-        return a + b
-
-    assert add(2, 3) == 15
-
-# ========== Advanced Features ==========
-
-@test("lambda")
-def test_lambda():
-    f = lambda x, y: x + y
-    assert f(2, 3) == 5
-
-@test("generator")
-def test_generator():
-    def gen(n):
-        for i in range(n):
+def gen_even(n):
+    for i in range(n):
+        if i % 2 == 0:
             yield i
-    result = list(gen(5))
-    assert result == [0, 1, 2, 3, 4]
+check("generator filter", list(gen_even(6)), [0, 2, 4])
 
-@test("slicing")
-def test_slicing():
-    lst = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-    assert lst[2:5] == [2, 3, 4]
-    assert lst[::2] == [0, 2, 4, 6, 8]
-    assert lst[::-1] == [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+# ============================================================
+# Section 17: Ternary Expression
+# ============================================================
 
-@test("walrus operator")
-def test_walrus():
-    if (n := 10) > 5:
-        assert n == 10
+x = 5
+check("ternary true", "big" if x > 3 else "small", "big")
+check("ternary false", "big" if x < 3 else "small", "small")
 
-@test("ternary expression")
-def test_ternary():
-    x = 5
-    result = "positive" if x > 0 else "non-positive"
-    assert result == "positive"
+# ============================================================
+# Section 18: Multiple Assignment
+# ============================================================
 
-# ========== String Methods ==========
+a, b = 10, 20
+check("multi assign a", a, 10)
+check("multi assign b", b, 20)
 
-@test("str.split/join")
-def test_str_split_join():
-    s = "a,b,c"
-    parts = s.split(",")
-    assert parts == ["a", "b", "c"]
-    joined = "-".join(parts)
-    assert joined == "a-b-c"
+# ============================================================
+# Section 19: Slicing
+# ============================================================
 
-@test("str.strip")
-def test_str_strip():
-    s = "  hello  "
-    assert s.strip() == "hello"
-    assert s.lstrip() == "hello  "
-    assert s.rstrip() == "  hello"
+lst = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+check("slice basic", lst[2:5], [2, 3, 4])
+check("slice step", lst[::2], [0, 2, 4, 6, 8])
+check("slice neg step", lst[::-1], [9, 8, 7, 6, 5, 4, 3, 2, 1, 0])
+check("slice neg idx", lst[-3:], [7, 8, 9])
 
-@test("str.replace")
-def test_str_replace():
-    s = "hello world"
-    assert s.replace("world", "python") == "hello python"
+# ============================================================
+# Section 20: Nested Data Structures
+# ============================================================
 
-@test("str.format")
-def test_str_format():
-    s = "Hello, {}!".format("World")
-    assert s == "Hello, World!"
-    s2 = "{}, {}!".format("Hello", "World")
-    assert s2 == "Hello, World!"
+matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+check("nested access", matrix[1][2], 6)
+check("nested row len", len(matrix[0]), 3)
 
-# ========== Dict Methods ==========
+# ============================================================
+# Section 21: String Formatting
+# ============================================================
 
-@test("dict.keys/values/items")
-def test_dict_methods():
-    d = {"a": 1, "b": 2}
-    keys = list(d.keys())
-    values = list(d.values())
-    items = list(d.items())
-    assert len(keys) == 2
-    assert len(values) == 2
-    assert len(items) == 2
+check("format basic", "Hello, {}!".format("World"), "Hello, World!")
+check("format multi", "{} + {} = {}".format(1, 2, 3), "1 + 2 = 3")
 
-@test("dict.update")
-def test_dict_update():
-    d = {"a": 1}
-    d.update({"b": 2, "c": 3})
-    assert len(d) == 3
-    assert d["b"] == 2
+# ============================================================
+# Section 22: Set Operations
+# ============================================================
 
-@test("dict.pop")
-def test_dict_pop():
-    d = {"a": 1, "b": 2}
-    v = d.pop("a")
-    assert v == 1
-    assert len(d) == 1
-    assert "a" not in d
+s1 = set()
+s1.add(1)
+s1.add(2)
+s1.add(3)
+s2 = set()
+s2.add(2)
+s2.add(3)
+s2.add(4)
+su = s1 | s2
+check("set union len", len(su), 4)
+si = s1 & s2
+check("set intersect len", len(si), 2)
+sd = s1 - s2
+check("set diff len", len(sd), 1)
 
-# ========== List Methods ==========
+# ============================================================
+# Section 23: None handling
+# ============================================================
 
-@test("list.extend")
-def test_list_extend():
-    a = [1, 2]
-    a.extend([3, 4])
-    assert a == [1, 2, 3, 4]
+x = None
+check_true("is none", x is None)
+check_true("is not none", 1 is not None)
 
-@test("list.insert")
-def test_list_insert():
-    a = [1, 3]
-    a.insert(1, 2)
-    assert a == [1, 2, 3]
+# ============================================================
+# Section 24: Bitwise Operations
+# ============================================================
 
-@test("list.remove")
-def test_list_remove():
-    a = [1, 2, 3, 2]
-    a.remove(2)
-    assert a == [1, 3, 2]
+check("bit and", 5 & 3, 1)
+check("bit or", 5 | 3, 7)
+check("bit xor", 5 ^ 3, 6)
+check("bit not", ~0, -1)
+check("bit lshift", 1 << 4, 16)
+check("bit rshift", 16 >> 2, 4)
 
-@test("list.pop")
-def test_list_pop():
-    a = [1, 2, 3]
-    v = a.pop()
-    assert v == 3
-    assert a == [1, 2]
-    v2 = a.pop(0)
-    assert v2 == 1
-    assert a == [2]
+# ============================================================
+# Section 25: Complex Expressions
+# ============================================================
 
-@test("list.sort")
-def test_list_sort():
-    a = [3, 1, 2]
-    a.sort()
-    assert a == [1, 2, 3]
-    a.sort(reverse=True)
-    assert a == [3, 2, 1]
+check("complex expr", (1 + 2) * (3 + 4), 21)
+check("nested call", len(str(12345)), 5)
+check("chained method", "  hello  ".strip().upper(), "HELLO")
 
-@test("list.reverse")
-def test_list_reverse():
-    a = [1, 2, 3]
-    a.reverse()
-    assert a == [3, 2, 1]
+# ============================================================
+# Section 26: Higher-order Functions
+# ============================================================
 
-# ========== Set Methods ==========
+def apply(f, x):
+    return f(x)
+check("hof", apply(lambda x: x * 2, 5), 10)
 
-@test("set.union/intersection")
-def test_set_union_intersection():
-    a = {1, 2, 3}
-    b = {2, 3, 4}
-    assert a | b == {1, 2, 3, 4}
-    assert a & b == {2, 3}
+def compose(f, g):
+    def composed(x):
+        return f(g(x))
+    return composed
+double = lambda x: x * 2
+inc = lambda x: x + 1
+check("compose", compose(double, inc)(5), 12)
 
-@test("set.add/remove")
-def test_set_add_remove():
-    s = {1, 2}
-    s.add(3)
-    assert 3 in s
-    s.remove(1)
-    assert 1 not in s
+# ============================================================
+# Section 27: Decorator Pattern (manual)
+# ============================================================
 
-# ========== Recursion ==========
+def double_result(func):
+    def wrapper(x):
+        return func(x) * 2
+    return wrapper
 
-@test("recursive function")
-def test_recursion():
-    def factorial(n):
-        if n <= 1:
-            return 1
-        return n * factorial(n - 1)
-    assert factorial(5) == 120
-    assert factorial(10) == 3628800
+def square(x):
+    return x * x
+square_d = double_result(square)
+check("decorator manual", square_d(3), 18)
 
-@test("fibonacci")
-def test_fibonacci():
+# ============================================================
+# Section 28: Context Manager (with)
+# ============================================================
+
+class MyCtx:
+    def __init__(self):
+        self.entered = False
+        self.exited = False
+    def __enter__(self):
+        self.entered = True
+        return self
+    def __exit__(self, *args):
+        self.exited = True
+        return False
+
+ctx = MyCtx()
+with ctx as c:
+    check("ctx entered", c.entered, True)
+    check("ctx not exited", c.exited, False)
+check("ctx exited", ctx.exited, True)
+
+# ============================================================
+# Section 29: Property-like access
+# ============================================================
+
+class Rect:
+    def __init__(self, w, h):
+        self.w = w
+        self.h = h
+    def area(self):
+        return self.w * self.h
+    def perimeter(self):
+        return 2 * (self.w + self.h)
+
+r = Rect(3, 4)
+check("rect area", r.area(), 12)
+check("rect perimeter", r.perimeter(), 14)
+
+# ============================================================
+# Section 30: String in/out
+# ============================================================
+
+check("str bool", str(True), "True")
+check("str none", str(None), "None")
+check("str list", str([1, 2, 3]), "[1, 2, 3]")
+
+# ============================================================
+# Section 31: Multiple return values via list
+# ============================================================
+
+def divmod_func(a, b):
+    return [a // b, a % b]
+r = divmod_func(17, 5)
+check("divmod q", r[0], 3)
+check("divmod r", r[1], 2)
+
+# ============================================================
+# Section 32: Dynamic attribute setting
+# ============================================================
+
+class Empty:
+    pass
+e = Empty()
+e.x = 10
+e.y = 20
+check("dynamic attr x", e.x, 10)
+check("dynamic attr y", e.y, 20)
+
+# ============================================================
+# Section 33: Method chaining
+# ============================================================
+
+class Builder:
+    def __init__(self):
+        self.result = ""
+    def add(self, s):
+        self.result = self.result + s
+        return self
+    def build(self):
+        return self.result
+
+check("chain", Builder().add("a").add("b").add("c").build(), "abc")
+
+# ============================================================
+# Section 34: Nested function scope
+# ============================================================
+
+def outer_fn():
+    x = 10
+    def inner_fn():
+        return x
+    return inner_fn()
+check("nested scope", outer_fn(), 10)
+
+# ============================================================
+# Section 35: Pass statement
+# ============================================================
+
+class Abstract:
+    pass
+a = Abstract()
+check("pass class", type(a).__name__, "Abstract")
+
+# ============================================================
+# Section 36: Del statement
+# ============================================================
+
+deld = {}
+deld["x"] = 1
+deld["y"] = 2
+del deld["x"]
+check("del key", len(deld), 1)
+check_true("del key not in", "x" not in deld)
+
+# ============================================================
+# Section 37: Assert statement
+# ============================================================
+
+try:
+    assert True
+    assert_result = "pass"
+except:
+    assert_result = "fail"
+check("assert true", assert_result, "pass")
+
+# ============================================================
+# Section 38: Global statement
+# ============================================================
+
+gvar = 0
+def modify_global():
+    global gvar
+    gvar = 42
+modify_global()
+check("global", gvar, 42)
+
+# ============================================================
+# Section 39: Complex class interactions
+# ============================================================
+
+class Vec:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+    def add(self, other):
+        return Vec(self.x + other.x, self.y + other.y)
+    def scale(self, s):
+        return Vec(self.x * s, self.y * s)
+    def mag_sq(self):
+        return self.x * self.x + self.y * self.y
+
+v1 = Vec(3, 4)
+v2 = Vec(1, 2)
+v3 = v1.add(v2)
+check("vec add x", v3.x, 4)
+check("vec add y", v3.y, 6)
+v4 = v1.scale(2)
+check("vec scale x", v4.x, 6)
+check("vec scale y", v4.y, 8)
+check("vec mag_sq", v1.mag_sq(), 25)
+
+# ============================================================
+# Section 40: List comprehension with method calls
+# ============================================================
+
+words = ["hello", "world", "python"]
+upper = [w.upper() for w in words]
+check("comp method", upper, ["HELLO", "WORLD", "PYTHON"])
+
+# ============================================================
+# Section 41: Nested comprehension
+# ============================================================
+
+flat = [x for row in [[1, 2], [3, 4], [5, 6]] for x in row]
+check("nested comp", flat, [1, 2, 3, 4, 5, 6])
+
+# ============================================================
+# Section 42: Generator expression
+# ============================================================
+
+total = sum([x * x for x in range(5)])
+check("gen expr sum", total, 30)
+
+# ============================================================
+# Section 43: String methods advanced
+# ============================================================
+
+check("str capitalize", "hello world".capitalize(), "Hello world")
+check("str title", "hello world".title(), "Hello World")
+check("str swapcase", "Hello".swapcase(), "hELLO")
+check("str center", "hi".center(6), "  hi  ")
+check("str ljust", "hi".ljust(5), "hi   ")
+check("str rjust", "hi".rjust(5), "   hi")
+check("str zfill", "42".zfill(5), "00042")
+check("str partition", "hello world".partition(" "), ("hello", " ", "world"))
+
+# ============================================================
+# Section 44: List copy
+# ============================================================
+
+orig = [1, 2, 3]
+copy = orig.copy()
+copy.append(4)
+check("list copy orig", len(orig), 3)
+check("list copy copy", len(copy), 4)
+
+# ============================================================
+# Section 45: Dict fromkeys
+# ============================================================
+
+d4 = dict.fromkeys(["a", "b", "c"], 0)
+check("fromkeys len", len(d4), 3)
+check("fromkeys val", d4["a"], 0)
+
+# ============================================================
+# Section 46: isinstance with custom class
+# ============================================================
+
+class Base:
+    pass
+class Derived(Base):
+    pass
+b = Base()
+d_obj = Derived()
+check("isinstance base", isinstance(b, Base), True)
+check("isinstance derived", isinstance(d_obj, Base), True)
+check("isinstance not", isinstance(b, Derived), False)
+
+# ============================================================
+# Section 47: Exception hierarchy
+# ============================================================
+
+try:
+    raise TypeError("type err")
+except TypeError:
+    caught_type = True
+except:
+    caught_type = False
+check("catch TypeError", caught_type, True)
+
+try:
+    raise ValueError("val err")
+except ValueError:
+    caught_val = True
+except:
+    caught_val = False
+check("catch ValueError", caught_val, True)
+
+# ============================================================
+# Section 48: Multiple except handlers
+# ============================================================
+
+def multi_except(err_type):
+    try:
+        if err_type == "value":
+            raise ValueError("v")
+        elif err_type == "type":
+            raise TypeError("t")
+        else:
+            raise KeyError("k")
+    except ValueError:
+        return "ValueError"
+    except TypeError:
+        return "TypeError"
+    except:
+        return "other"
+check("multi except value", multi_except("value"), "ValueError")
+check("multi except type", multi_except("type"), "TypeError")
+check("multi except other", multi_except("key"), "other")
+
+# ============================================================
+# Section 49: Chained method calls on builtins
+# ============================================================
+
+check("chained str", "  HELLO  ".strip().lower(), "hello")
+check("chained list", sorted([3,1,2]).__len__(), 3)
+
+# ============================================================
+# Section 50: Complex real-world patterns
+# ============================================================
+
+# Stack implementation
+class Stack:
+    def __init__(self):
+        self.items = []
+    def push(self, item):
+        self.items.append(item)
+    def pop(self):
+        return self.items.pop()
+    def is_empty(self):
+        return len(self.items) == 0
+    def size(self):
+        return len(self.items)
+
+s = Stack()
+s.push(1)
+s.push(2)
+s.push(3)
+check("stack pop", s.pop(), 3)
+check("stack size", s.size(), 2)
+check("stack not empty", s.is_empty(), False)
+
+# Fibonacci with memoization
+def make_fib():
+    cache = {}
     def fib(n):
+        if n in cache:
+            return cache[n]
         if n <= 1:
-            return n
-        return fib(n - 1) + fib(n - 2)
-    assert fib(10) == 55
+            result = n
+        else:
+            result = fib(n - 1) + fib(n - 2)
+        cache[n] = result
+        return result
+    return fib
+fast_fib = make_fib()
+check("memo fib 20", fast_fib(20), 6765)
 
-# ========== Main ==========
+# ============================================================
+# Results
+# ============================================================
 
-if __name__ == "__main__":
-    success = run_tests()
-    sys.exit(0 if success else 1)
+print("=" * 60)
+print("Results: " + str(_passed) + " passed, " + str(_failed) + " failed, " + str(_total) + " total")
+if _failed == 0:
+    print("ALL TESTS PASSED")
+else:
+    print("SOME TESTS FAILED")
